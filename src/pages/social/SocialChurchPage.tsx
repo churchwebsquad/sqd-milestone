@@ -133,7 +133,7 @@ export default function SocialChurchPage() {
 
   // ── Social links edit state ──────────────────────────────────────────────
   const [editingLinks, setEditingLinks] = useState(false)
-  const [linkDraft, setLinkDraft] = useState({ instagram: '', facebook: '', youtube: '', branded_carousel_task: '', branded_carousel_dropbox_file: '' })
+  const [linkDraft, setLinkDraft] = useState({ instagram: '', facebook: '', youtube: '', branded_carousel_task: '', branded_carousel_dropbox_file: '', brand_guide_link: '' })
   const [linkSaving, setLinkSaving] = useState(false)
 
   // ── Management fields edit state ─────────────────────────────────────────
@@ -179,12 +179,28 @@ export default function SocialChurchPage() {
     if (!member) return
     supabase
       .from('strategy_account_progress')
-      .select('member, church_name, css_rep, church_website, reel_submitted_this_week, last_reel_submission, recent_series_srp, instagram, facebook, youtube, custom_gpt, photos_link, bible_translation, preferred_bible_translation, which_social_media_platforms_do_you_want_us_to_post_to_from_all, sms_notes, social_coach, branded_carousel_task, branded_carousel_dropbox_file, vista_social_email_from_discovery, notion_dashboard, sermon_recap_form')
+      .select('member, church_name, css_rep, church_website, reel_submitted_this_week, last_reel_submission, recent_series_srp, instagram, facebook, youtube, custom_gpt, photos_link, legacy_photo_library, photos_from_all_in_discovery_form, bible_translation, preferred_bible_translation, which_social_media_platforms_do_you_want_us_to_post_to_from_all, sms_notes, social_coach, branded_carousel_task, branded_carousel_dropbox_file, vista_social_email_from_discovery, notion_dashboard, sermon_recap_form')
       .eq('member', member)
       .maybeSingle()
       .then(async ({ data }) => {
         if (data) {
-          setChurch(data as Church | null)
+          // Cascade photo library fields
+          const photoUrl = (data as any).photos_link ?? (data as any).legacy_photo_library ?? (data as any).photos_from_all_in_discovery_form ?? null
+          // Fetch instagram/facebook from accounts table if not in strategy_account_progress
+          let instagram = (data as any).instagram
+          let facebook  = (data as any).facebook
+          if (!instagram || !facebook) {
+            const { data: acct } = await (supabase as any)
+              .from('accounts')
+              .select('instagram, facebook')
+              .eq('account', member)
+              .maybeSingle()
+            if (acct) {
+              instagram = instagram ?? acct.instagram
+              facebook  = facebook  ?? acct.facebook
+            }
+          }
+          setChurch({ ...data, photos_link: photoUrl, instagram, facebook } as Church | null)
         } else {
           // Fallback — check strategy_social_pro_profiles for Social Pro churches
           const { data: proData } = await (supabase as any)
@@ -281,6 +297,7 @@ export default function SocialChurchPage() {
       youtube: church?.youtube ?? '',
       branded_carousel_task: church?.branded_carousel_task ?? '',
       branded_carousel_dropbox_file: church?.branded_carousel_dropbox_file ?? '',
+      brand_guide_link: brandGuideOnFile ?? '',
     })
     setEditingLinks(true)
   }
@@ -295,12 +312,18 @@ export default function SocialChurchPage() {
       branded_carousel_task: linkDraft.branded_carousel_task.trim() || null,
       branded_carousel_dropbox_file: linkDraft.branded_carousel_dropbox_file.trim() || null,
     }
-    const { error } = await supabase.from('strategy_account_progress').update(updates).eq('member', member)
-    if (!error) {
+    const [{ error }, brandErr] = await Promise.all([
+      supabase.from('strategy_account_progress').update(updates).eq('member', member),
+      linkDraft.brand_guide_link.trim()
+        ? (supabase as any).from('prf_brand_guides').upsert({ account: member, brand_guide_link: linkDraft.brand_guide_link.trim() }, { onConflict: 'account' })
+        : Promise.resolve({ error: null }),
+    ])
+    if (!error && !brandErr?.error) {
       setChurch(prev => prev ? { ...prev, ...updates } : prev)
+      if (linkDraft.brand_guide_link.trim()) setBrandGuideOnFile(linkDraft.brand_guide_link.trim())
       setEditingLinks(false)
     } else {
-      alert(`Save failed: ${error.message}`)
+      alert(`Save failed: ${(error ?? brandErr?.error)?.message}`)
     }
     setLinkSaving(false)
   }
@@ -598,6 +621,14 @@ export default function SocialChurchPage() {
 
                 <div className="border-t border-gray-100 pt-4 space-y-2">
                   <p className="text-xs font-semibold text-[#341756] mb-2">Quick Links</p>
+                  {editingLinks && (
+                    <div className="mb-3">
+                      <p className="text-xs text-gray-400 mb-0.5">Brand Guide URL</p>
+                      <input value={linkDraft.brand_guide_link} onChange={e => setLinkDraft(d => ({ ...d, brand_guide_link: e.target.value }))}
+                        placeholder="https://..."
+                        className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#513DE5]" />
+                    </div>
+                  )}
                   <a href="https://app.vistasocial.com" target="_blank" rel="noopener noreferrer"
                     className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-[#341756] hover:border-[#513DE5] hover:text-[#513DE5] transition-colors">
                     Open Vista Social <ExternalLink size={13} />
@@ -615,8 +646,8 @@ export default function SocialChurchPage() {
                     : <div className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-100 rounded-xl text-sm text-gray-300">
                         Notion Dashboard <ExternalLink size={13} />
                       </div>}
-                  {brandGuideOnFile
-                    ? <a href={brandGuideOnFile} target="_blank" rel="noopener noreferrer"
+                  {(editingLinks ? linkDraft.brand_guide_link.trim() : brandGuideOnFile)
+                    ? <a href={editingLinks ? linkDraft.brand_guide_link.trim() : brandGuideOnFile!} target="_blank" rel="noopener noreferrer"
                         className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-[#341756] hover:border-[#513DE5] hover:text-[#513DE5] transition-colors">
                         Brand Guide <ExternalLink size={13} />
                       </a>
