@@ -596,21 +596,15 @@ export default function SocialDashboardPage() {
                         </span>
                       )}
                       {srp ? (
-                        srp.url ? (
-                          <a
-                            href={srp.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={e => e.stopPropagation()}
-                            className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-medium hover:bg-amber-100 transition-colors"
-                          >
-                            <Sparkles size={10} /> {srpDate ?? `#${srp.taskId}`}
-                          </a>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-medium">
-                            <Sparkles size={10} /> {srpDate ?? `#${srp.taskId}`}
-                          </span>
-                        )
+                        <a
+                          href={srp.url || `https://app.clickup.com/t/${srp.taskId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-medium hover:bg-amber-100 transition-colors"
+                        >
+                          <Sparkles size={10} /> {srpDate ?? `#${srp.taskId}`}
+                        </a>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-300 px-2 py-0.5 rounded-full">
                           <Sparkles size={10} /> No SRP yet
