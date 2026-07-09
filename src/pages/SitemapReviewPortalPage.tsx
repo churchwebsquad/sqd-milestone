@@ -129,10 +129,25 @@ export default function SitemapReviewPortalPage() {
   const handleApprove = useCallback(async () => {
     if (!review) return
     if (!confirm('Approve this sitemap as your website structure? Downstream steps will read from it as canonical.')) return
-    const approved = approveReview(review, 'partner')
+    // Stamp who submitted so the Slack notif to #am-pm-web credits
+    // them; matches the partner_reviewed path.
+    const approved: SitemapReview = {
+      ...approveReview(review, 'partner'),
+      partner_reviewed_at: new Date().toISOString(),
+      partner_reviewed_by: partnerName ?? null,
+    }
     const ok = await persist(approved)
-    if (ok) setFlash('Sitemap approved. Thank you!')
-  }, [review, persist])
+    if (ok) {
+      setFlash('Sitemap approved. Thank you!')
+      if (token) {
+        void supabase.functions.invoke('notify-sitemap-feedback-submitted', {
+          body: { token },
+        }).catch(err => {
+          console.warn('[sitemap-feedback] notify invoke failed:', err)
+        })
+      }
+    }
+  }, [review, persist, partnerName, token])
 
   const handleSubmitFeedback = useCallback(async () => {
     if (!review) return

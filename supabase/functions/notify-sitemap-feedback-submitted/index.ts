@@ -125,8 +125,68 @@ Deno.serve(async (req) => {
 
   const appOrigin = Deno.env.get("APP_ORIGIN") ?? "https://strategy.thesqd.com";
   const feedbackUrl = `${appOrigin}/web/${project.id}/sitemap-feedback`;
+  const projectUrl  = `${appOrigin}/web/${project.id}?tab=cowork`;
 
-  const text = `${churchName} (#${project.member ?? "?"}) submitted content strategy feedback — ${noteCount} section note${noteCount === 1 ? "" : "s"}${hasOverall ? " + overall notes" : ""}`;
+  // Two paths land here:
+  //   partner_reviewed → partner submitted feedback; staff has to
+  //     execute the edits before downstream work starts.
+  //   approved         → partner approved as-is; no edits requested,
+  //     downstream drafting + low-fi layout can begin immediately.
+  // The Slack message differentiates so the AM / strategist knows
+  // exactly what to schedule next without opening the app first.
+  const isApproved = review.status === "approved";
+  const headerText   = isApproved
+    ? "Content strategy approved as-is"
+    : "Content strategy feedback submitted";
+  const statusLabel  = isApproved ? "Approved as-is" : "Feedback submitted";
+  const nextStepText = isApproved
+    ? "*Next step:* Downstream work can begin. The strategist can schedule *page drafting* and the *low-fi layout* pass — no strategy edits required."
+    : `*Next step:* Content strategy feedback has been scheduled. The strategist can schedule the *execute-edits* task now (${noteCount} section note${noteCount === 1 ? "" : "s"}${hasOverall ? " + overall notes" : ""}). Downstream page drafting waits until the edits land.`;
+  const fallbackText = isApproved
+    ? `${churchName} (#${project.member ?? "?"}) approved their content strategy as-is — downstream work can begin`
+    : `${churchName} (#${project.member ?? "?"}) submitted content strategy feedback — ${noteCount} section note${noteCount === 1 ? "" : "s"}${hasOverall ? " + overall notes" : ""}`;
+
+  const detailFields = [
+    { type: "mrkdwn", text: `*Church:*\n${churchName}` },
+    { type: "mrkdwn", text: `*Member:*\n#${project.member ?? "?"}` },
+    { type: "mrkdwn", text: `*Project:*\n${projectName}` },
+    { type: "mrkdwn", text: `*Account manager:*\n${cssRep ?? "—"}` },
+    { type: "mrkdwn", text: `*Submitted by:*\n${submittedBy}` },
+    { type: "mrkdwn", text: `*Submitted:*\n${submittedAt}` },
+    { type: "mrkdwn", text: `*Status:*\n${statusLabel}` },
+  ];
+  // Only surface note counts when there's something to execute —
+  // approved-as-is reviews have no open notes so listing zeros
+  // reads as noise.
+  if (!isApproved) {
+    detailFields.push(
+      { type: "mrkdwn", text: `*Section notes:*\n${noteCount}` },
+      { type: "mrkdwn", text: `*Overall notes:*\n${hasOverall ? "Yes" : "None"}` },
+    );
+  }
+
+  const actionElements = isApproved
+    ? [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "Open Content Engine", emoji: true },
+          url: projectUrl,
+          style: "primary",
+        },
+      ]
+    : [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "View partner feedback", emoji: true },
+          url: feedbackUrl,
+          style: "primary",
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "Open Content Engine", emoji: true },
+          url: projectUrl,
+        },
+      ];
 
   const slackResponse = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
@@ -136,35 +196,23 @@ Deno.serve(async (req) => {
     },
     body: JSON.stringify({
       channel,
-      text,
+      text: fallbackText,
       blocks: [
         {
           type: "header",
-          text: { type: "plain_text", text: "Content strategy feedback submitted", emoji: true },
+          text: { type: "plain_text", text: headerText, emoji: true },
         },
         {
           type: "section",
-          fields: [
-            { type: "mrkdwn", text: `*Church:*\n${churchName}` },
-            { type: "mrkdwn", text: `*Member:*\n#${project.member ?? "?"}` },
-            { type: "mrkdwn", text: `*Project:*\n${projectName}` },
-            { type: "mrkdwn", text: `*Account manager:*\n${cssRep ?? "—"}` },
-            { type: "mrkdwn", text: `*Submitted by:*\n${submittedBy}` },
-            { type: "mrkdwn", text: `*Submitted:*\n${submittedAt}` },
-            { type: "mrkdwn", text: `*Section notes:*\n${noteCount}` },
-            { type: "mrkdwn", text: `*Overall notes:*\n${hasOverall ? "Yes" : "None"}` },
-          ],
+          fields: detailFields,
+        },
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: nextStepText },
         },
         {
           type: "actions",
-          elements: [
-            {
-              type: "button",
-              text: { type: "plain_text", text: "View partner feedback", emoji: true },
-              url: feedbackUrl,
-              style: "primary",
-            },
-          ],
+          elements: actionElements,
         },
       ],
     }),
@@ -180,7 +228,7 @@ Deno.serve(async (req) => {
   }
 
   return new Response(
-    JSON.stringify({ ok: true, posted: true, channel, section_notes: noteCount, has_overall: hasOverall }),
+    JSON.stringify({ ok: true, posted: true, channel, kind: isApproved ? "approved" : "feedback", section_notes: noteCount, has_overall: hasOverall }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
 });
