@@ -286,8 +286,15 @@ export default function SocialDashboardPage() {
       const sm = new Map<number, SrpMeta>()
       for (const row of srpData.tasks) sm.set(row.member, row)
       setSrpMap(sm)
-      setAllTasks(srpData.allTasks ?? [])
-      setThisWeekTasks(srpWeekData.tasks ?? [])
+      const allTasksList = srpData.allTasks ?? []
+      setAllTasks(allTasksList)
+      // Filter this week client-side — the Squad API's updated_after param
+      // returns all tasks regardless, so we filter by updatedAt locally.
+      const ws = getWeekStart(new Date())
+      setThisWeekTasks(allTasksList.filter(t => {
+        const d = t.updatedAt || t.createdAt || ''
+        return d ? isThisWeek(d, ws) : false
+      }))
 
       // Surface ClickUp-only churches not yet in either DB table — deduplicated
       const allMemberSet = new Set(allChurches.map(c => c.member))
