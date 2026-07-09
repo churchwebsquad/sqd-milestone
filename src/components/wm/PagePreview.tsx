@@ -346,12 +346,31 @@ function extractSectionContent(
     ctas.push({ label: resolvedLabel || label, url: resolvedUrl, kind: cta.kind ?? null })
   }
 
+  // Some templates ship a `buttons` group whose item_schema declares
+  // scalar slots (`button_label: text`), but the stored value at that
+  // key is a full CtaValue object ({label, url, kind}). Without this
+  // detection we'd stringify the object and the copy view would show
+  // `[object Object]`. If a slot's value looks CTA-shaped (object
+  // with `url` and/or `label` scalar keys), route it to CTAs instead
+  // of stringifying — regardless of the schema's declared type.
+  const looksLikeCta = (v: unknown): boolean => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+    const o = v as Record<string, unknown>
+    const hasUrl   = typeof o.url   === 'string'
+    const hasLabel = typeof o.label === 'string'
+    return hasUrl || (hasLabel && (o.kind != null || 'target' in o))
+  }
+
   const walk = (fs: ReadonlyArray<WebFieldDef>, vals: Record<string, unknown>, prefix?: string) => {
     for (const f of fs) {
       const label = prefix ? `${prefix} · ${f.label ?? f.key}` : (f.label ?? f.key)
       const val = vals[f.key]
       if (f.kind === 'slot') {
         if (f.type === 'cta') {
+          pushCta(label, val)
+        } else if (looksLikeCta(val)) {
+          // Schema says text but value is a CTA object — trust the
+          // value shape and route to CTAs.
           pushCta(label, val)
         } else if (f.type === 'text' || f.type === 'richtext' || f.type === 'email' || f.type === 'phone' || f.type === 'url') {
           pushText(label, val, f.type === 'richtext')
@@ -361,9 +380,16 @@ function extractSectionContent(
       } else if (f.kind === 'group') {
         const items = Array.isArray(val) ? val : []
         items.forEach((item, i) => {
-          if (item && typeof item === 'object') {
-            walk(f.item_schema ?? [], item as Record<string, unknown>, `${label} ${i + 1}`)
+          if (!item || typeof item !== 'object') return
+          // If the whole group item is CTA-shaped (some templates
+          // store `buttons` as a flat array of CtaValue objects with
+          // no per-item schema wrapping), route the item itself to
+          // CTAs instead of recursing into a non-matching schema.
+          if (looksLikeCta(item)) {
+            pushCta(`${label} ${i + 1}`, item)
+            return
           }
+          walk(f.item_schema ?? [], item as Record<string, unknown>, `${label} ${i + 1}`)
         })
       }
     }
