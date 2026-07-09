@@ -492,6 +492,16 @@ export default function SitemapPartnerViewV2({
                   <span style={{ width: 26, height: 26, background: '#fff', borderRadius: 6, display: 'grid', placeItems: 'center', color: '#341756', fontSize: 13 }}>◆</span>
                   {review.footer_info?.church_name ?? church}
                 </div>
+                {/* Service times sit ABOVE the address/phone block so
+                    the primary "when we gather" info is the first thing
+                    a visitor scanning the footer sees. Only renders when
+                    populated. */}
+                {(review.footer_info?.service_times ?? '').trim().length > 0 && (
+                  <div style={{ margin: '6px 0 12px' }}>
+                    <div style={{ fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, color: '#B8B0D2', marginBottom: 4 }}>Service times</div>
+                    <div style={{ fontSize: 13, color: '#FFF', fontWeight: 600, lineHeight: 1.4 }}>{review.footer_info!.service_times}</div>
+                  </div>
+                )}
                 <p style={{ fontSize: 12.5, color: '#D8CFF3', margin: '0 0 12px', lineHeight: 1.5 }}>
                   {review.executive_summary ? '' : `Contact ${church} and stay in touch.`}
                 </p>
@@ -503,6 +513,15 @@ export default function SitemapPartnerViewV2({
                     <div style={{ opacity: 0.7, fontStyle: 'italic' }}>Contact info populates once your team confirms it.</div>
                   )}
                 </div>
+                {/* Office hours as its own labeled section beneath
+                    contact info. Missed rendering before this fix —
+                    field was authored but never surfaced. */}
+                {(review.footer_info?.office_hours ?? '').trim().length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, color: '#B8B0D2', marginBottom: 4 }}>Office hours</div>
+                    <div style={{ fontSize: 12, color: '#D8CFF3', lineHeight: 1.5 }}>{review.footer_info!.office_hours}</div>
+                  </div>
+                )}
                 {(review.footer_info?.social_links ?? []).length > 0 && (
                   <p style={{ fontSize: 11.5, color: '#B8B0D2', margin: '12px 0 0', letterSpacing: '.03em' }}>
                     {(review.footer_info?.social_links ?? []).map(s => s.label ?? capitalize(s.platform)).join(' · ')}

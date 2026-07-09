@@ -605,6 +605,7 @@ function FooterInfoEditor({
         <FooterField label="Address"        value={footer.address}        disabled={disabled} onSave={v => update({ address: v })} />
         <FooterField label="Phone"          value={footer.phone}          disabled={disabled} onSave={v => update({ phone: v })} />
         <FooterField label="Email"          value={footer.email}          disabled={disabled} onSave={v => update({ email: v })} />
+        <FooterField label="Service times"  value={footer.service_times}  disabled={disabled} onSave={v => update({ service_times: v })} />
         <FooterField label="Office hours"   value={footer.office_hours}   disabled={disabled} onSave={v => update({ office_hours: v })} />
         <FooterField label="Newsletter URL" value={footer.newsletter_signup_url} disabled={disabled} onSave={v => update({ newsletter_signup_url: v })} />
       </div>

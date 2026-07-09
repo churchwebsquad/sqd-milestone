@@ -272,6 +272,11 @@ export interface FooterInfo {
   phone?:               string | null
   email?:               string | null
   office_hours?:        string | null
+  /** Human-readable service times for the footer's contact column.
+   *  Seeded from strategy_web_projects.all_service_times (or
+   *  primary_service_time as a fallback) at compose time. Renders
+   *  above the contact info block on the partner review's footer. */
+  service_times?:       string | null
   newsletter_signup_url?: string | null
   social_links?: Array<{
     platform: 'facebook' | 'instagram' | 'youtube' | 'tiktok' | 'twitter' | 'linkedin' | 'other'
@@ -1389,6 +1394,7 @@ export function composeSitemapReview(args: {
     phone:                project.phone ?? null,
     email:                project.email ?? null,
     office_hours:         null,
+    service_times:        project.all_service_times ?? project.primary_service_time ?? null,
     newsletter_signup_url: null,
     social_links:         [
       project.social_facebook_url  ? { platform: 'facebook' as const,  url: project.social_facebook_url }  : null,
@@ -1399,6 +1405,16 @@ export function composeSitemapReview(args: {
       project.social_linkedin_url  ? { platform: 'linkedin' as const,  url: project.social_linkedin_url }  : null,
     ].filter((s): s is NonNullable<typeof s> => s !== null),
     footer_page_links:    [],
+  }
+
+  // Backfill service_times for pre-existing reviews that were created
+  // before this field was on FooterInfo. Only fills when the strategist
+  // hasn't already authored it (undefined AND null both count as
+  // unpopulated). Doesn't clobber an explicit empty string, since a
+  // strategist could choose to blank it deliberately.
+  if (existing?.footer_info && composedFooter.service_times == null) {
+    const seed = project.all_service_times ?? project.primary_service_time ?? null
+    if (seed) composedFooter.service_times = seed
   }
 
   // Seed footer_link_groups from cowork's grouped `nav.footer` output.
