@@ -218,6 +218,7 @@ export default function SocialDashboardPage() {
   const [srpMap, setSrpMap]       = useState<Map<number, SrpMeta>>(new Map())
   const [smmMap, setSmmMap]       = useState<Map<number, string>>(new Map())
   const [autoJobMap, setAutoJobMap] = useState<Map<number, AutoJob>>(new Map())
+  const [activeOnlySet, setActiveOnlySet] = useState<Set<number>>(new Set())
   const [allTasks, setAllTasks]         = useState<SrpMeta[]>([])
   const [thisWeekTasks, setThisWeekTasks] = useState<SrpMeta[]>([])
   const [loading, setLoading]     = useState(true)
@@ -247,10 +248,10 @@ export default function SocialDashboardPage() {
           .in('status', ['Active', 'Trial']),
       ])
 
-      // Build set of active/trial member numbers to filter out cancelled churches
-      const activeMembers = new Set<number>(
-        ((accountStatusRes.data ?? []) as { account: number; status: string }[]).map(a => a.account)
-      )
+      const accountStatuses = (accountStatusRes.data ?? []) as { account: number; status: string }[]
+      // Active/Trial members shown in the hub; Active-only members shown in overdue alert
+      const activeMembers     = new Set<number>(accountStatuses.map(a => a.account))
+      const activeOnlyMembers = new Set<number>(accountStatuses.filter(a => a.status === 'Active').map(a => a.account))
 
       const dbMembers = new Set(((churchRes.data ?? []) as Church[]).map(c => c.member))
       const proChurches: Church[] = ((proRes.data ?? []) as StrategySocialProProfile[])
@@ -346,6 +347,7 @@ export default function SocialDashboardPage() {
         for (const row of autoJobRes.value.data as AutoJob[]) aj.set(row.member, row)
       }
       setAutoJobMap(aj)
+      setActiveOnlySet(activeOnlyMembers)
     }
     void load()
   }, [])
@@ -422,6 +424,7 @@ export default function SocialDashboardPage() {
     const now = Date.now()
     return churches.filter(c => {
       if (c.socialPro) return false // only All-In churches
+      if (!activeOnlySet.has(c.member)) return false // exclude Trial + non-active
       if (thisWeekMemberSet.has(c.member)) return false // active this week
       const srp = srpMap.get(c.member)
       if (!srp) return true // never submitted
@@ -429,7 +432,7 @@ export default function SocialDashboardPage() {
       if (isNaN(lastMs)) return false // no timestamp — can't determine, don't flag
       return (now - lastMs) >= TWO_WEEKS_MS
     })
-  }, [churches, srpMap, thisWeekMemberSet])
+  }, [churches, srpMap, thisWeekMemberSet, activeOnlySet])
 
   const STATUS_LABELS: Record<string, string> = {
     'open':                  'Open',

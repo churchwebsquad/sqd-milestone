@@ -59,6 +59,7 @@ interface SocialIntelProfile {
     visual_style?: string
     font_suggestions?: string[]
     photography_vs_illustrated?: string
+    brand_card_url?: string
   }
   team_tips?: string
   change_log?: { date?: string; what?: string; sources?: string[] }[]
@@ -549,6 +550,19 @@ export default function SocialIntelProfileView({ profile, editMode, onProfileCha
                 <div className="mb-3">
                   <p className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider mb-2">Accent Colors</p>
                   <div className="flex flex-wrap">{(design.accent_colors ?? []).map((c, i) => <ColorSwatch key={i} hex={c} />)}</div>
+                </div>
+              )}
+              {design.brand_card_url && (
+                <div className="mb-3">
+                  <p className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider mb-1">Brand Guide</p>
+                  <a
+                    href={design.brand_card_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-[#513DE5] underline hover:text-[#341756] transition-colors"
+                  >
+                    View brand guide →
+                  </a>
                 </div>
               )}
               <Field label="Visual Style" value={design.visual_style} />

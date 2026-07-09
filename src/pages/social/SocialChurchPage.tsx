@@ -214,11 +214,14 @@ export default function SocialChurchPage() {
     if (tab !== 'profile' && tab !== 'srp') return
     setCuLoading(true)
     Promise.allSettled([
-      fetch('/api/clickup/srp-tasks')
-        .then(r => r.ok ? r.json() : { allTasks: [] })
-        .then(data => {
-          const all: CuTask[] = (data.allTasks ?? []).filter((t: CuTask & { member: number }) => t.member === member)
-          // On profile tab show max 3; on SRP tab keep all (filtered by 30 days in the tab)
+      (supabase as any)
+        .from('strategy_srp_hub_cache')
+        .select('data')
+        .eq('cache_key', 'srp_tasks')
+        .single()
+        .then(({ data: row }: { data: { data: { allTasks?: CuTask[] } } | null }) => {
+          const all: CuTask[] = ((row?.data?.allTasks ?? []) as (CuTask & { member: number })[])
+            .filter(t => t.member === member)
           setSrpTasks(tab === 'srp' ? all : all.slice(0, 3))
         }),
       fetch(`/api/clickup/church-tasks?member=${member}`)

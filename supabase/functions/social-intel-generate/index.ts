@@ -233,7 +233,7 @@ Deno.serve(async (req) => {
   const supabaseUrl   = Deno.env.get("SUPABASE_URL");
   const supabaseKey   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   // Squad API accepts either a dedicated API key or the user's Supabase JWT
-  const squadApiKey   = Deno.env.get("SQUAD_API_KEY") ?? req.headers.get("authorization")?.replace("Bearer ", "") ?? undefined;
+  const squadApiKey   = Deno.env.get("SQUAD_API_KEY") ?? Deno.env.get("STRATEGY_SQUAD_API_KEY") ?? req.headers.get("authorization")?.replace("Bearer ", "") ?? undefined;
 
   if (!anthropicKey) return json({ error: "ANTHROPIC_API_KEY secret not set" }, 500);
   if (!firecrawlKey) return json({ error: "FIRECRAWL_API_KEY secret not set" }, 500);
@@ -732,6 +732,12 @@ After researching, return ONLY this JSON:
     } catch {
       return json({ error: "AI returned malformed JSON", raw: rawText.slice(0, 500) }, 502);
     }
+  }
+
+  // Inject brand card URL directly — AI doesn't reliably include URLs in JSON
+  if (brandProfile?.card_url && profile && typeof profile === "object") {
+    const p = profile as Record<string, unknown>;
+    p.design_notes = { ...(p.design_notes as Record<string, unknown> ?? {}), brand_card_url: brandProfile.card_url };
   }
 
   return json({
