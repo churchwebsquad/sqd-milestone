@@ -143,8 +143,6 @@ async function fetchSrpTasks(squadApiKey: string) {
     if (rows.length === 0) break;
 
     // Debug: log first row shape so we can see what fields Squad API returns
-    if (page === 1 && rows.length > 0) console.log("[debug] first raw row:", JSON.stringify(rows[0]).slice(0, 800));
-
     for (const t of rows) {
       const memberRaw = t.account;
       const member = typeof memberRaw === "number" ? memberRaw : Number(memberRaw);
@@ -193,9 +191,14 @@ async function fetchSrpTasks(squadApiKey: string) {
   return { tasks, allTasks };
 }
 
-// ── Squad API — this week's SRP tasks (Fri–Thu work week) ────────────────────
-// Uses updated_after to get only tasks touched this week, so the stats bar
-// on the Social Hub shows an accurate weekly count.
+// ── ClickUp v2 direct: this week's SRP tasks (Fri–Thu work week) ─────────────
+// Calls ClickUp's v2 API directly (not Squad API gateway) because the gateway
+// strips due_date. Uses due_date_gt to filter server-side so we only fetch
+// ~50 tasks instead of 450+. Requires CLICKUP_API_TOKEN secret.
+//
+// Member number is extracted from the task name prefix (e.g. "4077 - ...").
+
+const CLICKUP_TEAM_ID = "1235435";
 
 function getWeekStartTimestamp(): number {
   const now = new Date();
@@ -206,24 +209,29 @@ function getWeekStartTimestamp(): number {
   return now.getTime();
 }
 
-async function fetchSrpTasksThisWeek(squadApiKey: string): Promise<{
-  tasks: Array<{ member: number; taskId: string; taskName: string; status: string }>;
+function extractMemberFromTaskName(name: string): number | null {
+  const m = name.match(/^(\d+)\s*-/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+async function fetchSrpTasksThisWeek(clickupToken: string): Promise<{
+  tasks: Array<{ member: number; taskId: string; taskName: string; status: string; dueDate: string }>;
   total: number;
 }> {
   const weekStartMs = getWeekStartTimestamp();
-  const allTasks: Array<{ member: number; taskId: string; taskName: string; status: string }> = [];
+  const allTasks: Array<{ member: number; taskId: string; taskName: string; status: string; dueDate: string }> = [];
 
-  const PER_PAGE      = 50;
   const FETCH_TIMEOUT = 25_000;
-  let page = 1;
+  let page = 0;
 
   while (true) {
-    const url = new URL(`${SQUAD_API_BASE}/v1/tasks/list`);
-    url.searchParams.set("tag",            "sms-sermon-recap");
+    const url = new URL(`https://api.clickup.com/api/v2/team/${CLICKUP_TEAM_ID}/task`);
+    url.searchParams.set("tags[]",         "sms-sermon-recap");
     url.searchParams.set("include_closed", "true");
-    url.searchParams.set("per_page",       String(PER_PAGE));
     url.searchParams.set("page",           String(page));
-    url.searchParams.set("updated_after",  String(weekStartMs));
+    url.searchParams.set("due_date_gt",    String(weekStartMs));
 
     let res: Response | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -232,7 +240,7 @@ async function fetchSrpTasksThisWeek(squadApiKey: string): Promise<{
       const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT);
       try {
         const r = await fetch(url.toString(), {
-          headers: { Authorization: `Bearer ${squadApiKey}` },
+          headers: { Authorization: clickupToken },
           signal:  ac.signal,
         });
         if (r.ok) { res = r; break; }
@@ -242,29 +250,25 @@ async function fetchSrpTasksThisWeek(squadApiKey: string): Promise<{
     if (!res) break;
 
     const payload = await res.json();
-    const rows: SquadTaskRow[] =
-      (Array.isArray(payload?.tasks)   && payload.tasks)   ||
-      (Array.isArray(payload?.data)    && payload.data)    ||
-      (Array.isArray(payload?.results) && payload.results) ||
-      (Array.isArray(payload)          && payload)         ||
-      [];
+    const rows: Array<{ id?: string; name?: string; status?: { status?: string }; due_date?: string | number | null }> =
+      Array.isArray(payload?.tasks) ? payload.tasks : [];
+
     if (rows.length === 0) break;
 
     for (const t of rows) {
-      const memberRaw = t.account;
-      const member = typeof memberRaw === "number" ? memberRaw : Number(memberRaw);
-      if (!Number.isFinite(member) || member <= 0) continue;
+      const member = extractMemberFromTaskName(t.name ?? "");
+      if (!member) continue;
       const dueDateMs = Number(t.due_date ?? 0);
       allTasks.push({
         member,
         taskId:   t.id ?? "",
         taskName: t.name ?? "",
-        status:   t.status ?? "",
+        status:   t.status?.status ?? "",
         dueDate:  dueDateMs ? new Date(dueDateMs).toISOString() : "",
       });
     }
 
-    if (rows.length < PER_PAGE) break;
+    if (payload?.last_page !== false) break; // last_page=true or absent means done
     page += 1;
     if (page > 20) break;
   }
@@ -339,10 +343,15 @@ Deno.serve(async (req: Request) => {
   const results: Record<string, string> = {};
 
   // ── SRP tasks (all) + this week's tasks ─────────────────────────────────────
+  // srp_tasks_this_week uses CLICKUP_API_TOKEN directly (v2 API) because the
+  // Squad API gateway strips due_date — without it we can't filter by week.
+  const clickupToken = Deno.env.get("CLICKUP_STRATEGY_MILESTONE_TOKEN") ?? Deno.env.get("CLICKUP_API_KEY") ?? "";
   try {
     const [srpData, srpWeekData] = await Promise.all([
       fetchSrpTasks(squadApiKey),
-      fetchSrpTasksThisWeek(squadApiKey),
+      clickupToken
+        ? fetchSrpTasksThisWeek(clickupToken)
+        : Promise.resolve({ tasks: [], total: 0 }),
     ]);
     await Promise.all([
       supabase.from("strategy_srp_hub_cache").upsert({
