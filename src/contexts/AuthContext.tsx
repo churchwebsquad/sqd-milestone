@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import type { Employee } from '../types/database'
@@ -68,6 +68,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
 
+  // Ref so the onAuthStateChange closure always sees the current staffProfile
+  // even after TOKEN_REFRESHED fires during long-running operations (e.g. intel generation).
+  const staffProfileRef = useRef<Employee | null>(null)
+  useEffect(() => { staffProfileRef.current = staffProfile }, [staffProfile])
+
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
@@ -101,7 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Skip the employees lookup if we already have a profile for
           // this user — only fetch when the user identity actually
           // changed or we don't have one yet.
-          if (staffProfile && staffProfile.email?.toLowerCase() === email.toLowerCase()) {
+          if (staffProfileRef.current && staffProfileRef.current.email?.toLowerCase() === email.toLowerCase()) {
             return
           }
 
