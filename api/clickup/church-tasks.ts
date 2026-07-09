@@ -45,7 +45,7 @@ export default async function handler(req: any, res: any) {
   const member = parseInt(String(req.query.member ?? ''), 10)
   if (!member) return res.status(400).json({ error: 'Missing member query param' })
 
-  const token = process.env.CLICKUP_API_TOKEN
+  const token = process.env.CLICKUP_API_TOKEN ?? process.env.CLICKUP_STRATEGY_MILESTONE_TOKEN
   if (!token) return res.status(500).json({ error: 'CLICKUP_API_TOKEN not set' })
 
   const since120Days = Date.now() - 120 * 24 * 60 * 60 * 1000
