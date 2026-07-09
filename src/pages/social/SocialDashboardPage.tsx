@@ -25,6 +25,7 @@ interface SrpMeta {
   createdAt: string
   updatedAt: string
   dueDate?: string
+  url?: string
 }
 
 interface AutoJob {
@@ -263,7 +264,8 @@ export default function SocialDashboardPage() {
           .in('cache_key', ['srp_tasks', 'smm_assignments', 'srp_tasks_this_week']),
         fetch('/api/notion/smm-assignments').then(r => r.ok ? r.json() : null),
         (supabase as any)
-          .from('strategy_srp_auto_jobs')
+          .schema('strategy')
+          .from('srp_auto_jobs')
           .select('member, video_status, transcript_status, video_error')
           .gte('week_start', getWeekStart(new Date()).toISOString().split('T')[0]),
       ])
@@ -594,9 +596,21 @@ export default function SocialDashboardPage() {
                         </span>
                       )}
                       {srp ? (
-                        <span className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-medium">
-                          <Sparkles size={10} /> #{srp.taskId} · {srpDate}
-                        </span>
+                        srp.url ? (
+                          <a
+                            href={srp.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-medium hover:bg-amber-100 transition-colors"
+                          >
+                            <Sparkles size={10} /> {srpDate ?? `#${srp.taskId}`}
+                          </a>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-medium">
+                            <Sparkles size={10} /> {srpDate ?? `#${srp.taskId}`}
+                          </span>
+                        )
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-300 px-2 py-0.5 rounded-full">
                           <Sparkles size={10} /> No SRP yet

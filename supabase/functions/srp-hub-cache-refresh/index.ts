@@ -186,6 +186,7 @@ async function fetchSrpTasks(squadApiKey: string) {
     status:    t.status,
     createdAt: t.date_created,
     updatedAt: t.updatedAt,
+    url:       t.url,
   }));
 
   return { tasks, allTasks };
