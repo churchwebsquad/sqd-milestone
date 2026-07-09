@@ -103,7 +103,7 @@ export default async function handler(req: any, res: any) {
 
     const inWindow = (t: any) => Number(t.date_updated ?? 0) >= since120Days
 
-    const sermonTasks   = allTasks.filter(t => (hasTag(t, 'sermonseries') || hasTag(t, 'broadcastvideo')) && inWindow(t)).map(mapTask)
+    const sermonTasks   = allTasks.filter(t => hasTag(t, 'sermonseries') && inWindow(t)).map(mapTask)
     const carouselTasks = allTasks.filter(t => hasTag(t, 'social-sermoncarouseltemplate') && inWindow(t)).map(mapTask)
 
     res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=60')
