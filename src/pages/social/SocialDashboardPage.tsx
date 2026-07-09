@@ -340,6 +340,13 @@ export default function SocialDashboardPage() {
 
   const weekStart = useMemo(() => getWeekStart(new Date()), [])
 
+  // Build a set of member numbers that had an SRP task due this week
+  // (from the ClickUp-direct cache which has real due dates)
+  const thisWeekMemberSet = useMemo(
+    () => new Set(thisWeekTasks.map(t => t.member)),
+    [thisWeekTasks]
+  )
+
   const sorted = useMemo(() => {
     const base = search.trim()
       ? churches.filter(c =>
@@ -355,8 +362,8 @@ export default function SocialDashboardPage() {
     return base.sort((a, b) => {
       const aSrp = srpMap.get(a.member)
       const bSrp = srpMap.get(b.member)
-      const aThisWeek = aSrp ? isThisWeek(aSrp.updatedAt || aSrp.createdAt, weekStart) : false
-      const bThisWeek = bSrp ? isThisWeek(bSrp.updatedAt || bSrp.createdAt, weekStart) : false
+      const aThisWeek = thisWeekMemberSet.has(a.member)
+      const bThisWeek = thisWeekMemberSet.has(b.member)
       if (aThisWeek && !bThisWeek) return -1
       if (!aThisWeek && bThisWeek) return  1
       // Both this week → most recently updated first
@@ -541,7 +548,7 @@ export default function SocialDashboardPage() {
               const srp          = srpMap.get(c.member)
               const srpDateMs    = srp ? new Date(srp.updatedAt || srp.createdAt).getTime() : NaN
               const srpDate      = srp && !isNaN(srpDateMs) ? new Date(srpDateMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null
-              const thisWeek     = srp ? isThisWeek(srp.updatedAt || srp.createdAt, weekStart) : false
+              const thisWeek     = thisWeekMemberSet.has(c.member)
               const noName       = !c.church_name
 
               return (
