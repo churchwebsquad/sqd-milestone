@@ -11,6 +11,7 @@ import WebProjectsPage from './pages/web/WebProjectsPage'
 import AmQuestionsPage from './pages/web/AmQuestionsPage'
 import WebTemplatesPage from './pages/web/WebTemplatesPage'
 import WebContentManagerPage from './pages/web/WebContentManagerPage'
+import SitemapFeedbackPage from './pages/web/SitemapFeedbackPage'
 import CopyReviewAdminPage from './pages/CopyReviewAdminPage'
 import BrandGuideEditorPage from './pages/BrandGuideEditorPage'
 import IntelAuditToolPage from './pages/IntelAuditToolPage'
@@ -33,7 +34,6 @@ import BrandingIndexPage from './pages/BrandingIndexPage'
 import BrandHandoffPage from './pages/BrandHandoffPage'
 import PortalReviewPage from './pages/PortalReviewPage'
 import SitemapReviewPortalPage from './pages/SitemapReviewPortalPage'
-import PartnerHubPage from './pages/PartnerHubPage'
 import ContentCollectionPage from './pages/ContentCollectionPage'
 import RegistrarIntakePage from './pages/RegistrarIntakePage'
 import FeedbackPreviewPage from './pages/FeedbackPreviewPage'
@@ -99,11 +99,15 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/portal/:token" element={<ClientPortalPage />} />
           <Route path="/portal/:token/copy-review" element={<CopyReviewPortalPage />} />
-          {/* Partner hub — greenfield. Lists outstanding asks (content
-              collection sessions, etc.). Will eventually subsume the
-              milestone view above, but we keep both routes live during
-              rollout so production partner links don't break. */}
-          <Route path="/portal/:token/hub" element={<PartnerHubPage />} />
+          {/* Partner hub was merged into the milestone timeline route
+              above — the timeline page now renders a right-column review
+              hub next to the milestones when reviews are live. We keep
+              /portal/:token/hub pointed at the same page so any partner
+              links that captured the standalone /hub URL still land on
+              the unified view. The nested /hub/content-collection/:id
+              route stays intact because the content-collection portal
+              lives at that URL and the AM share flow bakes it in. */}
+          <Route path="/portal/:token/hub" element={<ClientPortalPage />} />
           <Route path="/portal/:token/hub/content-collection/:sessionId" element={<ContentCollectionPage />} />
           {/* Standalone registrar intake — for partners migrating their
               current site before content collection is provisioned.
@@ -163,6 +167,12 @@ export default function App() {
             <Route path="/web/:projectId/design"   element={<WebTabRedirect tab="design"     />} />
             <Route path="/web/:projectId/dev"      element={<WebTabRedirect tab="devhandoff" />} />
             <Route path="/web/:projectId/reviews"  element={<WebTabRedirect tab="review"     />} />
+            {/* Dedicated staff review for a partner's sitemap feedback.
+                Entered from Content Engine → Step 6 "View partner
+                feedback" once the review's status flips to
+                partner_reviewed, and from the Slack #am-pm-web
+                notification's button. */}
+            <Route path="/web/:projectId/sitemap-feedback" element={<SitemapFeedbackPage />} />
 
             {/* All In Journey Milestones */}
             <Route path="/pathway" element={<ComingSoonPage title="Pathway Viewer" />} />

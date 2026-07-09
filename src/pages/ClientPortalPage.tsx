@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
-import { Check, ExternalLink, Clock } from 'lucide-react'
+import { ArrowRight, Check, ExternalLink, Clock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type {
   Squad,
@@ -9,6 +9,7 @@ import type {
   StrategySubmissionAsset,
 } from '../types/database'
 import { SQUAD_LABELS, PATHWAY_LABELS, ASSET_TYPE_LABELS } from '../components/submit/types'
+import { fetchPartnerReviewLinks, type PartnerReviewLink } from '../lib/partnerReviewLinks'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -299,6 +300,11 @@ export default function ClientPortalPage() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [partner, setPartner] = useState<PartnerInfo | null>(null)
   const [pathways, setPathways] = useState<PathwayData[]>([])
+  // Active partner reviews (content collection, sitemap, copy review).
+  // Rendered as a right-column sidebar next to the milestone timeline.
+  // Empty array = no reviews live for this partner; the timeline
+  // renders at full width instead of squeezed into a 2/3 column.
+  const [reviewLinks, setReviewLinks] = useState<PartnerReviewLink[]>([])
 
   useEffect(() => {
     if (!token) {
@@ -322,6 +328,13 @@ export default function ClientPortalPage() {
         }
 
         setPartner(partnerData as PartnerInfo)
+
+        // Fire the review-links fetch in parallel with the rest of
+        // the timeline loader. It's an independent query set so it
+        // doesn't block the milestone render if it takes a moment.
+        void fetchPartnerReviewLinks(partnerData.member).then(links => {
+          setReviewLinks(links)
+        })
 
         // ── 2. Load submissions for this member ────────────────────────────
         const { data: submissionsData } = await supabase
@@ -570,11 +583,19 @@ export default function ClientPortalPage() {
   }
 
   // ── Main render ───────────────────────────────────────────────────────────
+  // Layout rules:
+  //   · Reviews exist → two columns on lg+ (timeline 2/3, reviews 1/3).
+  //     Below lg the review column stacks ABOVE the timeline because the
+  //     reviews are actionable and the timeline is passive progress.
+  //   · No reviews → single-column timeline at the original max-w-2xl
+  //     width so the existing bookmarked layout stays unchanged.
+  const hasReviews = reviewLinks.length > 0
+
   return (
     <div className="min-h-screen bg-cream flex flex-col">
       <PortalHeader churchName={partner?.church_name ?? null} />
 
-      <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-8 space-y-5">
+      <main className={`flex-1 w-full px-4 py-8 ${hasReviews ? 'max-w-6xl mx-auto' : 'max-w-2xl mx-auto'}`}>
         {loadError ? (
           <div className="bg-white border border-lavender rounded-2xl p-6 text-center shadow-sm">
             <p className="text-deep-plum font-medium mb-1">
@@ -585,7 +606,7 @@ export default function ClientPortalPage() {
               your account manager.
             </p>
           </div>
-        ) : pathways.length === 0 ? (
+        ) : pathways.length === 0 && !hasReviews ? (
           <div className="bg-white border border-lavender rounded-2xl p-8 text-center shadow-sm">
             <div className="h-14 w-14 rounded-full bg-lavender-tint flex items-center justify-center mx-auto mb-4">
               <Clock size={24} className="text-primary-purple" />
@@ -599,9 +620,28 @@ export default function ClientPortalPage() {
             </p>
           </div>
         ) : (
-          pathways.map(pw => (
-            <PathwayTimeline key={`${pw.squad}:${pw.pathway}`} data={pw} />
-          ))
+          <div className={hasReviews ? 'grid grid-cols-1 lg:grid-cols-3 gap-6' : ''}>
+            <section className={`space-y-5 ${hasReviews ? 'lg:col-span-2 order-2 lg:order-1' : ''}`}>
+              {pathways.length === 0 ? (
+                <div className="bg-white border border-lavender rounded-2xl p-6 text-center shadow-sm">
+                  <p className="text-deep-plum font-medium mb-1">Project timeline is on the way.</p>
+                  <p className="text-purple-gray text-sm">
+                    Milestone updates will appear here as your project progresses.
+                  </p>
+                </div>
+              ) : (
+                pathways.map(pw => (
+                  <PathwayTimeline key={`${pw.squad}:${pw.pathway}`} data={pw} />
+                ))
+              )}
+            </section>
+
+            {hasReviews && (
+              <aside className="order-1 lg:order-2 lg:col-span-1">
+                <ReviewHubColumn links={reviewLinks} />
+              </aside>
+            )}
+          </div>
         )}
       </main>
 
@@ -609,5 +649,105 @@ export default function ClientPortalPage() {
         © Church Media Squad. All rights reserved.
       </footer>
     </div>
+  )
+}
+
+// ── ReviewHubColumn ───────────────────────────────────────────────────────────
+
+type ReviewGroupKey = 'web' | 'brand'
+
+const REVIEW_GROUP_LABEL: Record<ReviewGroupKey, string> = {
+  web:   'Web',
+  brand: 'Brand',
+}
+
+/** All current review sources are web-side. When brand-side review
+ *  sources graduate onto PartnerReviewLink (brand handoff review,
+ *  brand approval, etc.), add their source-key mapping here and the
+ *  UI will pick them up automatically. */
+function groupKeyFor(source: PartnerReviewLink['source']): ReviewGroupKey {
+  if (source === 'content_collection' || source === 'sitemap_review' || source === 'web_partner_review') return 'web'
+  return 'web'
+}
+
+function ReviewHubColumn({ links }: { links: PartnerReviewLink[] }) {
+  const grouped = new Map<ReviewGroupKey, PartnerReviewLink[]>()
+  for (const link of links) {
+    const key = groupKeyFor(link.source)
+    if (!grouped.has(key)) grouped.set(key, [])
+    grouped.get(key)!.push(link)
+  }
+  // Sort inside each group so outstanding cards sit above completed ones —
+  // partners see what's still on their plate at the top of the column.
+  const stateWeight = (s: PartnerReviewLink['state']) =>
+    s === 'outstanding' ? 0 : s === 'submitted' ? 1 : 2
+  for (const arr of grouped.values()) {
+    arr.sort((a, b) => stateWeight(a.state) - stateWeight(b.state))
+  }
+
+  return (
+    <div className="bg-white border border-lavender rounded-2xl shadow-sm overflow-hidden lg:sticky lg:top-6">
+      <div className="px-5 py-4 border-b border-lavender bg-lavender-tint/40">
+        <p className="text-xs font-bold text-primary-purple uppercase tracking-wider">Your reviews</p>
+      </div>
+      <div className="p-4 space-y-5">
+        {[...grouped.entries()].map(([groupKey, groupLinks]) => (
+          <div key={groupKey}>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-purple-gray mb-2 px-1">
+              {REVIEW_GROUP_LABEL[groupKey]}
+            </p>
+            <div className="space-y-2">
+              {groupLinks.map(link => (
+                <ReviewSidebarCard key={link.id} link={link} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ReviewSidebarCard({ link }: { link: PartnerReviewLink }) {
+  const isOutstanding = link.state === 'outstanding'
+  const submittedOn = link.submitted_at
+    ? new Date(link.submitted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : null
+
+  // Sitemap review uses partner-friendlier wording — "Feedback sent"
+  // matches the persistent confirmation banner the partner sees on
+  // the review portal itself, so the hub and portal read as one flow.
+  const submittedNoun =
+    link.source === 'sitemap_review' ? 'Feedback sent' :
+    link.source === 'content_collection' ? 'Submitted' :
+                                           'Submitted'
+  const statusLabel =
+    link.state === 'approved'  ? (submittedOn ? `Approved · ${submittedOn}` : 'Approved') :
+    link.state === 'submitted' ? (submittedOn ? `${submittedNoun} · ${submittedOn}` : submittedNoun) :
+                                 'Start review'
+
+  return (
+    <a
+      href={link.url}
+      className={`block rounded-xl border px-3.5 py-3 transition-colors group ${
+        isOutstanding
+          ? 'border-lavender hover:border-primary-purple bg-white'
+          : 'border-lavender/60 bg-lavender-tint/40'
+      }`}
+    >
+      <p className="text-[13px] font-semibold text-deep-plum leading-snug">{link.label}</p>
+      <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+        {isOutstanding ? (
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-purple">
+            {statusLabel}
+            <ArrowRight size={11} className="group-hover:translate-x-0.5 transition-transform" />
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-[#E8F3EC] text-[#3f7d55]">
+            <Check size={10} /> {statusLabel}
+          </span>
+        )}
+      </div>
+    </a>
   )
 }

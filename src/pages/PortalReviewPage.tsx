@@ -566,7 +566,7 @@ export default function PortalReviewPage() {
       {!isInternalReview && data.partnerPortalToken && (
         <div className="bg-lavender-tint text-center py-2 px-5 border-b border-lavender text-[12.5px]">
           <a
-            href={`/portal/${data.partnerPortalToken}/hub`}
+            href={`/portal/${data.partnerPortalToken}`}
             className="text-primary-purple font-semibold hover:underline"
           >
             ← Back to your review hub

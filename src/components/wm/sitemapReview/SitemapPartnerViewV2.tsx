@@ -272,6 +272,71 @@ export default function SitemapPartnerViewV2({
             Preview · this is what your partner sees
           </div>
         )}
+
+        {/* Persistent confirmation banner — shown once the partner has
+            clicked "Share Sitemap Review Feedback". Sits above the hero
+            so it's the first thing the partner (or anyone with the link)
+            sees on return visits. Read-only mode hides it because staff
+            preview shouldn't advertise a partner submission that hasn't
+            happened yet in the staff context. */}
+        {!readOnly && review.status === 'partner_reviewed' && (
+          <div
+            role="status"
+            style={{
+              background: '#E8F3EC',
+              border: '1px solid #B5D9C3',
+              color: '#22503A',
+              borderRadius: 14,
+              padding: '14px 18px',
+              margin: '0 0 22px',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            <span
+              aria-hidden
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 26,
+                height: 26,
+                borderRadius: '999px',
+                background: '#3f7d55',
+                color: '#fff',
+                fontSize: 15,
+                lineHeight: 1,
+                flex: 'none',
+                marginTop: 1,
+              }}
+            >
+              ✓
+            </span>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Feedback submitted, thank you.</p>
+              <p style={{ fontSize: 13, margin: '2px 0 0', color: '#2E5A44' }}>
+                We are reviewing your feedback and will follow up with next steps.
+              </p>
+              {(review.partner_reviewed_at || review.partner_reviewed_by) && (
+                <p style={{ fontSize: 12, margin: '6px 0 0', color: '#2E5A44' }}>
+                  {review.partner_reviewed_by && <>Submitted by <strong>{review.partner_reviewed_by}</strong></>}
+                  {review.partner_reviewed_by && review.partner_reviewed_at && ' · '}
+                  {review.partner_reviewed_at && (
+                    <>
+                      {new Date(review.partner_reviewed_at).toLocaleString('en-US', {
+                        month: 'long', day: 'numeric', year: 'numeric',
+                        hour: 'numeric', minute: '2-digit',
+                      })}
+                    </>
+                  )}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         {hero && (
           <header className={clickable('intro')} {...clickBind('intro', 'Introduction')}>
             <div className="hero">
@@ -778,8 +843,17 @@ export default function SitemapPartnerViewV2({
         {!readOnly && (
           <section className="sec">
             <div className="turn">
-              <h2>Your turn, <em className="brand-em">tell us what you think</em></h2>
-              <p>This is your site, and this is the moment to shape it. Click any section above to leave a note pinned to it, or drop overall thoughts here.</p>
+              {review.status === 'partner_reviewed' ? (
+                <>
+                  <h2>Have <em className="brand-em">additional thoughts</em> you'd like to share?</h2>
+                  <p>Your feedback has already been submitted, we're reviewing it now. If something else comes to mind, add a section note above or a fresh overall thought below, and we'll fold it into the same review.</p>
+                </>
+              ) : (
+                <>
+                  <h2>Your turn, <em className="brand-em">tell us what you think</em></h2>
+                  <p>This is your site, and this is the moment to shape it. Click any section above to leave a note pinned to it, or drop overall thoughts here.</p>
+                </>
+              )}
 
               <label htmlFor="partner-notes" className="mega-label" style={{ color: '#D8CFF3', display: 'block', marginTop: 14, marginBottom: 8 }}>Overall notes</label>
               <textarea

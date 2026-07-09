@@ -37,6 +37,7 @@ import {
   type PartnerEditRequest,
   type SitemapReview,
 } from '../lib/sitemapReview'
+import { supabase } from '../lib/supabase'
 import SitemapPartnerViewV2 from '../components/wm/sitemapReview/SitemapPartnerViewV2'
 
 const STORAGE_KEY = (token: string) => `sitemap_review_${token}_name`
@@ -137,10 +138,30 @@ export default function SitemapReviewPortalPage() {
     if (!review) return
     const openCount = (review.partner_edit_requests ?? []).filter(r => r.status === 'open').length
     if (!confirm(`Share your feedback with the Church Media Squad team? ${openCount} section note${openCount === 1 ? '' : 's'} plus your overall notes will be sent.`)) return
-    const next: SitemapReview = { ...review, status: 'partner_reviewed' }
+    const submittedAt = new Date().toISOString()
+    const next: SitemapReview = {
+      ...review,
+      status:              'partner_reviewed',
+      partner_reviewed_at: submittedAt,
+      partner_reviewed_by: partnerName ?? null,
+    }
     const ok = await persist(next)
-    if (ok) setFlash('Feedback sent. Your Squad team will review and follow up.')
-  }, [review, persist])
+    if (ok) {
+      setFlash('Feedback sent. Your Squad team will review and follow up.')
+      // Fire-and-forget Slack notification to #am-pm-web so the AM
+      // knows partner feedback landed without polling the composer.
+      // Matches the notify-content-collection-submitted /
+      // notify-copy-review-submitted pattern. Failures are logged
+      // server-side; we don't block the partner UX on it.
+      if (token) {
+        void supabase.functions.invoke('notify-sitemap-feedback-submitted', {
+          body: { token },
+        }).catch(err => {
+          console.warn('[sitemap-feedback] notify invoke failed:', err)
+        })
+      }
+    }
+  }, [review, persist, partnerName, token])
 
   const submitName = useCallback((name: string) => {
     const trimmed = name.trim()
@@ -188,7 +209,7 @@ export default function SitemapReviewPortalPage() {
       {partnerPortalToken && (
         <div style={{ background: '#EDE9FC', textAlign: 'center', padding: '8px 20px', fontSize: 12.5, borderBottom: '1px solid #CFC9F8' }}>
           <a
-            href={`/portal/${partnerPortalToken}/hub`}
+            href={`/portal/${partnerPortalToken}`}
             style={{ color: '#513DE5', fontWeight: 600, textDecoration: 'none' }}
           >
             ← Back to your review hub

@@ -557,6 +557,12 @@ export interface SitemapReview {
   published_at: string | null
   approved_at:  string | null
   approved_by:  'staff' | 'partner' | null
+  /** When the partner clicked "Share Sitemap Review Feedback" and the
+   *  review flipped to `partner_reviewed`. Also carries the name they
+   *  entered at the name gate so the staff-side confirmation banner
+   *  can credit them. Both remain null until the partner submits. */
+  partner_reviewed_at?: string | null
+  partner_reviewed_by?: string | null
 
   /** ISO timestamp of the last time this review re-hydrated auto-fields
    *  (pages list, nav_layout, persona names/descriptions, migrations)

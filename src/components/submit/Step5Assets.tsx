@@ -68,7 +68,10 @@ export default function Step5Assets({ formData, updateForm, onNext, onBack }: St
     }
     let cancelled = false
     fetchPartnerReviewLinks(memberNumber).then(links => {
-      if (!cancelled) setPartnerReviewLinks(links)
+      // Asset picker only surfaces reviews the partner can still
+      // act on. Submitted/approved reviews aren't attachable —
+      // there's nothing left for the partner to do.
+      if (!cancelled) setPartnerReviewLinks(links.filter(l => l.state === 'outstanding'))
     })
     return () => { cancelled = true }
   }, [memberNumber])

@@ -19,6 +19,11 @@ export type PartnerReviewLinkSource =
   | 'sitemap_review'
   | 'web_partner_review'
 
+/** Lifecycle state for a review, from the partner's perspective.
+ *  Drives which section the card renders in on the Partner Hub
+ *  (outstanding vs completed) and which pill it wears. */
+export type PartnerReviewLinkState = 'outstanding' | 'submitted' | 'approved'
+
 export interface PartnerReviewLink {
   /** Stable id, used as the dropdown <option value>. */
   id:     string
@@ -32,11 +37,26 @@ export interface PartnerReviewLink {
    *  its title. Optional; consumers that don't need it (asset picker)
    *  ignore it. */
   description?: string
+  /** Lifecycle state — the hub splits cards by this. `outstanding`
+   *  is still waiting on the partner; `submitted` means partner has
+   *  sent it in but staff hasn't finalized; `approved` means locked
+   *  as canonical. */
+  state: PartnerReviewLinkState
+  /** Target-submission date (content collection only). Used to show
+   *  a due badge on outstanding cards. Ignored once state !=
+   *  outstanding. ISO string. */
+  due_at?:       string | null
+  /** When the partner submitted / approved. Used to stamp completed
+   *  cards. ISO string. */
+  submitted_at?: string | null
 }
 
-/** Fetch every open partner review link for this member. Returns
- *  an empty array on any miss (no project, no portal token, no
- *  open sessions) — callers render conditionally. */
+/** Fetch every live partner review link for this member — both
+ *  outstanding and already-submitted. Each link carries a `state`
+ *  the hub uses to decide which section it renders in. Closed /
+ *  archived items are filtered out (they don't belong on a partner
+ *  dashboard). Returns an empty array on any miss (no project, no
+ *  portal token, nothing live) — callers render conditionally. */
 export async function fetchPartnerReviewLinks(
   memberNumber: number,
 ): Promise<PartnerReviewLink[]> {
@@ -66,25 +86,33 @@ export async function fetchPartnerReviewLinks(
   const links: PartnerReviewLink[] = []
 
   // ── Content collection ─────────────────────────────────────────
-  // Needs both an open session AND the partner's portal token; the
-  // public URL embeds both. If either is missing the link can't be
-  // assembled, so we skip silently.
+  // Needs the partner's portal token; the public URL embeds both
+  // token and session id. We surface the latest non-closed session
+  // and let the hub sort it by `state`:
+  //   'open'      → outstanding (still on the partner's plate)
+  //   'submitted' → submitted   (partner has sent it in)
+  //   'closed'    → filtered out (staff has archived it)
   if (portalToken) {
     const ccRes = await supabase
       .from('strategy_content_collection_sessions')
-      .select('id')
+      .select('id, status, due_at, submitted_at')
       .eq('web_project_id', projectId)
       .neq('status', 'closed')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
     if (ccRes.data?.id) {
+      const state: PartnerReviewLinkState =
+        ccRes.data.status === 'submitted' ? 'submitted' : 'outstanding'
       links.push({
-        id:          `content_collection:${ccRes.data.id}`,
-        label:       'Website Content Collection',
-        description: 'Review what we found on your current site, tell us what to update or leave alone, and answer a few questions about how you\'d like the new site to work.',
-        url:         `${origin}/portal/${portalToken}/hub/content-collection/${ccRes.data.id}`,
-        source:      'content_collection',
+        id:           `content_collection:${ccRes.data.id}`,
+        label:        'Website Content Collection',
+        description:  'Review what we found on your current site, tell us what to update or leave alone, and answer a few questions about how you\'d like the new site to work.',
+        url:          `${origin}/portal/${portalToken}/hub/content-collection/${ccRes.data.id}`,
+        source:       'content_collection',
+        state,
+        due_at:       ccRes.data.due_at ?? null,
+        submitted_at: ccRes.data.submitted_at ?? null,
       })
     }
   }
@@ -92,47 +120,63 @@ export async function fetchPartnerReviewLinks(
   // ── Sitemap & Navigation review ────────────────────────────────
   // Token + status live under roadmap_state.sitemap_review. Only
   // surfaced once the strategist has published the review; drafts
-  // stay hidden from the partner. Uses its own token in the URL
-  // (roadmap_state.sitemap_review.token), which the sitemap portal
-  // page resolves via the get_sitemap_review_by_token RPC.
+  // stay hidden from the partner. Status categorization:
+  //   'published'        → outstanding (waiting on partner)
+  //   'partner_reviewed' → submitted   (partner sent feedback)
+  //   'approved'         → approved    (locked as canonical)
   const smRes = await supabase
     .from('strategy_web_projects')
     .select('roadmap_state')
     .eq('id', projectId)
     .maybeSingle()
-  const smRaw = smRes.data?.roadmap_state as { sitemap_review?: { token?: string; status?: string } } | null
-  const sm    = smRaw?.sitemap_review
-  const smVisible = sm?.status === 'published' || sm?.status === 'partner_reviewed'
-  if (sm?.token && smVisible) {
+  const smRaw = smRes.data?.roadmap_state as {
+    sitemap_review?: { token?: string; status?: string; approved_at?: string; partner_reviewed_at?: string }
+  } | null
+  const sm = smRaw?.sitemap_review
+  const smState: PartnerReviewLinkState | null =
+    sm?.status === 'published'        ? 'outstanding' :
+    sm?.status === 'partner_reviewed' ? 'submitted'   :
+    sm?.status === 'approved'         ? 'approved'    :
+    null
+  if (sm?.token && smState) {
     links.push({
-      id:          `sitemap_review:${sm.token}`,
-      label:       'Sitemap & Navigation Review',
-      description: 'The pages we\'re planning for your new site, how the navigation groups them, and who each one is for. Tell us what to rename, move, or add.',
-      url:         `${origin}/portal/sitemap/${sm.token}`,
-      source:      'sitemap_review',
+      id:           `sitemap_review:${sm.token}`,
+      label:        'Sitemap & Navigation Review',
+      description:  'The pages we\'re planning for your new site, how the navigation groups them, and who each one is for. Tell us what to rename, move, or add.',
+      url:          `${origin}/portal/sitemap/${sm.token}`,
+      source:       'sitemap_review',
+      state:        smState,
+      submitted_at: sm.approved_at ?? sm.partner_reviewed_at ?? null,
     })
   }
 
   // ── Web partner review ─────────────────────────────────────────
-  // Open partner-kind review for this project — token alone is
-  // enough; the portal page resolves project/member from the token.
+  // Partner-kind review for this project. We now include closed
+  // rows so the completed section can show finished reviews.
+  //   no_status | open_for_review | editing_content | open → outstanding
+  //   on_hold                                              → outstanding (staff pause, partner card still visible)
+  //   completed | closed                                   → submitted
   const wrRes = await supabase
     .from('web_reviews')
-    .select('partner_token')
+    .select('partner_token, status, closed_at')
     .eq('web_project_id', projectId)
     .eq('kind', 'partner')
-    .in('status', ['no_status', 'open_for_review', 'editing_content', 'open'])
     .not('partner_token', 'is', null)
     .order('started_at', { ascending: false })
     .limit(1)
     .maybeSingle()
   if (wrRes.data?.partner_token) {
+    const wrStatus = wrRes.data.status
+    const wrState: PartnerReviewLinkState =
+      wrStatus === 'completed' || wrStatus === 'closed' ? 'submitted' : 'outstanding'
     links.push({
-      id:          `web_partner_review:${wrRes.data.partner_token}`,
-      label:       'Website Content Review',
-      description: 'Walk through the drafted pages, suggest specific edits, and leave notes for the team.',
-      url:         `${origin}/portal/review/${wrRes.data.partner_token}`,
-      source:      'web_partner_review',
+      id:           `web_partner_review:${wrRes.data.partner_token}`,
+      label:        'Website Content Review',
+      description:  'Walk through the drafted pages, suggest specific edits, and leave notes for the team.',
+      url:          `${origin}/portal/review/${wrRes.data.partner_token}`,
+      source:       'web_partner_review',
+      state:        wrState,
+      submitted_at: wrRes.data.closed_at ?? null,
     })
   }
 
