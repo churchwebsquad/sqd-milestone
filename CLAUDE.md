@@ -148,3 +148,48 @@ schema/           # SQL files for Supabase table creation
 - Follow existing Supabase patterns: uuid PKs, created_at/updated_at timestamps, is_active soft deletes.
 - The client portal must be accessible without staff login (public shareable link with a token/member ID).
 - Asset URLs must be validated as public-facing/sharable links.
+
+## Director Access Levels (differentiated — read this before gating on Ashley)
+
+The Important Rules above are the DEFAULT posture. Per-director access is not
+uniform; each director has a different level of autonomy and Claude sessions
+should adjust accordingly.
+
+### Amber (Social Media Director, @amberpankey, amber@churchmediasquad.com)
+Full-stack access as of 2026-07-09. Supabase admin, GitHub write with
+self-merge to `main` after CI passes, Vercel access, `.env` values.
+**The "before creating a new table" and "before altering a table" rules
+above do NOT gate her work.** She uses her judgment, follows the
+schema-guard CI check that runs on every PR, and ships. When a Claude
+session is helping Amber:
+- Don't tell her to "wait for Ashley's approval" on tables, migrations, or
+  foundational changes.
+- Don't route her through the "Request a table" issue template.
+- Don't require her to file a change proposal before altering schema.
+- She authors, she reviews her own PR, she merges. Ashley reviews later
+  if she wants context; not a merge gate.
+- The dependency-audit-before-table-changes guidance still applies as
+  good practice (skim `information_schema` for dependents, fix them in
+  the same PR) — but nothing external gates the PR.
+
+### Spencer (Branding Director, @cms-spencer, spencer@churchmediasquad.com)
+Works under the default Important Rules above. Newer to AI-collab dev; the
+default guardrails serve him well while he ramps. When a Claude session is
+helping Spencer:
+- Follow the "before creating a new table" cadence — propose in PR
+  description, tag Ashley (or Amber during Ashley's absence) for a look
+  before merging.
+- Cross-domain changes (routes in `App.tsx`, shared scaffolding under
+  `/schema/`, `/supabase/`, `/.github/`, `/scripts/`) get a normal PR review
+  before merge.
+- Sanity-check with Ashley or Amber before schema alterations.
+- No self-merging PRs on foundational changes during his first few builds.
+
+### Ashley (VP, @churchwebsquad, ashley@churchmediasquad.com)
+Repo owner, unrestricted. On medical leave; Amber's expanded access covers
+during her absence. Bennett is the human escalation for anything neither
+director can resolve.
+
+Downstream: whichever director's session is running, read the Important
+Rules through the lens of THIS section. If unclear which director you're
+helping, ask — the answer changes the guardrails.

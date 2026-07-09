@@ -14231,7 +14231,7 @@ About ▾        : Vision & Strategy · Beliefs · Leadership · Locations · In
     name:         'revise-site-strategy',
     model:        'anthropic/claude-opus-4-7',
     version:      '1.0.0',
-    contentHash:  'ab0371f4f7e4bd11',
+    contentHash:  '023edb759a6e410a',
     references:   [],
     systemPrompt: `# Revise Site Strategy
 
@@ -14304,8 +14304,11 @@ into a cowork session. The prompt names YOU.
      them the cumulative diff at the end.
 
 4. **Preserve invariants** as you apply each edit:
-   - Every slug in \`nav.primary[].slug\`, \`nav.footer[]\`, \`nav.cta_only[]\`
-     MUST appear in \`pages[].slug\` or in \`nav.primary[].children[]\`.
+   - Every slug in \`nav.primary[].slug\`, \`nav.secondary[].slug\`,
+     \`nav.footer[]\` (both flat-array and grouped-object shapes:
+     \`primary_links\`, \`explore\`, \`legal\` all count), and
+     \`nav.cta_only[]\` MUST appear in \`pages[].slug\` or in a
+     \`children[]\` array.
    - Every slug referenced in \`persona_journeys[].entry_points\` and
      \`journey[]\` MUST appear in \`pages[].slug\`.
    - Every persona named in \`persona_journeys[].persona\` MUST appear
@@ -14317,6 +14320,48 @@ into a cowork session. The prompt names YOU.
    - \`nav_change_level\` is OUT OF SCOPE for edits — it was derived
      from \`current_navigation_satisfaction\` at synthesis time and
      stays put.
+
+**When you drop a page — mandatory nav sweep.** Every time an
+operation removes a slug from \`pages[]\`, you MUST also walk EVERY
+nav-adjacent structure in the artifact and delete references to
+that slug. Missing any one of these leaves a stale reference that
+the partner-facing sitemap review will silently render — and the
+strategist will believe the page is gone even though partners still
+see it. The exhaustive list:
+
+- \`nav.primary[]\` — walk each entry AND its \`children[]\` recursively
+- \`nav.secondary[]\` — same
+- \`nav.footer[]\` — both shapes: if flat \`string[]\` or \`{slug,label}[]\`,
+  filter directly. If grouped object \`{primary_links, explore, legal,
+  social, parked, contact_block, service_times}\`, filter each of
+  \`primary_links\` / \`explore\` / \`legal\` (the three link-carrying keys)
+- \`nav.cta_only[]\`
+- \`nav_presentation.visible_top_level[]\` — filter items whose slug
+  matches the dropped slug
+- \`nav_presentation.header_ctas[]\` — same
+- \`nav_presentation.megamenu_panels[].columns[].links[]\` — recurse
+  through every panel + column + link
+- \`nav_presentation.standard_dropdowns.groups[].children[]\` — recurse
+- \`nav_presentation.offcanvas_overlay.sections[].links[]\` — recurse
+- \`persona_journeys[].entry_points[]\` — remove the slug
+- \`persona_journeys[].journey[]\` — remove the slug (and if the
+  journey no longer ends on a \`commit\`-funnel page, flag it in the
+  handoff note)
+- \`persona_journeys[].drop_off_risk.at_slug\` — if it equals the
+  dropped slug, null it out
+- \`presentation.tiers[].page_entries[]\` — remove the entry
+- \`presentation.congregations[].links_left[]\` — filter
+- \`presentation.congregations[].links_right[]\` — filter
+
+**Also delete the legacy \`roadmap_state.stage_2.nav_presentation\`
+if it exists.** That was an early location for the nav_presentation
+shape; the partner review composer used to fall back to it when
+\`site_strategy.nav_presentation\` was absent, which means a stale
+stage_2 copy will render for the partner even after you've written
+a clean site_strategy. Deleting stage_2 forces the composer to only
+read from your revised strategy. Use \`#- '{stage_2,nav_presentation}'\`
+in your jsonb_set chain or a \`roadmap_state - '{stage_2}'\` if
+stage_2 has no other content worth preserving.
 
 5. **Sync nav_presentation when nav placement changes.** This is the
    contract the visible header + megamenu/dropdowns/offcanvas
@@ -14426,20 +14471,60 @@ into a cowork session. The prompt names YOU.
 
 ## Self-check before persisting
 
-Before the final \`roadmap_state_set\` call, verify:
-- [ ] Every \`nav.*\` slug exists in \`pages[]\` OR in a \`children[]\` array.
-- [ ] Every \`persona_journeys[].entry_points\` slug exists in \`pages[]\`.
-- [ ] Every \`persona_journeys[].journey[]\` slug exists in \`pages[]\`.
-- [ ] Every \`persona_journeys[].persona\` matches a stage_1 persona name.
-- [ ] \`nav_change_level\` is unchanged from \`current_strategy.nav_change_level\`.
-- [ ] \`nav_presentation\` (if present) has chips + column entries that
-      match the revised \`pages[]\` + \`nav.primary[]\`.
-- [ ] \`_meta.revision_of\` points at the version you replaced.
+Before the final \`roadmap_state_set\` call, verify these EXHAUSTIVELY.
+A miss here = partner-facing sitemap review renders stale content
+(the exact class of bug that hit Doxology's Alliance/Español tiers
+and Desert Springs' Stories page).
+
+Build a set of \`valid_slugs = pages[].slug\`. Then walk every one of
+these structures and confirm each slug it references is in
+\`valid_slugs\`. Any orphan = a hard error that blocks the write.
+
+- [ ] \`nav.primary[].slug\` AND \`nav.primary[].children[].slug\`
+      (recursive) — every slug in \`valid_slugs\`.
+- [ ] \`nav.secondary[].slug\` AND \`nav.secondary[].children[].slug\`
+      (recursive).
+- [ ] \`nav.footer\` — walk the correct shape:
+    - If flat array: each \`string\` slug in \`valid_slugs\`; each
+      \`{slug, label}\` object's slug too.
+    - If grouped object: walk \`primary_links[]\`, \`explore[]\`,
+      \`legal[]\` — each slug in \`valid_slugs\`. (\`social[]\` is
+      platform names, \`parked[]\` is off-render, \`contact_block\` /
+      \`service_times\` are booleans — not slugs.)
+- [ ] \`nav.cta_only[]\` — every slug in \`valid_slugs\`.
+- [ ] \`nav_presentation.visible_top_level[]\` — every \`slug\` field.
+- [ ] \`nav_presentation.header_ctas[]\` — every \`slug\` field
+      (external \`url\` entries are exempt).
+- [ ] \`nav_presentation.megamenu_panels[].columns[].links[].slug\` —
+      recursive.
+- [ ] \`nav_presentation.standard_dropdowns.groups[].children[].slug\` —
+      recursive.
+- [ ] \`nav_presentation.offcanvas_overlay.sections[].links[].slug\` —
+      recursive.
+- [ ] \`persona_journeys[].entry_points[]\` — each slug in \`valid_slugs\`.
+- [ ] \`persona_journeys[].journey[]\` — each slug in \`valid_slugs\`.
+- [ ] \`persona_journeys[].drop_off_risk.at_slug\` — if set, in \`valid_slugs\`.
+- [ ] \`persona_journeys[].persona\` — each matches a \`stage_1.personas[].name\`.
+- [ ] \`presentation.tiers[].page_entries[].slug\` — each in \`valid_slugs\`.
+- [ ] \`presentation.congregations[].links_left[].slug\` and
+      \`links_right[].slug\` — each in \`valid_slugs\`.
+- [ ] \`nav_change_level\` unchanged from \`current_strategy.nav_change_level\`.
+- [ ] \`_meta.revision_of\` points at the previous \`_meta.generated_at\`,
+      NOT at itself. If they match, you forgot to bump.
+- [ ] \`_meta.generated_at\` is strictly newer than the previous
+      \`_meta.generated_at\`. If they match, downstream watermark
+      cascades fail and the partner review won't refresh.
+- [ ] \`roadmap_state.stage_2.nav_presentation\` is either DELETED or,
+      if you kept it for compatibility, has been rewritten to match
+      the new \`site_strategy.nav_presentation\`. Never leave stage_2
+      pointing at slugs that aren't in the revised pages.
 - [ ] No silent additions to \`pages[]\` the strategist didn't explicitly
       approve.
 
-If any check fails, surface it and re-confirm with the strategist
-before writing.
+If any check fails, surface it and either (a) fix the orphan
+reference (usually by dropping it) or (b) re-confirm with the
+strategist before writing. Never persist an artifact with dangling
+slug references — the partner review will render them silently.
 
 ## Handoff Note — required final substep
 
