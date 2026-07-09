@@ -1449,7 +1449,7 @@ export function composeSitemapReview(args: {
     approved_at:        existing?.approved_at ?? null,
     approved_by:        existing?.approved_by ?? null,
     intro:              existing?.intro ?? {
-      headline: `${project.church_name ?? 'Your church'} website content strategy`,
+      headline: `${project.church_name ?? 'Your church'} Website Content Strategy`,
       body:     `Here's the proposed structure for your new website: what each page is for, how they fit together, and how the whole site is shaped around the people you're inviting into your church family. Everything on this page is editable. Read through it, share it with your team, and tell us what to refine. This is a working draft we build together.`,
     },
     executive_summary:  composedExecSummary,
