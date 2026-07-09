@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 
 interface SocialIntelProfile {
   church_overview?: {
@@ -88,13 +88,16 @@ function Field({
 }: {
   label: string; value?: string | null; editMode?: boolean; onChange?: (v: string) => void
 }) {
+  const [local, setLocal] = useState(value ?? '')
+  useEffect(() => { setLocal(value ?? '') }, [value])
   if (editMode) {
     return (
       <div className="mb-3">
         <label className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider block mb-1">{label}</label>
         <textarea
-          value={value ?? ''}
-          onChange={e => onChange?.(e.target.value)}
+          value={local}
+          onChange={e => setLocal(e.target.value)}
+          onBlur={() => onChange?.(local)}
           rows={3}
           className="w-full text-sm text-[#341756] border border-[#CFC9F8] rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#513DE5] resize-y bg-white"
         />
@@ -115,14 +118,17 @@ function InlineField({
 }: {
   label: string; value?: string | null; editMode?: boolean; onChange?: (v: string) => void
 }) {
+  const [local, setLocal] = useState(value ?? '')
+  useEffect(() => { setLocal(value ?? '') }, [value])
   if (editMode) {
     return (
       <div className="mb-2">
         <label className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider block mb-1">{label}</label>
         <input
           type="text"
-          value={value ?? ''}
-          onChange={e => onChange?.(e.target.value)}
+          value={local}
+          onChange={e => setLocal(e.target.value)}
+          onBlur={() => onChange?.(local)}
           className="w-full text-sm text-[#341756] border border-[#CFC9F8] rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#513DE5] bg-white"
         />
       </div>
@@ -150,6 +156,8 @@ function EditableTagList({
 }: {
   label: string; items: string[]; editMode?: boolean; onChange?: (items: string[]) => void
 }) {
+  const [local, setLocal] = useState(items.join(', '))
+  useEffect(() => { setLocal(items.join(', ')) }, [items.join(', ')])
   if (editMode) {
     return (
       <div className="mb-3">
@@ -158,8 +166,9 @@ function EditableTagList({
         </label>
         <input
           type="text"
-          value={items.join(', ')}
-          onChange={e => onChange?.(e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+          value={local}
+          onChange={e => setLocal(e.target.value)}
+          onBlur={() => onChange?.(local.split(',').map(s => s.trim()).filter(Boolean))}
           className="w-full text-sm text-[#341756] border border-[#CFC9F8] rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-[#513DE5] bg-white"
         />
       </div>
