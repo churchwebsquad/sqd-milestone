@@ -229,7 +229,7 @@ export default function SocialDashboardPage() {
     async function load() {
       setLoading(true)
 
-      const [churchRes, intelRes, proRes] = await Promise.all([
+      const [churchRes, intelRes, proRes, accountStatusRes] = await Promise.all([
         supabase
           .from('strategy_account_progress')
           .select('member, church_name, css_rep')
@@ -241,14 +241,26 @@ export default function SocialDashboardPage() {
         (supabase as any)
           .from('strategy_social_pro_profiles')
           .select('member, church_name, css_rep'),
+        (supabase as any)
+          .from('accounts')
+          .select('account, status')
+          .in('status', ['Active', 'Trial']),
       ])
+
+      // Build set of active/trial member numbers to filter out cancelled churches
+      const activeMembers = new Set<number>(
+        ((accountStatusRes.data ?? []) as { account: number; status: string }[]).map(a => a.account)
+      )
 
       const dbMembers = new Set(((churchRes.data ?? []) as Church[]).map(c => c.member))
       const proChurches: Church[] = ((proRes.data ?? []) as StrategySocialProProfile[])
         .filter(p => !dbMembers.has(p.member))
         .map(p => ({ member: p.member, church_name: p.church_name, css_rep: p.css_rep, socialPro: true }))
 
-      const allChurches = [...((churchRes.data ?? []) as Church[]), ...proChurches]
+      const allChurches = [
+        ...((churchRes.data ?? []) as Church[]).filter(c => activeMembers.size === 0 || activeMembers.has(c.member)),
+        ...proChurches,
+      ]
       setChurches(allChurches)
       setLoading(false)
 
@@ -340,12 +352,28 @@ export default function SocialDashboardPage() {
 
   const weekStart = useMemo(() => getWeekStart(new Date()), [])
 
-  // Build a set of member numbers that had an SRP task due this week
-  // (from the ClickUp-direct cache which has real due dates)
+  // Build a set + due-date map from the ClickUp-direct this-week cache
   const thisWeekMemberSet = useMemo(
     () => new Set(thisWeekTasks.map(t => t.member)),
     [thisWeekTasks]
   )
+  const thisWeekDueDateMap = useMemo(() => {
+    const m = new Map<number, number>()
+    for (const t of thisWeekTasks) {
+      const ms = t.dueDate ? new Date(t.dueDate).getTime() : Infinity
+      if (!m.has(t.member) || ms < m.get(t.member)!) m.set(t.member, ms)
+    }
+    return m
+  }, [thisWeekTasks])
+
+  // task ID map from ClickUp-direct data (Squad API doesn't return id field)
+  const thisWeekTaskIdMap = useMemo(() => {
+    const m = new Map<number, string>()
+    for (const t of thisWeekTasks) {
+      if (t.taskId && !m.has(t.member)) m.set(t.member, t.taskId)
+    }
+    return m
+  }, [thisWeekTasks])
 
   const sorted = useMemo(() => {
     const base = search.trim()
@@ -366,9 +394,9 @@ export default function SocialDashboardPage() {
       const bThisWeek = thisWeekMemberSet.has(b.member)
       if (aThisWeek && !bThisWeek) return -1
       if (!aThisWeek && bThisWeek) return  1
-      // Both this week → most recently updated first
+      // Both this week → earliest due date first
       if (aThisWeek && bThisWeek) {
-        return new Date(bSrp!.updatedAt || bSrp!.createdAt).getTime() - new Date(aSrp!.updatedAt || aSrp!.createdAt).getTime()
+        return (thisWeekDueDateMap.get(a.member) ?? Infinity) - (thisWeekDueDateMap.get(b.member) ?? Infinity)
       }
       // Neither this week → most recently active first
       const aTime = aSrp ? new Date(aSrp.updatedAt).getTime() : 0
@@ -376,7 +404,7 @@ export default function SocialDashboardPage() {
       if (aTime !== bTime) return bTime - aTime
       return a.member - b.member
     })
-  }, [churches, search, sort, srpMap, weekStart])
+  }, [churches, search, sort, srpMap, weekStart, thisWeekMemberSet, thisWeekDueDateMap, thisWeekTaskIdMap])
 
   const handleProfileSaved = useCallback((profile: StrategySocialProProfile) => {
     setChurches(prev => prev.map(c =>
@@ -394,12 +422,14 @@ export default function SocialDashboardPage() {
     const now = Date.now()
     return churches.filter(c => {
       if (c.socialPro) return false // only All-In churches
+      if (thisWeekMemberSet.has(c.member)) return false // active this week
       const srp = srpMap.get(c.member)
       if (!srp) return true // never submitted
       const lastMs = new Date(srp.updatedAt || srp.createdAt).getTime()
-      return isNaN(lastMs) || (now - lastMs) >= TWO_WEEKS_MS
+      if (isNaN(lastMs)) return false // no timestamp — can't determine, don't flag
+      return (now - lastMs) >= TWO_WEEKS_MS
     })
-  }, [churches, srpMap])
+  }, [churches, srpMap, thisWeekMemberSet])
 
   const STATUS_LABELS: Record<string, string> = {
     'open':                  'Open',
@@ -604,13 +634,13 @@ export default function SocialDashboardPage() {
                       )}
                       {srp ? (
                         <a
-                          href={srp.url || `https://app.clickup.com/t/${srp.taskId}`}
+                          href={srp.url || `https://app.clickup.com/t/${thisWeekTaskIdMap.get(c.member) || srp.taskId}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={e => e.stopPropagation()}
                           className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-medium hover:bg-amber-100 transition-colors"
                         >
-                          <Sparkles size={10} /> {srpDate ?? `#${srp.taskId}`}
+                          <Sparkles size={10} /> #{thisWeekTaskIdMap.get(c.member) || srp.taskId}{srpDate ? ` · ${srpDate}` : ''}
                         </a>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-300 px-2 py-0.5 rounded-full">
