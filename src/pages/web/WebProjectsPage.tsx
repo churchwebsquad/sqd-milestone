@@ -39,7 +39,7 @@ export default function WebProjectsPage() {
   const [queueSearch, setQueueSearch] = useState('')
 
   const plan = useLaunchPlan()
-  const launchedCount = plan.rows.filter(r => r.current_phase === 'launched' && !r.archived).length
+  const launchedCount = plan.rows.filter(r => (r.effective_phase ?? r.current_phase) === 'launched' && !r.archived).length
 
   // Narrow the queue rows by church name (case-insensitive substring) or
   // member number (substring match on the stringified number so `19` finds

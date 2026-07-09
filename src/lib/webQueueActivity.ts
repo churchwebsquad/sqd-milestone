@@ -36,10 +36,16 @@ interface RoadmapSniff {
   acf_plan?:             { _meta?: { generated_at?: string } }
   site_strategy?:        { _meta?: { generated_at?: string } }
   page_allocation_plan?: { _meta?: { generated_at?: string } }
+  page_seo_plans?:       { _meta?: { generated_at?: string } }
   page_outlines?:        Record<string, unknown>
   page_drafts?:          Record<string, unknown>
   page_critiques?:       Record<string, unknown>
   critique_rollup?:      { _meta?: { generated_at?: string } }
+  /** Sitemap review lifecycle. `status` moves draft → published →
+   *  partner_reviewed → approved as the AM composes and the partner
+   *  interacts. Surfaced in the queue label so the PM knows whether
+   *  the strategy is with staff, the partner, or approved. */
+  sitemap_review?:       { status?: string; token?: string }
 }
 
 /** Produce the sub-label. Returns null when nothing useful to add
@@ -63,16 +69,29 @@ export function summarizeQueueActivity(
 
   if (phase === 'content') {
     const r = (project.roadmap_state ?? {}) as RoadmapSniff
-    // Walk the cowork pipeline in order and return the deepest stage
-    // that's been touched. Each stage is "done" when its _meta carries
-    // a generated_at, OR (for entries-mode) when at least one entry has
-    // its own _meta. Mirrors computeCoworkDoneSet in StepTimeline.
+    // The sitemap review lifecycle short-circuits the pipeline walk.
+    // Once Step 6 lands and the partner is in the loop, the PM cares
+    // more about "where is the review sitting" than "what cowork
+    // sub-step is next" — the sitemap is the gate between staff work
+    // and partner buy-in.
+    const smStatus = r.sitemap_review?.status
+    if (smStatus === 'published')        return 'Sitemap review · awaiting partner approval'
+    if (smStatus === 'partner_reviewed') return 'Sitemap review · partner feedback in, edits pending'
+    if (smStatus === 'approved')         return 'Sitemap approved · downstream drafting can begin'
+    if (smStatus === 'draft')            return 'Sitemap review · drafting for partner'
+
+    // No sitemap review yet — walk the cowork pipeline in order and
+    // return the deepest stage that's been touched. Each stage is
+    // "done" when its _meta carries a generated_at, OR (for entries-
+    // mode) when at least one entry has its own _meta. Mirrors
+    // computeCoworkDoneSet in StepTimeline.
     const stages: Array<{ key: string; label: string; done: boolean }> = [
       { key: 'stage_1',              label: 'Atomize',         done: !!r.stage_1?._meta?.generated_at },
       { key: 'ministry_model',       label: 'Ministry model',  done: !!r.ministry_model?._meta?.generated_at },
       { key: 'acf_plan',             label: 'ACF plan',        done: !!r.acf_plan?._meta?.generated_at },
       { key: 'site_strategy',        label: 'Site strategy',   done: !!r.site_strategy?._meta?.generated_at },
       { key: 'page_allocation_plan', label: 'Page allocation', done: !!r.page_allocation_plan?._meta?.generated_at },
+      { key: 'page_seo_plans',       label: 'Page SEO',        done: !!r.page_seo_plans?._meta?.generated_at },
       { key: 'page_outlines',        label: 'Page outlines',   done: hasAnyEntry(r.page_outlines) },
       { key: 'page_drafts',          label: 'Page drafts',     done: hasAnyEntry(r.page_drafts) },
       { key: 'page_critiques',       label: 'Page critiques',  done: hasAnyEntry(r.page_critiques) },

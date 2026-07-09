@@ -313,7 +313,7 @@ function RowAndRecovery({
           </button>
           <div className="flex items-center gap-2 mt-0.5 text-[11px] text-purple-gray flex-wrap">
             <span className="font-mono">#{row.member}</span>
-            {row.current_phase && <><span>·</span><span className="uppercase tracking-wider text-[10px] font-bold text-primary-purple">{row.current_phase}</span></>}
+            {(row.effective_phase ?? row.current_phase) && <><span>·</span><span className="uppercase tracking-wider text-[10px] font-bold text-primary-purple">{row.effective_phase ?? row.current_phase}</span></>}
             {isWaiting && <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold uppercase">Waiting feedback</span>}
             {row.hard_deadline && (
               <span className={`ml-1 inline-flex items-center gap-0.5 ${hardDeadlineMissed ? 'text-red-700 font-bold' : 'text-amber-700'}`}>
