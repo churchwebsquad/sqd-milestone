@@ -45,6 +45,7 @@ export default function SitemapReviewPortalPage() {
   const { token } = useParams<{ token: string }>()
   const [review, setReview] = useState<SitemapReview | null>(null)
   const [churchName, setChurchName] = useState<string | null>(null)
+  const [partnerPortalToken, setPartnerPortalToken] = useState<string | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>('loading')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -72,6 +73,7 @@ export default function SitemapReviewPortalPage() {
     if (!res) { setStatus('not-found'); return }
     setReview(res.review)
     setChurchName(res.church_name)
+    setPartnerPortalToken(res.partner_portal_token)
     setStatus('ready')
   }, [token])
 
@@ -183,6 +185,16 @@ export default function SitemapReviewPortalPage() {
 
   return (
     <>
+      {partnerPortalToken && (
+        <div style={{ background: '#EDE9FC', textAlign: 'center', padding: '8px 20px', fontSize: 12.5, borderBottom: '1px solid #CFC9F8' }}>
+          <a
+            href={`/portal/${partnerPortalToken}/hub`}
+            style={{ color: '#513DE5', fontWeight: 600, textDecoration: 'none' }}
+          >
+            ← Back to your review hub
+          </a>
+        </div>
+      )}
       {locked && (
         <div style={{ background: '#3f7d55', color: '#fff', textAlign: 'center', padding: '10px 20px', fontSize: 13, fontWeight: 620, letterSpacing: '.04em', textTransform: 'uppercase' }}>
           ✓ Approved · locked as canonical

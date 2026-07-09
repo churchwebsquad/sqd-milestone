@@ -55,6 +55,11 @@ interface PortalData {
   templates: Record<string, WebContentTemplate>
   cardTemplates: Record<string, WebContentTemplate>
   snippetMap: SnippetMap
+  /** Partner's portal_token from strategy_account_progress. Used to
+   *  render a "Back to your review hub" link at the top of the page.
+   *  Null when the partner row has no portal_token yet (rare — the
+   *  page still renders without the back link). */
+  partnerPortalToken: string | null
 }
 
 interface FieldSuggestion {
@@ -221,6 +226,21 @@ export default function PortalReviewPage() {
         const snippetMap: Record<string, string> = {}
         for (const sn of snippetList) snippetMap[sn.token] = sn.resolvedValue
 
+        // Partner's portal_token — used to render the "Back to your
+        // review hub" link at the top of this page. Fetched via the
+        // project's member; safe to run in parallel with the other
+        // downstream reads but done here to keep the diff small.
+        let partnerPortalToken: string | null = null
+        const memberId = (project as StrategyWebProject).member
+        if (typeof memberId === 'number' && memberId > 0) {
+          const { data: apRow } = await supabase
+            .from('strategy_account_progress')
+            .select('portal_token')
+            .eq('member', memberId)
+            .maybeSingle()
+          partnerPortalToken = (apRow as { portal_token: string | null } | null)?.portal_token ?? null
+        }
+
         if (cancelled) return
         setData({
           review:        review as WebReview,
@@ -230,6 +250,7 @@ export default function PortalReviewPage() {
           templates,
           cardTemplates,
           snippetMap,
+          partnerPortalToken,
         })
 
         // Pick the first page by default
@@ -539,6 +560,19 @@ export default function PortalReviewPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-lavender-tint/40 via-cream to-cream">
+      {/* Back to review hub — renders when the partner has a portal
+       *  token available. Partner-facing only; internal reviews get
+       *  no hub, so the link is hidden for them. */}
+      {!isInternalReview && data.partnerPortalToken && (
+        <div className="bg-lavender-tint text-center py-2 px-5 border-b border-lavender text-[12.5px]">
+          <a
+            href={`/portal/${data.partnerPortalToken}/hub`}
+            className="text-primary-purple font-semibold hover:underline"
+          >
+            ← Back to your review hub
+          </a>
+        </div>
+      )}
       {/* Top bar */}
       <header className="border-b border-lavender bg-white/80 backdrop-blur sticky top-0 z-30">
         <div className="max-w-[1440px] mx-auto px-4 py-3 flex items-center gap-3 flex-wrap">

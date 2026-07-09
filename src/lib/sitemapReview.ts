@@ -2165,15 +2165,16 @@ export async function getApprovedSitemapReview(
 export async function loadSitemapReviewByToken(
   token: string,
   sb: SupabaseClient = defaultSupabase,
-): Promise<{ review: SitemapReview; church_name: string | null; project_id: string } | null> {
+): Promise<{ review: SitemapReview; church_name: string | null; project_id: string; partner_portal_token: string | null } | null> {
   const { data, error } = await sb.rpc('get_sitemap_review_by_token', { p_token: token })
   if (error || !data) return null
   const row = data as {
-    review:      SitemapReview | null
-    church_name: string | null
-    project_id:  string
-    project:     ComposeSourceProject | null
-    pages:       ComposeSourceWebPage[] | null
+    review:               SitemapReview | null
+    church_name:          string | null
+    project_id:           string
+    project:              ComposeSourceProject | null
+    pages:                ComposeSourceWebPage[] | null
+    partner_portal_token: string | null
   }
   if (!row.review) return null
 
@@ -2199,7 +2200,12 @@ export async function loadSitemapReviewByToken(
       })
     : row.review
 
-  return { review: composed, church_name: row.church_name, project_id: row.project_id }
+  return {
+    review: composed,
+    church_name: row.church_name,
+    project_id: row.project_id,
+    partner_portal_token: row.partner_portal_token ?? null,
+  }
 }
 
 /** Partner-side save. Sends the full next review through a
