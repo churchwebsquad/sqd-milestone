@@ -866,41 +866,13 @@ function IngestExternalStrategyBanner({ projectId, state }: {
   if (hasFoundationWork) return null
 
   const prompt =
-`Use the **ingest-external-content-strategy** skill for project_id \`${projectId}\`.
+`Use the **ingest-external-content-strategy** skill.
 
-## Inputs (attached, NOT MCP)
+I'll answer your intake questions (church name, member number) when you ask. I'm attaching the partner's approved content strategy doc — read it as the authority, not as one input among many.
 
-I'm attaching:
-1. The ingest-external-content-strategy **SKILL.md** (contract + output shape).
-2. The partner's **content strategy doc** (Notion export / markdown). Read this as the AUTHORITY — the doc's page list, nav architecture, persona framing, AEO/GEO targets, and executive summary are already decided. You are not re-deriving strategy, you are structuring what's there.
-3. (Optional) The project's approved **strategic_goals** snapshot, if the strategist has attached one. Use it to fill fields the doc doesn't cover (audience, top_3_website_goals, voice_and_tone.one_key_message, vision).
+Follow the skill end-to-end: Step 0 intake → Step 1 project lookup → Step 2 doc walkthrough (pause for my pushback) → Step 3 emit the four foundation artifacts + approved sitemap_review → Step 4 chunked persist → Step 6 self-checks → Step 7 hand off to plan-cross-page-allocation.
 
-## What to produce
-
-Four foundation artifacts + an approved sitemap review, all written to \`roadmap_state\`:
-
-- \`stage_1\` (personas, voice, x_factor, sitemap_signals, topic_coverage_plan)
-- \`ministry_model\` (primary + optional secondary blend, evidence lifted from the doc)
-- \`acf_plan\` (cell_density derived from page purposes, gaps flagged for Phase 2)
-- \`site_strategy\` (full pages[] + nav + persona_journeys + page_elevations)
-- \`sitemap_review\` stamped \`status: 'approved'\`, \`approved_by: 'staff'\` — the doc IS the approved sitemap
-
-Every \`_meta.skill_name\` = \`'ingest-external-content-strategy'\`.
-
-## Read order
-
-1. Skim the whole doc first so you have the full picture before starting extraction.
-2. Executive Summary + Navigation Architecture → drives site_strategy.nav, page_elevations, and the executive_summary field on sitemap_review.
-3. Phase Summary table → your page_count + phase splits.
-4. Each Webpage Outline → one \`pages[]\` entry with slug / name / purpose / audience / funnel / covers_cells.
-5. AEO/GEO section → \`stage_1.seo_aeo_geo_targets\` (step 8 re-runs downstream; this is the seed).
-6. Open Items and Action Items → surface in the strategist handoff note.
-
-## Persist
-
-Use the column-free chunked write pattern from plan-cross-page-allocation §Persist. Chunk keys under \`_chunks\`: \`stage_1\`, \`ministry_model\`, \`acf_plan\`, \`site_strategy\`, \`sitemap_review\`. Wrap the final \`roadmap_state_set\` in \`IS NOT NULL\` so the ~300KB return doesn't blow the MCP output limit.
-
-Walk me through the extraction before persisting — pause on any page or nav decision where the doc is ambiguous.
+The skill is self-contained. Everything you need — the artifact shapes, the Supabase MCP lookup, the column-free persist pattern, the _meta contract — is inline in the SKILL.md.
 `
 
   const copy = async () => {

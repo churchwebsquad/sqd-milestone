@@ -5559,10 +5559,10 @@ Return JSON matching \`CoworkStrategicPillarsResult\` in
   'ingest-external-content-strategy': {
     name:         'ingest-external-content-strategy',
     model:        'anthropic/claude-opus-4-7',
-    version:      '1.0.0',
-    contentHash:  '78e3a5a46f642bc6',
+    version:      '1.1.0',
+    contentHash:  '04e236ac3bb20530',
     references:   [],
-    systemPrompt: `# Ingest External Content Strategy
+    systemPrompt: `# Ingest External Content Strategy — Standalone Cowork Skill
 
 You are consuming an already-decided content strategy document and
 turning it into the four Content Engine artifacts the downstream
@@ -5575,314 +5575,626 @@ apply to a fresh partner. If the doc says something, the doc wins.
 Where the doc is silent, use sensible defaults documented below. Do
 not invent facts about the church — only lift what the doc supplies.
 
-## When to use this skill
+---
 
-Partners who arrive with an existing content strategy document
-authored offline (usually via an AM Notion doc). Signals you'll see
-in the invocation:
-- The strategist attaches a markdown / Notion export.
-- \`strategy_web_projects.crawl_excluded = true\` OR no crawl inventory
-  exists for the project.
-- The AM has not run the Content Engine's steps 1 through 6.
+## Step 0 — Say hello and gather what you need
 
-For partners without a prior strategy doc, use the standard step 1
-through 6 flow instead (atomize / classify-ministry / organize-acf /
-synthesize-strategy / plan-site-strategy).
+The moment this skill is invoked, greet the strategist and ask three
+things. Do not proceed until you have all three:
 
-## Your input
+1. **Church name** — the partner's church name. Used to sanity-check
+   the DB lookup and phrase the walkthrough by name (e.g. "Ready to
+   ingest Evangel Christian Churches?").
+2. **Member number** — the numeric member id (e.g. \`2846\`). This is
+   the primary key that resolves to a \`strategy_web_projects\` row.
+3. **Content strategy doc** — confirm the strategist has attached it
+   to this conversation. If they haven't, ask them to paste or drop
+   it now.
 
-\`\`\`ts
+Your greeting should sound like a Squad teammate, not a bot. Example:
+
+> Hey! I'll turn the AM's content strategy doc into everything the
+> Content Engine needs, so we can jump straight to step 7. Before I
+> start, three quick things:
+>
+> 1. What's the church's name?
+> 2. What's their member number?
+> 3. Have you attached the strategy doc to this chat? (Notion export
+>    / markdown / whatever the AM wrote.)
+
+Once all three land, echo them back for confirmation before running
+the DB lookup in Step 1.
+
+---
+
+## Step 1 — Resolve project_id via Supabase MCP
+
+Given the member number, look up the active web project. This gives
+you the \`project_id\` (uuid) used in every write below.
+
+\`\`\`sql
+SELECT wp.id AS project_id,
+       wp.name,
+       wp.kind,
+       wp.current_phase,
+       wp.archived,
+       ap.church_name,
+       ap.member,
+       (wp.roadmap_state ? 'stage_1')          AS has_stage_1,
+       (wp.roadmap_state ? 'ministry_model')   AS has_ministry_model,
+       (wp.roadmap_state ? 'acf_plan')         AS has_acf_plan,
+       (wp.roadmap_state ? 'site_strategy')    AS has_site_strategy,
+       (wp.roadmap_state ? 'sitemap_review')   AS has_sitemap_review,
+       (wp.roadmap_state ? 'strategic_goals')  AS has_strategic_goals
+FROM strategy_web_projects wp
+LEFT JOIN strategy_account_progress ap ON ap.member = wp.member
+WHERE wp.member = <MEMBER_NUMBER>
+  AND wp.archived = false
+ORDER BY wp.created_at DESC
+LIMIT 5;
+\`\`\`
+
+Interpret the result:
+
+- **0 rows** → the partner has no web project yet. Stop and tell the
+  strategist they need to create the project in the Website Manager
+  before running this skill.
+- **1 row** → confirm \`church_name\` matches what the strategist told
+  you. If it doesn't match, stop and confirm the member number is
+  right — mis-typing the member is the most common failure mode.
+- **2+ rows** → multiple projects for this member. Show the list and
+  ask the strategist which project id to use.
+
+If any of the \`has_*\` flags are \`true\`, warn the strategist:
+
+> This project already has {list of populated artifacts}. Running
+> the skill will replace them with fresh output from the doc. That's
+> usually the right move when the AM's doc supersedes the pipeline's
+> earlier output, but confirm before I overwrite.
+
+Wait for explicit "go" before proceeding.
+
+Also pull the approved strategic_goals if present — it fills fields
+the doc leaves silent. Do NOT need to fetch every field the app
+carries; the pieces this skill needs are:
+
+\`\`\`sql
+SELECT roadmap_state->'strategic_goals' AS strategic_goals
+FROM strategy_web_projects
+WHERE id = '<PROJECT_ID>'::uuid;
+\`\`\`
+
+Inside \`strategic_goals\`, the load-bearing fields are:
+\`goals_and_vision.top_3_website_goals\`, \`goals_and_vision.church_vision\`,
+\`voice_and_tone.one_key_message\`, \`voice_and_tone.tone_descriptors\`,
+\`content_and_allocation.ministries_to_grow\`. Every field carries a
+\`{value, status}\` shape — only trust entries whose \`status ===
+'approved'\`. Ignore drafts.
+
+---
+
+## Step 2 — Read the doc thoroughly, then walk me through your reading
+
+Before persisting anything, read the doc end-to-end and give the
+strategist your read of it. Cover:
+
+- Church identity: how does the doc position this church? (1-2 lines)
+- Central persona: who is the site primarily for? (visitor / parent
+  / member / seeker / other)
+- Ministry model: what's the doc's dominant posture? (family_first /
+  discipleship_pathway / community_first / teaching_first /
+  outreach_first / worship_first — see §4 below for definitions)
+- Phase 1 page list, in order.
+- Phase 2 page list.
+- Nav architecture headline (primary items + dropdowns + footer).
+- Any explicit "carry forward from current site" pages.
+- Any open items / action items the doc calls out.
+
+Pause here. Let the strategist push back on any read before you
+build the artifacts.
+
+---
+
+## Step 3 — What you produce (the four artifacts + the approved review)
+
+Five things get written to \`roadmap_state\`:
+
+1. \`roadmap_state.stage_1\`         — foundation strategy
+2. \`roadmap_state.ministry_model\`  — model classification
+3. \`roadmap_state.acf_plan\`        — audience × category × funnel
+4. \`roadmap_state.site_strategy\`   — page list + nav + journeys
+5. \`roadmap_state.sitemap_review\`  — stamped \`status: 'approved'\`
+
+Every artifact carries an \`_meta\` block per the ArtifactMeta contract
+(see §6 for the exact shape). Fields are described below in the
+order they should appear on the object.
+
+### 3.1 \`stage_1\`
+
+\`\`\`
 {
-  project_id:     string
-  strategy_doc:   string     // full markdown of the AM's strategy doc
-  /** OPTIONAL. When the strategist has already captured approved
-   *  strategic goals in the app (audience, top_3_website_goals,
-   *  voice_and_tone, etc.), they'll be attached. Use them to fill
-   *  fields the doc doesn't explicitly cover. */
-  strategic_goals?: StrategicGoalsSnapshot
-  /** OPTIONAL. When the app already has a stage_1 / ministry_model /
-   *  acf_plan (e.g. a prior partial run), attach so you can preserve
-   *  strategist-authored fields on re-run. Absent = fresh run. */
-  existing_artifacts?: {
-    stage_1?:        CoworkStage1
-    ministry_model?: CoworkMinistryModel
-    acf_plan?:       CoworkAcfPlan
-    site_strategy?:  CoworkSiteStrategy
+  audience:                {}                   // freeform object; describe the doc's positioning
+  personas: [
+    {
+      name:               string
+      age_range?:         string
+      barrier:            string
+      need:               string
+      voice_resonance:    string                // what tone / register lands for them
+      primary_pages?:     string[]              // page slugs this persona should be served on
+    },
+    ...
+  ]
+  x_factor:                string               // 1-2 sentences — what makes this church distinct
+  voice_exemplars:         string[]             // verbatim phrases the doc endorses
+  voice_anti_exemplars:    string[]             // verbatim phrases the doc says to avoid
+  voice_characteristics:   string[]             // tone_descriptors expanded
+  project_goals:           string[]             // from approved strategic_goals.top_3_website_goals
+  vision_statement:        string               // verbatim from approved strategic_goals; else ''
+  key_message:             string               // verbatim from approved one_key_message; else the doc's positioning line
+  sitemap_signals:         string[]             // 3-6 partner-stated needs driving sitemap shape
+  topic_coverage_plan:     Record<string,string> // topic_key → page slug
+  total_page_count:        number               // count of unique pages in the doc
+  existing_pages_to_carry_forward: string[]     // slugs
+  seo_aeo_geo_targets:     {                    // seed for step 8 downstream
+    primary_keywords:      Array<{ query: string; page_slug: string }>
+    secondary_keywords:    Array<{ query: string; page_slug: string }>
+    long_tail_queries:     Array<{ query: string; page_slug: string }>
+    local_terms:           string[]             // city, state, neighborhoods, service areas
+    aeo_targets?:          Array<{ question: string; page_slug: string }>
   }
+  sources_used:            ['external_content_strategy_doc']
+  _meta:                   ArtifactMeta
 }
 \`\`\`
 
-## What you produce
+**Persona extraction rules.** Explicit personas win — if the doc
+names a "first-time visitor" persona, that's the name. When the doc
+implies personas without naming them, extract from context: a page
+titled "Plan a Visit" targeted at "the nervous newcomer" produces a
+\`first-time visitor\` persona; a "Family Ministries" page targeted at
+"the parent wondering if their kids have a place" produces a
+\`parent\` persona. Emit at least ONE persona. Zero personas = the
+skill has failed to read the doc.
 
-Four artifacts written to \`roadmap_state\`, PLUS a \`sitemap_review\`
-row stamped \`status: 'approved'\`. Every artifact carries its own
-\`_meta\` block per the ArtifactMeta contract.
+**Voice exemplar extraction.** Anything the doc quotes as "confirmed
+ECC language" / "confirmed language" / puts in double quotes as a
+brand phrase is an exemplar. Lift verbatim.
 
-### 1. stage_1 (roadmap_state.stage_1)
+**seo_aeo_geo_targets.** Nearly every strategy doc has an AEO/GEO or
+SEO Strategy section. Structure per the schema above so step 8 can
+reshape into per-page WebPageSeo plans without re-analysis.
 
-Extract from the doc:
-- **personas**: every persona the doc names (implicit or explicit).
-  For each: \`name\`, \`barrier\`, \`need\`, \`voice_resonance\`,
-  \`primary_pages\`. If the doc is oriented around one central persona
-  (e.g. "the first-time visitor"), emit that as the primary persona;
-  add secondaries if the doc talks about parents, seekers, families,
-  members, etc. distinctly.
-- **audience**: the strategist's stated audience description. Free
-  form, but should reflect the doc's positioning.
-- **x_factor**: 1-2 sentence distillation of what makes this church
-  distinct, per the doc. Usually lives in an Executive Summary or
-  Church Identity section.
-- **voice_exemplars**: verbatim phrases the doc endorses ("Love God.
-  Love people. Make disciples.", "Belong. Believe. Become.",
-  "Disciples Serve."). Pull them straight from the doc.
-- **voice_anti_exemplars**: phrases the doc calls out as OUT of
-  voice, if any (usually in a "avoid" or "not this" section).
-- **voice_characteristics**: tone descriptors the doc lists.
-- **project_goals**: from \`strategic_goals.top_3_website_goals\` if
-  attached, else empty.
-- **vision_statement**: verbatim from
-  \`strategic_goals.goals_and_vision.church_vision\` if attached, else
-  empty.
-- **key_message**: verbatim from
-  \`strategic_goals.voice_and_tone.one_key_message\` if attached, else
-  the doc's one-sentence positioning line.
-- **sitemap_signals**: partner-stated needs that drove sitemap shape
-  (e.g. Evangel's "make it too easy to watch from home is broken" is
-  a signal that led to demoting the Watch page). Lift 3 to 6 signals
-  from the doc.
-- **topic_coverage_plan**: map every major topic named in the doc to
-  the page slug that carries it (e.g. \`{ "kids_ministry": "family",
-  "baptism": "baptism", "give": "give" }\`).
-- **total_page_count**: count of unique pages in the doc across all
-  phases.
-- **existing_pages_to_carry_forward**: pages the doc explicitly says
-  are being kept from the current site.
-- **seo_aeo_geo_targets**: lift the doc's AEO/GEO section verbatim
-  into a structured map. Primary keywords, secondary keywords, long-
-  tail queries, page targets. Step 8 (plan-page-seo) will re-shape
-  these into per-page plans downstream.
-- **sources_used**: \`['external_content_strategy_doc']\`.
+### 3.2 \`ministry_model\`
 
-### 2. ministry_model (roadmap_state.ministry_model)
+Classify against the closed enum:
 
-The doc's ministries section names each ministry with its own
-posture. Classify against the standard MinistryModel enum:
-- **family_first** — kids/teens/families are the hero, discipleship
-  pathway centers on family life
+- **family_first** — kids/teens/families are the hero; discipleship
+  pathway centers on family life; family ministries surface at the
+  top of nav.
 - **discipleship_pathway** — Grow Tracks / classes / Bible study are
-  the through-line
-- **community_first** — Life Groups and community are the primary
-  invitation
-- **teaching_first** — Sunday teaching / sermon archive is the anchor
+  the through-line; ownership + formation is the story.
+- **community_first** — Life Groups + relational community as the
+  primary invitation.
+- **teaching_first** — Sunday teaching / sermon archive is the
+  anchor; the pulpit is the draw.
 - **outreach_first** — missions / justice / neighborhood presence is
-  the hero
-- **worship_first** — Sunday worship experience is the anchor
+  the hero.
+- **worship_first** — Sunday worship experience is the anchor.
 
 Emit:
+
 \`\`\`
 {
-  model:            <primary>          // best-fit
-  confidence:       0.8-1.0            // authored strategy = high confidence
-  secondary_blend:  <secondary | null> // if the doc gives near-equal weight to a second
-  blend_notes:      string | null      // 1-2 sentences on how the blend reads
-  evidence:         string[]           // 3-5 verbatim phrases from the doc that justify
-  rationale:        string             // 2-3 sentences explaining the pick
-  cta_default:      string             // the doc's dominant CTA phrasing
-                                       // (e.g. "Plan a Visit", "Find your people")
-  _meta: ArtifactMeta
+  model:            <primary>
+  confidence:       0.85-1.0              // authored strategy = high confidence
+  secondary_blend:  <secondary> | null    // when doc gives near-equal weight to a second model
+  blend_notes:      string | null         // 1-2 sentences on the blend
+  evidence:         string[]              // 3-5 verbatim phrases from the doc justifying the classification
+  rationale:        string                // 2-3 sentences explaining the pick
+  cta_default:      string                // doc's dominant CTA (e.g. "Plan a Visit", "Find your people")
+  _meta:            ArtifactMeta
 }
 \`\`\`
 
-### 3. acf_plan (roadmap_state.acf_plan)
+### 3.3 \`acf_plan\`
 
-The Audience × Category × Funnel plan. For an ingested doc you're
-emitting a compact form:
+Compact form. For an ingested doc you don't emit ACF module configs
+(those come from web_content_templates); you emit the density map
+and gap list step 7 uses to route allocation.
+
 \`\`\`
 {
-  modules:    []           // no ACF modules from a doc (they come from web_content_templates)
-  taxonomies: []
-  rationale:  string       // 2-3 sentences on how the doc structures audience/funnel
-  cell_density: Record<\`\${audience}:\${category}:\${funnel}\`, number>
-                            // populate from the doc's page purposes
-  coverage_gaps: string[]  // gaps the doc explicitly flags as "Phase 2" or "open"
-  _meta: ArtifactMeta
+  modules:       []                            // deliberately empty — no analyzer-derived modules
+  taxonomies:    []
+  rationale:     string                        // 2-3 sentences on how the doc structures audience/funnel
+  cell_density:  Record<\`\${audience}:\${category}:\${funnel}\`, number>
+  coverage_gaps: string[]                      // gaps the doc explicitly flags as Phase 2 or open
+  _meta:         ArtifactMeta
 }
 \`\`\`
 
-Cell density: for every page in the doc, credit +1 to each cell the
-page's purpose implies. Purposes are usually phrased "give visitors
-a taste" (audience: visitor, funnel: discover), "help someone ready
-to take the step" (audience: attender, funnel: commit), etc.
+**Cell density.** For every page in the doc, credit +1 to the cells
+its purpose implies. Vocab:
 
-### 4. site_strategy (roadmap_state.site_strategy)
+- Audience: \`visitor\` | \`attender\` | \`member\` | \`parent\` | \`general\`
+- Category: \`invitation\` | \`story\` | \`belief\` | \`ministry\` | \`care\` |
+  \`generosity\` | \`teaching\` | \`event\` | \`admin\`
+- Funnel: \`discover\` | \`consider\` | \`commit\`
 
-The load-bearing artifact. This is what step 7
-(plan-cross-page-allocation) reads. Emit the full CoworkSiteStrategy
-shape from \`src/types/coworkBundle.ts\`:
+The doc's Strategic Purpose lines are your best signal. E.g. "Give
+visitors a taste of Dr. Hines' teaching that makes them want to show
+up Sunday" = \`visitor:teaching:discover\`.
 
-- **pages[]**: one entry per page in the doc, across all phases.
-  Extract per-page:
-  - \`slug\` (from the doc's URL, e.g. \`/plan-a-visit\` → \`plan-a-visit\`)
-  - \`name\` (from the doc's page heading)
-  - \`purpose\` (from the doc's "Strategic Purpose" line, ≤180 chars)
-  - \`primary_audience\` (from the doc's inferred/stated persona)
-  - \`primary_funnel\` (from the doc's phrasing — 'discover' for
-    hero/awareness pages, 'consider' for about/beliefs, 'commit' for
-    Plan a Visit / Baptism / Give / Grow Tracks)
-  - \`covers_cells\` (populated from cell_density above)
-  - \`nav_order\` (from Phase 1 nav order in the doc, or null for pages
-    not in primary nav)
-  - \`nav_strategy\` ('primary' | 'secondary' | 'footer' |
-    'contextual_only' per the doc's nav decisions)
-  - \`has_children\` (true when the doc names sub-pages, e.g. About
-    with Our Story / Beliefs / Meet Our Team)
+**Coverage gaps.** Phase 2 items on the doc's Phase Summary table
+belong here as gaps ("Meet Our Team — Phase 2, awaits Genna's
+titles", "Baptism — Phase 2", etc.).
 
-- **nav**: reproduce the doc's Navigation Architecture verbatim.
-  - \`primary\`: Phase 1 items as \`[{slug, children?}]\`
-  - \`secondary\` / \`secondary_label\`: any off-canvas / utility items
-    the doc names
-  - \`footer\` (GROUPED shape): parse the doc's Footer section into
-    \`primary_links\`, \`explore\`, \`legal\`, \`social\`, \`parked\` (Phase 2
-    items with a "reason: 'phase 2'" tag)
-  - \`cta_only\`: sticky-CTA links (e.g. Give)
+### 3.4 \`site_strategy\`
 
-- **nav_change_level**: \`full_rewrite\` when the doc explicitly changes
-  the current nav (usually the case); \`partial\` if it preserves the
-  crawled spine with tweaks; \`preserve\` if the doc says "keep current
-  nav". The doc's "why these decisions" narrative usually names this
-  directly.
+The load-bearing artifact. Step 7 reads this to route allocation.
 
-- **persona_journeys[]**: for each persona from stage_1, emit the
-  journey the doc implies. The doc's page purpose statements usually
-  chain naturally — e.g. "first-time visitor" journey walks Homepage
-  → Plan a Visit → About → Family Ministries → Give. End every
-  journey on a \`commit\`-funnel page.
+\`\`\`
+{
+  pages: Array<{
+    slug:              string                  // kebab-case (from doc's URL, e.g. '/plan-a-visit' → 'plan-a-visit')
+    name:              string                  // doc's page heading
+    purpose:           string                  // doc's Strategic Purpose, ≤180 chars
+    primary_audience:  string                  // persona name from stage_1 OR 'general'
+    primary_funnel:    'discover' | 'consider' | 'commit'
+    covers_cells: Array<{ audience: string; category: string; funnel: string }>
+    nav_order:         number | null           // Phase 1 primary nav order; null for pages not in primary nav
+    nav_strategy:      'primary' | 'secondary' | 'footer' | 'contextual_only'
+    has_children:      boolean                 // true when doc names sub-pages (e.g. About with Beliefs + Meet Our Team + Our Story)
+    phase:             1 | 2                   // Phase 1 vs Phase 2 from doc's Phase Summary
+    carryover_slug?:   string                  // when the doc names this as carried from current site
+  }>
 
-- **pages_considered_dropped[]**: pages the doc explicitly says were
-  considered and rejected, or moved to Phase 2 with a "we thought
-  about this but…" rationale.
+  nav: {
+    primary:   Array<{ slug: string; children?: string[] }>
+    secondary?: Array<{ slug: string; children?: string[] }>
+    secondary_label?: string
+    footer: {
+      primary_links?: string[]
+      explore?:       string[]
+      legal?:         string[]
+      social?:        string[]                  // platform names: 'facebook', 'instagram', 'youtube', 'tiktok', 'x', 'linkedin'
+      parked?:        Array<{ label: string; reason: string }>
+      contact_block?: boolean                   // default true
+      service_times?: boolean                   // default true
+    }
+    cta_only: string[]                          // sticky-CTA links (e.g. Give)
+  }
 
-- **report**: page_count, nav_primary_count, pages_carried_forward,
-  coverage_gaps_addressed, coverage_gaps_remaining. The doc's
-  "Phase Summary" table drives coverage_gaps_remaining (Phase 2
-  items are addressed later).
+  nav_change_level: 'full_rewrite' | 'partial' | 'tweaks' | 'preserve'
+  // full_rewrite when doc explicitly changes current nav (default for AM-authored strategy docs)
+  // partial when doc preserves current spine with tweaks
+  // preserve when doc says "keep as-is"
 
-- **siteflow**: \`homepage_arc\` (the doc's homepage section list,
-  ordered), \`narrative_thread\` (2-3 sentences on how the site reads
-  top-to-bottom). Both usually visible in the doc's Homepage outline.
+  siteflow: {
+    homepage_arc:     string[]                  // ordered phrases describing what homepage DOES
+    narrative_thread: string                    // 2-3 sentences on how site reads top-to-bottom
+  }
 
-- **page_elevations[]**: for every ministry / topic the doc flags as
-  strategic (e.g. Evangel's "Family Ministries" pulled forward, or
-  Watch demoted), emit an entry with \`topic\`, \`importance\`, and
-  \`rationale\`. Read the doc's "Why these decisions" or "Strategic
-  Purpose" lines for the rationale.
+  persona_journeys: Array<{
+    persona_name:  string                       // exact name from stage_1
+    entry_points:  string[]                     // 1-3 slugs they're most likely to land on
+    journey_arc:   string[]                     // ordered slugs, ends on a commit-funnel page
+    barriers_addressed: string[]
+  }>
 
-- **voice_register_per_page_type**: register per page family (visitor
-  pages read warmer / more practical, doctrinal pages read more
-  measured, ministry pages read invitational). Lift from the doc's
-  tone directives per-page.
+  page_elevations: Array<{
+    topic:      string                          // e.g. 'Family Ministries', 'Watch demoted'
+    importance: 'core' | 'supporting' | 'optional'
+    rationale:  string                          // lift from doc's Why-these-decisions narrative
+  }>
 
-- **key_info_to_highlight**: bullet-list of "what MUST appear where"
-  from the doc's action items and cross-page notes (e.g. Evangel's
-  "service times must appear on every page's footer" / "kids check-in
-  process is a required section on Family Ministries").
+  pages_considered_dropped: Array<{ slug: string; reason: string }>
 
-- **rationale**: 3-5 sentence summary of why the sitemap looks this
-  way, lifted from the doc's executive summary.
+  key_info_to_highlight: Array<{ what: string; where: string }>
 
-### 5. sitemap_review (roadmap_state.sitemap_review, status='approved')
+  voice_register_per_page_type: Record<string, string>
+  // e.g. { hero: 'warm, practical, no jargon',
+  //        doctrinal: 'measured, honest',
+  //        ministry: 'invitational' }
 
-The doc IS the approved sitemap review. Emit a full SitemapReview
-per \`src/lib/sitemapReview.ts\` with:
-- \`status: 'approved'\`
-- \`approved_by: 'staff'\`
-- \`approved_at\`: now
-- \`pages[]\`: same as site_strategy.pages with \`purpose\`,
-  \`sitemap_tag\` derived from nav_strategy, \`is_nav_parent_only\`
-  when the doc lists a dropdown label with no destination
-- \`nav_layout\`: derived from site_strategy.nav
-- \`footer_info\`: extract the doc's footer content (service times,
-  office hours, address, socials) into the FooterInfo shape
-- \`intro.headline\`: "<Church Name> Website Content Strategy"
-- \`intro.body\`: 2-3 sentence pull from the doc's executive summary
-- \`executive_summary\`: verbatim from the doc's Executive Summary block
-- \`navigation_strategy\`: verbatim from the doc's "Why these decisions"
-  narrative
+  report: {
+    page_count:              number
+    nav_primary_count:       number
+    pages_carried_forward:   string[]
+    coverage_gaps_addressed: string[]
+    coverage_gaps_remaining: string[]           // Phase 2 items belong here
+  }
 
-Every page purpose the strategist could edit later must be present so
-the review reads correctly when opened for reference.
+  rationale: string                             // 3-5 sentence summary from doc's executive summary
+  _meta:     ArtifactMeta
+}
+\`\`\`
 
-## Persist — column-free chunked write
+### 3.5 \`sitemap_review\`
 
-Same rule as plan-site-strategy: use the four-step chunked scratch
-pattern so no single SQL statement exceeds ~8KB. Wrap the final
-\`roadmap_state_set\` in \`IS NOT NULL\` to swallow the ~300KB return
-payload. See \`plan-cross-page-allocation/SKILL.md\` §Persist for the
-canonical template.
+The doc IS the approved sitemap review. Emit a full review with the
+partner-facing fields populated so the SitemapReviewEditor opens
+cleanly if staff wants to re-view:
 
-Chunk keys to stage under \`_chunks\`:
-- \`stage_1\`, \`ministry_model\`, \`acf_plan\`, \`site_strategy\`,
-  \`sitemap_review\`
+\`\`\`
+{
+  schema_version: 1
+  token:          <cryptographically random opaque id, 32 chars kebab-case>
+  status:         'approved'
+  created_at:     <now ISO>
+  updated_at:     <now ISO>
+  published_at:   <now ISO>
+  approved_at:    <now ISO>
+  approved_by:    'staff'
+  intro: {
+    headline: '<Church Name> Website Content Strategy'
+    body:     '<2-3 sentence pull from doc executive summary>'
+  }
+  executive_summary:   <verbatim from doc Executive Summary block>
+  navigation_strategy: <verbatim from doc's "Why these decisions" narrative>
+  pages: Array<{
+    slug:             string                    // same slugs as site_strategy.pages
+    name:             string
+    purpose:          string
+    sitemap_tag:      'hub' | 'ministry' | 'churchwide' | 'foundation' | 'utility'
+                      // hub for primary-nav destinations, ministry for Ministries dropdown children,
+                      // churchwide for About/Give/Messages, foundation for Homepage/Plan a Visit,
+                      // utility for footer-only Baptism/Events
+    is_nav_parent_only?: boolean                // true when doc lists a dropdown label with no destination
+                                                //   of its own (e.g. Ministries, Connect)
+    is_phase_2?:      boolean                   // true when doc puts this in Phase 2
+  }>
+  nav_layout: {
+    primary:          Array<{ slug: string; label: string; children?: Array<{ slug: string; label: string }> }>
+    secondary?:       string[]
+    footer?:          string[]
+  }
+  footer_info: {
+    address?:      string
+    phone?:        string
+    email?:        string
+    service_times?: string                      // e.g. "Sundays at 10:15am"
+    office_hours?: string
+    socials?:      Array<{ platform: string; url?: string }>
+    search?:       boolean
+  }
+  persona_postures: [] // (staff can author later; can be empty on ingest)
+  content_migrations: []
+  partner_edit_requests: []
+  edit_history: [
+    { at: <now ISO>, actor: 'staff', kind: 'ingest', note: 'Ingested from external content strategy doc via ingest-external-content-strategy skill v1.1.0' }
+  ]
+}
+\`\`\`
 
-Assemble each into its own \`roadmap_state.<key>\` in the final commit.
+**Sitemap tag heuristic** — sort each page one of:
 
-After the assemble step, sanity-check the shape with:
+- \`foundation\` — Homepage, Plan a Visit (the visitor-entry pages)
+- \`churchwide\` — About, Give, Messages (site-wide identity/action)
+- \`ministry\` — Family Ministries, ECC Kids, ECC Teens, Life Groups,
+  Grow Tracks, Team ECC, Celebrate Recovery, ECC Women, ECC Men
+- \`utility\` — Baptism, Events, What We Believe, Meet Our Team,
+  Sermon Blog (footer or standalone destinations)
+- \`hub\` — any dropdown parent that has children but no destination
+  of its own (Ministries, Connect, sometimes About)
+
+---
+
+## Step 4 — Persist (column-free chunked write)
+
+Two failure modes to avoid every time:
+
+**(A) Output-limit failure** — a naked \`SELECT roadmap_state_set(...)\`
+returns the full ~300 KB roadmap_state on success and blows the MCP
+output limit. **Every \`roadmap_state_set\` call MUST be wrapped in
+\`IS NOT NULL\`.**
+
+**(B) Input-size failure** — emitting one giant \`execute_sql\` with
+all chunks inline as \`VALUES\` exceeds Claude Desktop's output token
+cap (~8k tokens, ~32 KB of SQL). Use the column-free scratchpad
+pattern below — each individual statement stays under 8 KB SQL.
+
+For each of the five artifacts, walk this four-step shape:
+
+### Step A — clear prior scratch (idempotent)
+
+\`\`\`sql
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks,<ARTIFACT>}'
+WHERE id = '<PROJECT_ID>'::uuid;
+\`\`\`
+
+\`<ARTIFACT>\` ∈ \`{stage_1, ministry_model, acf_plan, site_strategy, sitemap_review}\`.
+
+### Step B — stage each chunk (one call per chunk index)
+
+Base64-encode your assembled JSON locally so quotes / newlines don't
+corrupt the SQL literal. Split into chunks of ≤6 KB each so the
+surrounding statement stays comfortably under 8 KB total. Write each
+chunk to its own slot:
+
+\`\`\`sql
+UPDATE strategy_web_projects
+SET roadmap_state = jsonb_set(
+  COALESCE(roadmap_state, '{}'::jsonb),
+  ARRAY['_chunks','<ARTIFACT>','<INDEX>'],
+  to_jsonb('<BASE64-CHUNK-TEXT>'::text)
+)
+WHERE id = '<PROJECT_ID>'::uuid;
+\`\`\`
+
+Each call is idempotent — safe to re-run if a socket drops mid-write.
+
+### Step C — assemble + verify + write + return BOOLEAN
+
+One final call per artifact (~1 KB SQL each):
+
+\`\`\`sql
+WITH chunks AS (
+  SELECT (e.key)::int AS ix, e.value AS b64
+  FROM strategy_web_projects p,
+       jsonb_each_text(p.roadmap_state -> '_chunks' -> '<ARTIFACT>') AS e
+  WHERE p.id = '<PROJECT_ID>'::uuid
+),
+body_cte AS (
+  SELECT convert_from(decode(string_agg(b64, '' ORDER BY ix), 'base64'), 'UTF8') AS body
+  FROM chunks
+)
+SELECT
+  CASE WHEN md5(body) = '<LOCAL-MD5>'
+    THEN (roadmap_state_set('<PROJECT_ID>'::uuid, ARRAY['<ARTIFACT>'], body::jsonb) IS NOT NULL)
+    ELSE FALSE
+  END AS committed
+FROM body_cte;
+\`\`\`
+
+Return value:
+- \`true\` → artifact wrote successfully.
+- \`false\` → md5 mismatch; the assembled body doesn't match what you
+  intended. Investigate before rerunning.
+
+The \`IS NOT NULL\` wrapper collapses the ~300 KB \`roadmap_state_set\`
+return payload into a single boolean so the response fits the MCP
+output limit.
+
+### Step D — cleanup scratch
+
+Once all five artifacts have committed successfully:
+
+\`\`\`sql
+UPDATE strategy_web_projects
+SET roadmap_state = roadmap_state #- '{_chunks}',
+    updated_at = now()
+WHERE id = '<PROJECT_ID>'::uuid;
+\`\`\`
+
+Removes the temporary \`_chunks\` scratchpad. Wait to run this until
+EVERY artifact is committed — the scratch is what lets you resume
+mid-flight if something disconnects.
+
+### Verification pass
+
+After Step D:
 
 \`\`\`sql
 SELECT
-  (roadmap_state->'stage_1'       ? '_meta') AS stage_1_ok,
-  (roadmap_state->'ministry_model'? '_meta') AS ministry_ok,
-  (roadmap_state->'acf_plan'      ? '_meta') AS acf_ok,
-  (roadmap_state->'site_strategy' ? '_meta') AS strategy_ok,
-  (roadmap_state->'sitemap_review'->>'status') AS sm_status
+  (roadmap_state->'stage_1'        ? '_meta')                AS stage_1_ok,
+  (roadmap_state->'ministry_model' ? '_meta')                AS ministry_ok,
+  (roadmap_state->'acf_plan'       ? '_meta')                AS acf_ok,
+  (roadmap_state->'site_strategy'  ? '_meta')                AS strategy_ok,
+  (roadmap_state->'sitemap_review'->>'status')               AS sm_status,
+  jsonb_array_length(COALESCE(roadmap_state->'site_strategy'->'pages','[]'::jsonb)) AS page_count,
+  jsonb_array_length(COALESCE(roadmap_state->'stage_1'->'personas','[]'::jsonb))    AS persona_count
 FROM strategy_web_projects
-WHERE id = '{{project_id}}'::uuid;
+WHERE id = '<PROJECT_ID>'::uuid;
 \`\`\`
 
-Expected: every \`_ok\` true, \`sm_status = 'approved'\`.
+Expected: every \`_ok\` is \`true\`, \`sm_status = 'approved'\`,
+\`page_count\` matches the doc's Phase 1 + Phase 2 total, and
+\`persona_count ≥ 1\`.
 
-## Self-checks before you persist
+If any check fails, DO NOT tell the strategist you're done. Fix
+before signing off.
 
-Before writing anything, verify:
+---
 
-1. **Every page in the doc has a matching entry in
-   \`site_strategy.pages[]\`.** Compare your page slugs to the doc's
-   URL list (Phase 1 + Phase 2). Missing pages = incomplete ingest.
-2. **Nav shape matches the doc's Navigation Architecture section
-   verbatim.** Same primary items in same order. Same dropdown
-   groupings. Same footer items.
+## Step 5 — \`_meta\` block (identical on every artifact)
+
+\`\`\`
+{
+  bundle_version: 'v1'                                     // stable
+  skill_name:     'ingest-external-content-strategy'
+  skill_version:  '1.1.0'
+  generated_at:   <ISO timestamp, same on all five artifacts so re-run detection works>
+  model:          'claude-opus-4-7'                        // or whatever model actually ran
+  prompt_hash:    <optional, first 16 hex chars of sha256(system_prompt); can omit>
+  usage:          { input_tokens: number, output_tokens: number } // optional but preferred
+}
+\`\`\`
+
+Downstream tools inspect \`skill_name\` to know the provenance — the
+Content Engine step display, the Dev Handoff panel, and the
+sitemap-review composer all look for this so they show the right
+badges + affordances.
+
+---
+
+## Step 6 — Self-checks BEFORE persisting
+
+Verify before writing anything:
+
+1. **Every page named in the doc is in \`site_strategy.pages[]\`.**
+   Cross-reference against the doc's URL list. Missing pages =
+   incomplete ingest.
+2. **Nav shape matches the doc's Navigation Architecture verbatim.**
+   Same primary items in same order. Same dropdown groupings. Same
+   footer items.
 3. **Persona journeys terminate at a \`commit\`-funnel page.** No
    dead-end journeys.
-4. **\`sitemap_review.status === 'approved'\`.** The whole point of
-   this skill is to short-circuit steps 1-6, so this stamp must land
-   or the app will still treat the project as awaiting review.
+4. **\`sitemap_review.status === 'approved'\`.** The whole point is
+   to short-circuit steps 1-6, so this stamp must land or the app
+   will still gate step 7.
 5. **\`_meta.skill_name === 'ingest-external-content-strategy'\` on
-   every artifact.** Downstream tools inspect this to know the
-   provenance — e.g. the "Compute now" button on Dev Handoff, the
-   Content Engine step display.
+   every artifact.**
 6. **\`_meta.generated_at\`** carries the same ISO timestamp across
-   all four artifacts so re-run detection works cleanly.
+   all five artifacts.
 7. **No hallucinated pages, personas, or ministries.** Everything
    maps back to the doc. When the doc is silent, leave the field
    empty (or use a defensible default named in this SKILL) rather
    than invent.
+8. **At least one persona in \`stage_1.personas\`.** Zero personas
+   almost always means the doc's implicit personas weren't lifted.
 
-## Handoff notes for step 7
+---
 
-After you commit, tell the strategist:
+## Step 7 — Hand off to plan-cross-page-allocation
+
+After committing everything, tell the strategist:
 
 > Content strategy ingested. Steps 1-6 are marked done; the sitemap
 > is approved as canonical. Step 7 (plan-cross-page-allocation) is
-> ready — but note this partner has an external content collection
-> and no crawl inventory. Step 7 will need to rely on the doc's page
-> purposes + partner-supplied assets rather than atoms + facts pools.
-> If a content_collection session exists for this project, its
-> supplemental submissions are still available; otherwise the AM
-> should provide any partner-supplied copy separately before step 7
-> runs.
+> the immediate next action.
+>
+> Note this partner has an external content collection and no crawl
+> inventory. Step 7 will need to rely on the doc's page purposes +
+> partner-supplied assets rather than atoms + facts pools. If a
+> content_collection session exists, its supplemental submissions
+> are still available; otherwise the AM should provide any partner-
+> supplied copy separately before step 7 runs.
+>
+> To kick off step 7, open the Content Engine tab in the Website
+> Manager and hit the "Decide what goes on which page" step's
+> starter prompt — it'll pull the plan-cross-page-allocation skill
+> and the doc-derived site_strategy in as inputs.
 
-That's the load-bearing note the plan-cross-page-allocation skill
-will read in its \`prior_handoff_notes\`.
+That paragraph is the handoff plan-cross-page-allocation reads out
+of \`prior_handoff_notes\`, so keep it accurate.
+
+---
+
+## Common failure modes + recovery
+
+- **You lost the strategist mid-conversation.** Resume by re-reading
+  the doc and asking "want me to pick up where I left off?" — the
+  scratch chunks under \`roadmap_state._chunks\` survive so you can
+  finish the assemble step without redoing all the extraction.
+- **md5 mismatch in Step C.** The assembled body doesn't match what
+  you thought you wrote. Re-emit the chunks and try again.
+- **\`SELECT roadmap_state_set(...)\` returned an error about output
+  size.** You forgot the \`IS NOT NULL\` wrapper. Re-run the
+  wrapped version.
+- **\`page_count\` doesn't match the doc.** You dropped or duplicated
+  a page during extraction. Re-read the doc's Phase Summary table
+  and rebuild \`site_strategy.pages[]\`.
+- **\`persona_count == 0\`.** You didn't extract personas from the
+  doc's implicit framing. Re-read the "Strategic Purpose" and hero
+  direction on each page — the persona voice is baked into them.
+- **Existing artifacts in the way.** You warned the strategist in
+  Step 1 that overwriting was going to happen; they said go. The
+  \`roadmap_state_set\` call swaps the artifact atomically, so the
+  old value goes away as the new one lands. No prior cleanup needed
+  beyond the strategist's confirmation.
 `,
   },
   'organize-acf': {
