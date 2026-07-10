@@ -20,17 +20,26 @@ import {
   composeSitemapReview,
   loadSitemapReview,
   publishReview,
+  saveSiteStrategy,
   saveSitemapReview,
   type ContentMigration,
   type PersonaPosture,
-  type ReviewPage,
+  type ReviewPageAnnotation,
   type SitemapReview,
   type SitemapReviewNavPresentation,
+  type SiteStrategyBlob,
 } from '../../../lib/sitemapReview'
 import { buildPortalUrl } from '../../../lib/portalUrl'
 import { uploadAttachment } from '../../../lib/attachmentUpload'
 import { PartnerEditRequestsInbox } from './PartnerEditRequestsInbox'
 import SitemapPartnerViewV2 from './SitemapPartnerViewV2'
+
+/** Slugs + names lifted from site_strategy for use by the editor's
+ *  page picker widgets (persona key pages, tier descriptions, topnav
+ *  item slug, header CTA slug). Kept minimal so the widgets keep
+ *  working without dragging the whole site_strategy blob through
+ *  every prop chain. */
+interface StrategyPageOption { slug: string; name: string; purpose: string }
 
 interface Props {
   projectId: string
@@ -49,6 +58,7 @@ export function SitemapReviewEditor({
   projectId, churchName, onChange, embed = false, onClose,
 }: Props) {
   const [review, setReview] = useState<SitemapReview | null>(null)
+  const [siteStrategy, setSiteStrategy] = useState<SiteStrategyBlob | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -57,15 +67,11 @@ export function SitemapReviewEditor({
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
-    // Always recompose against the latest project state so older
-    // reviews get missing defaults (executive_summary, navigation_
-    // strategy, footer_info, sitemap_tag per page, seeded why_cards)
-    // filled in without wiping anything the strategist authored.
-    // composeSitemapReview preserves every existing field it finds;
-    // the caller passes existing through so authored purposes,
-    // intro copy, footer overrides, presentation blocks, and
-    // partner_edit_requests round-trip.
-    const [existing, { data: proj }, { data: pgs }] = await Promise.all([
+    // Recompose against the latest project state so newer reviews
+    // pick up missing defaults (executive_summary, navigation_
+    // strategy, footer_info, seeded why_cards) without wiping
+    // anything the strategist authored.
+    const [existing, { data: proj }] = await Promise.all([
       loadSitemapReview(supabase, projectId),
       supabase.from('strategy_web_projects')
         .select([
@@ -75,36 +81,19 @@ export function SitemapReviewEditor({
           'social_tiktok_url, social_twitter_url, social_linkedin_url',
         ].join(', '))
         .eq('id', projectId).maybeSingle(),
-      supabase.from('web_pages')
-        .select('id, slug, name, phase, sort_order, nav_group_label, user_journey_step')
-        .eq('web_project_id', projectId)
-        .eq('archived', false)
-        .order('sort_order', { ascending: true }),
     ])
     const composed = composeSitemapReview({
       project:      (proj ?? { id: projectId }) as never,
-      pages:        (pgs ?? []) as never,
       existing,
     })
-    // AUTO-PERSIST on any drift. Three triggers:
-    //   1. Watermark advanced — cowork's sitemap step reran and this
-    //      compose call rehydrated auto-fields (pages, nav, migrations,
-    //      etc.) from strategy. Persist so partners on
-    //      /portal/sitemap/<token> get the fresh view.
-    //   2. Footer link groups just seeded from empty — cowork emitted
-    //      grouped nav.footer that we translated into headed columns
-    //      for the first time. Without this, the seed sits in local
-    //      state and the partner still sees a blank footer until the
-    //      strategist saves something else. Applies once per review.
-    //   3. Stale persona key_page_slugs got pruned — compose filters
-    //      slugs against the current pages set; if the DB was holding
-    //      references to renamed/dropped pages, persist the pruned
-    //      state so the DB self-heals on next partner load.
-    // All writes are idempotent; if nothing actually changed, the
-    // save is a no-op. Stable loads (no drift) don't trigger a write.
-    const watermarkAdvanced =
-      composed.last_synced_from_strategy_at != null &&
-      composed.last_synced_from_strategy_at !== existing?.last_synced_from_strategy_at
+    // AUTO-PERSIST on drift the compose introduced. Two triggers left
+    // after the site-strategy-is-source-of-truth refactor:
+    //   1. Footer link groups just seeded from empty — cowork emitted
+    //      grouped nav.footer that compose translated into headed
+    //      columns for the first time.
+    //   2. Stale persona key_page_slugs got pruned — compose filters
+    //      slugs against the current site_strategy pages set.
+    // Both are idempotent; stable loads don't write.
     const footerGroupsSeeded =
       ((composed.footer_info?.footer_link_groups?.length ?? 0) > 0) &&
       ((existing?.footer_info?.footer_link_groups?.length ?? 0) === 0)
@@ -115,12 +104,16 @@ export function SitemapReviewEditor({
       return priorKeys.length !== nextKeys.length
         || priorKeys.some((s, i) => s !== nextKeys[i])
     })
-    if (watermarkAdvanced || footerGroupsSeeded || posturesKeyPagesPruned) {
+    if (footerGroupsSeeded || posturesKeyPagesPruned) {
       const persistRes = await saveSitemapReview(supabase, projectId, composed)
       setReview(persistRes.ok ? persistRes.review : composed)
     } else {
       setReview(composed)
     }
+    // Extract site_strategy from the project row we already fetched;
+    // one round trip carries everything the editor needs.
+    const rs = ((proj as { roadmap_state?: Record<string, unknown> } | null)?.roadmap_state ?? {}) as { site_strategy?: SiteStrategyBlob }
+    setSiteStrategy(rs.site_strategy ?? null)
     setLoading(false)
   }, [projectId])
 
@@ -140,43 +133,27 @@ export function SitemapReviewEditor({
     if (onChange) await onChange()
   }, [projectId, onChange])
 
-  // Publish path with a forced strategy → review resync. The partner-
-  // facing URL reads from the persisted review, so anything stale
-  // there gets served verbatim. Rather than trust the compose-time
-  // watermark / drift-detection to catch drift (both can miss subtle
-  // cases where writers didn't bump _meta.generated_at AND the slug
-  // sets happen to overlap by coincidence), this path re-fetches
-  // project + web_pages, recomposes with a nulled watermark so
-  // strategy is treated as authoritative, applies publishReview,
-  // and saves atomically. Guarantees the partner sees the current
-  // strategy state at the moment of publish, no matter what.
+  // Publish path — recomposes so any seeded defaults land, then
+  // marks the review published. Post-refactor there's no drift to
+  // worry about (site_strategy is the live source; the partner view
+  // reads pages/nav from it directly), so this is a plain compose +
+  // save round-trip.
   const publishWithResync = useCallback(async () => {
     if (!review) return
     setSaving(true)
     setError(null)
     try {
-      const [{ data: proj }, { data: pgs }] = await Promise.all([
-        supabase.from('strategy_web_projects')
-          .select([
-            'id, church_name, personas, nav_group_definitions, roadmap_state',
-            'address, city_state, phone, email, primary_service_time, all_service_times',
-            'social_facebook_url, social_instagram_url, social_youtube_url',
-            'social_tiktok_url, social_twitter_url, social_linkedin_url',
-          ].join(', '))
-          .eq('id', projectId).maybeSingle(),
-        supabase.from('web_pages')
-          .select('id, slug, name, phase, sort_order, nav_group_label, user_journey_step')
-          .eq('web_project_id', projectId)
-          .eq('archived', false)
-          .order('sort_order', { ascending: true }),
-      ])
+      const { data: proj } = await supabase.from('strategy_web_projects')
+        .select([
+          'id, church_name, personas, nav_group_definitions, roadmap_state',
+          'address, city_state, phone, email, primary_service_time, all_service_times',
+          'social_facebook_url, social_instagram_url, social_youtube_url',
+          'social_tiktok_url, social_twitter_url, social_linkedin_url',
+        ].join(', '))
+        .eq('id', projectId).maybeSingle()
       const fresh = composeSitemapReview({
         project:  (proj ?? { id: projectId }) as never,
-        pages:    (pgs ?? []) as never,
-        // Null the watermark so compose forces resync from strategy.
-        // Slug-keyed carry-forward still preserves authored per-page
-        // fields (purpose overrides, sitemap_tag, what_changed, etc.)
-        existing: { ...review, last_synced_from_strategy_at: undefined },
+        existing: review,
       })
       const published = publishReview(fresh)
       const res = await saveSitemapReview(supabase, projectId, published)
@@ -185,6 +162,8 @@ export function SitemapReviewEditor({
         return
       }
       setReview(res.review)
+      const rs = ((proj as { roadmap_state?: Record<string, unknown> } | null)?.roadmap_state ?? {}) as { site_strategy?: SiteStrategyBlob }
+      setSiteStrategy(rs.site_strategy ?? null)
       if (onChange) await onChange()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -192,6 +171,22 @@ export function SitemapReviewEditor({
       setSaving(false)
     }
   }, [projectId, review, onChange])
+
+  // Save a JSON-edited site_strategy blob. Delegates to
+  // saveSiteStrategy which validates + bumps _meta.generated_at.
+  const persistSiteStrategy = useCallback(async (parsed: SiteStrategyBlob): Promise<{ ok: true } | { ok: false; error: string }> => {
+    setSaving(true)
+    setError(null)
+    const res = await saveSiteStrategy(supabase, projectId, parsed)
+    setSaving(false)
+    if (!res.ok) {
+      setError(res.error)
+      return { ok: false, error: res.error }
+    }
+    setSiteStrategy(res.strategy)
+    if (onChange) await onChange()
+    return { ok: true }
+  }, [projectId, onChange])
 
   const shareUrl = useMemo(() => {
     if (!review?.token || review.status === 'draft') return null
@@ -211,6 +206,20 @@ export function SitemapReviewEditor({
 
   const status = review.status
   const isApproved = status === 'approved'
+
+  // Slug + name option list for the editor's page pickers (persona
+  // key pages, tier descriptions, topnav slug, header CTA slug).
+  // Derived from site_strategy, filtered to real destinations (drops
+  // rows the strategist has flagged as nav-parent-only in the
+  // review's page_annotations).
+  const strategyPageOptions: StrategyPageOption[] = (siteStrategy?.pages ?? [])
+    .filter(p => typeof p.slug === 'string' && p.slug && p.slug !== '_meta')
+    .filter(p => review.page_annotations?.[p.slug as string]?.is_nav_parent_only !== true)
+    .map(p => ({
+      slug:    p.slug as string,
+      name:    p.name ?? (p.slug as string),
+      purpose: p.purpose ?? '',
+    }))
 
   const container = embed
     ? 'flex flex-col h-full bg-wm-bg'
@@ -268,22 +277,11 @@ export function SitemapReviewEditor({
             <button
               type="button"
               disabled={saving || isApproved}
-              onClick={() => {
-                // Refresh from cowork sitemap step. Nulling the
-                // watermark on the loaded review makes composeSitemapReview
-                // treat the underlying site_strategy as authoritative on
-                // the next call — pages, nav_layout, migrations, and
-                // nav_presentation refresh from strategy while authored
-                // fields (posture_summary, goal, key_page_slugs, per-page
-                // purpose overrides, presentation.*, congregations,
-                // footer_info, intro, executive_summary, navigation_strategy)
-                // survive. Persisted immediately so the fresh review lands.
-                void persist({ ...review, last_synced_from_strategy_at: undefined }).then(() => load())
-              }}
+              onClick={() => void load()}
               className="text-[11.5px] font-semibold text-wm-text-muted hover:text-wm-accent-strong disabled:opacity-40"
-              title="Pull the latest sitemap from cowork step 6 into this review. Authored fields (posture summaries, per-page notes, presentation cards) are preserved."
+              title="Reload site_strategy + review from the database. Use after a cowork sitemap run or a JSON edit."
             >
-              ↻ Refresh from sitemap step
+              ↻ Reload
             </button>
             {shareUrl && (
               <a
@@ -335,7 +333,12 @@ export function SitemapReviewEditor({
 
             <SectionBand num="02" label="Primary Navigation">
               <NavigationStrategyEditor review={review} onChange={persist} disabled={isApproved} />
-              <NavPresentationEditor review={review} onChange={persist} disabled={isApproved} />
+              <NavPresentationEditor
+                review={review}
+                strategyPages={strategyPageOptions}
+                onChange={persist}
+                disabled={isApproved}
+              />
               <div className="mt-4">
                 <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Announcement banner (above nav)</p>
                 <AnnouncementBannerEditor review={review} onChange={persist} disabled={isApproved} />
@@ -364,12 +367,22 @@ export function SitemapReviewEditor({
                 <TiersEditor review={review} onChange={persist} disabled={isApproved} />
               </div>
               <div className="mt-4">
-                <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Pages</p>
-                <PagesEditor review={review} onChange={persist} disabled={isApproved} />
+                <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Pages (annotations)</p>
+                <PagesEditor
+                  review={review}
+                  strategyPages={strategyPageOptions}
+                  onChange={persist}
+                  disabled={isApproved}
+                />
               </div>
               <div className="mt-4">
                 <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Per-page descriptions</p>
-                <TierPageDescriptionsEditor review={review} onChange={persist} disabled={isApproved} />
+                <TierPageDescriptionsEditor
+                  review={review}
+                  strategyPages={strategyPageOptions}
+                  onChange={persist}
+                  disabled={isApproved}
+                />
               </div>
             </SectionBand>
 
@@ -400,16 +413,34 @@ export function SitemapReviewEditor({
               <p className="text-[11.5px] text-wm-text-muted mb-2">
                 Each persona plus the step-by-step journey the partner sees on the review. Only personas with a posture summary or at least one journey step render on the partner view.
               </p>
-              <PersonaPosturesEditor review={review} onChange={persist} disabled={isApproved} />
+              <PersonaPosturesEditor
+                review={review}
+                strategyPages={strategyPageOptions}
+                onChange={persist}
+                disabled={isApproved}
+              />
             </SectionBand>
 
             <SectionBand num="Cowork" label="Presentation layer (authored by cowork sessions)">
               <PresentationEditor review={review} onChange={persist} disabled={isApproved} />
             </SectionBand>
+
+            <SectionBand num="JSON" label="Edit site_strategy JSON (pages, nav, cowork blob)">
+              <SiteStrategyJsonEditor
+                siteStrategy={siteStrategy}
+                onSave={persistSiteStrategy}
+                disabled={isApproved}
+              />
+            </SectionBand>
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
-            <SitemapPartnerViewV2 review={review} churchName={churchName} readOnly />
+            <SitemapPartnerViewV2
+              review={review}
+              siteStrategy={siteStrategy}
+              churchName={churchName}
+              readOnly
+            />
           </div>
         )}
 
@@ -956,58 +987,74 @@ function FooterField({
 }
 
 function PagesEditor({
-  review, onChange, disabled,
-}: { review: SitemapReview; onChange: (next: SitemapReview) => Promise<void> | void; disabled: boolean }) {
-  const updatePage = (id: string, patch: Partial<ReviewPage>) => {
-    void onChange({ ...review, pages: review.pages.map(p => p.id === id ? { ...p, ...patch } : p) })
+  review, strategyPages, onChange, disabled,
+}: {
+  review:        SitemapReview
+  strategyPages: StrategyPageOption[]
+  onChange:      (next: SitemapReview) => Promise<void> | void
+  disabled:      boolean
+}) {
+  const annotations = review.page_annotations ?? {}
+  const updateAnnotation = (slug: string, patch: Partial<ReviewPageAnnotation>) => {
+    const prior = annotations[slug] ?? {}
+    const next: ReviewPageAnnotation = { ...prior, ...patch }
+    // Drop empty-string fields so annotations stay lean.
+    if (next.what_changed && !next.what_changed.trim()) delete next.what_changed
+    if (next.why_change && !next.why_change.trim()) delete next.why_change
+    if (next.strategic_alignment && !next.strategic_alignment.trim()) delete next.strategic_alignment
+    if (next.is_nav_parent_only === false) delete next.is_nav_parent_only
+    if (next.sitemap_tag === undefined) delete next.sitemap_tag
+    const nextMap = { ...annotations, [slug]: next }
+    if (Object.keys(next).length === 0) delete nextMap[slug]
+    void onChange({ ...review, page_annotations: nextMap })
   }
+
+  // Include all site_strategy pages (including nav-parent-only ones)
+  // in the editor list, otherwise the strategist can't un-check the
+  // is_nav_parent_only flag. We fetch strategyPages already filtered
+  // for the partner-facing widgets; for this editor we pull the full
+  // set from the review's annotations map + strategyPages.
+  const allSlugs = new Set<string>()
+  for (const p of strategyPages) allSlugs.add(p.slug)
+  for (const slug of Object.keys(annotations)) allSlugs.add(slug)
+
   return (
-    <Section title="Pages" subtitle={`${review.pages.length} pages · edit each purpose so partners see what each page is for`}>
+    <Section title="Pages" subtitle={`${allSlugs.size} pages · names + purposes are read from site_strategy. Edit review-owned annotations (role tag, what changed, why change, strategic alignment) here.`}>
+      <p className="text-[11.5px] text-wm-text-muted mb-2">
+        Page names + purposes live on <code>site_strategy</code> and are shown read-only here. To rename or rewrite a purpose, edit the JSON block at the bottom of this editor (or run a cowork revise-site-strategy pass).
+      </p>
       <ul className="space-y-2">
-        {review.pages.map(p => (
-          <li key={p.id} className="border border-wm-border rounded p-2.5 bg-wm-bg">
+        {[...allSlugs].map(slug => {
+          const strategyPg = strategyPages.find(sp => sp.slug === slug)
+          const ann = annotations[slug] ?? {}
+          const name = strategyPg?.name ?? slug
+          const purpose = strategyPg?.purpose ?? ''
+          return (
+          <li key={slug} className="border border-wm-border rounded p-2.5 bg-wm-bg">
             <div className="flex items-baseline gap-2 mb-1 flex-wrap">
-              <input
-                type="text"
-                defaultValue={p.name}
-                disabled={disabled}
-                onBlur={e => { if (e.target.value !== p.name) updatePage(p.id, { name: e.target.value }) }}
-                className="text-[13px] font-semibold text-wm-text bg-transparent focus:outline-none border-b border-transparent focus:border-wm-accent disabled:opacity-50"
-              />
-              <code className="text-[11px] font-mono text-wm-text-muted">/{p.slug}</code>
-              {p.nav_position && (
-                <span className="text-[10.5px] text-wm-text-subtle ml-auto">{p.nav_position}</span>
+              <span className="text-[13px] font-semibold text-wm-text">{name}</span>
+              <code className="text-[11px] font-mono text-wm-text-muted">/{slug}</code>
+              {!strategyPg && (
+                <span className="text-[10px] uppercase tracking-widest font-bold text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+                  Not in site_strategy
+                </span>
               )}
             </div>
             <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
-              {p.primary_audience && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-wm-accent-tint border border-wm-accent/30 text-wm-accent-strong">
-                  Audience: {p.primary_audience}
-                </span>
-              )}
-              {p.funnel_stage && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-wm-bg-elevated border border-wm-border text-wm-text-muted">
-                  Funnel: {p.funnel_stage}
-                </span>
-              )}
               <label className="ml-auto flex items-center gap-1.5 text-[10px] text-wm-text-muted">
                 <span className="uppercase tracking-wider font-semibold">Role</span>
                 <select
                   value={
-                    // Legacy migration-status values (kept/unified/
-                    // consolidated/new) no longer render as pills.
-                    // Show "unset" in the dropdown so the strategist
-                    // picks a role for old reviews on next open.
-                    p.sitemap_tag === 'hub' || p.sitemap_tag === 'ministry'
-                      || p.sitemap_tag === 'churchwide' || p.sitemap_tag === 'foundation'
-                      ? p.sitemap_tag
+                    ann.sitemap_tag === 'hub' || ann.sitemap_tag === 'ministry'
+                      || ann.sitemap_tag === 'churchwide' || ann.sitemap_tag === 'foundation'
+                      ? ann.sitemap_tag
                       : ''
                   }
                   disabled={disabled}
-                  onChange={e => updatePage(p.id, {
+                  onChange={e => updateAnnotation(slug, {
                     sitemap_tag: e.target.value === ''
                       ? undefined
-                      : (e.target.value as ReviewPage['sitemap_tag']),
+                      : (e.target.value as ReviewPageAnnotation['sitemap_tag']),
                   })}
                   className="text-[11px] rounded-full border border-wm-border bg-white px-2 py-0.5 font-semibold text-wm-text focus:outline-none focus:border-wm-accent disabled:opacity-50"
                 >
@@ -1025,35 +1072,69 @@ function PagesEditor({
             >
               <input
                 type="checkbox"
-                checked={p.is_nav_parent_only === true}
+                checked={ann.is_nav_parent_only === true}
                 disabled={disabled}
-                onChange={e => updatePage(p.id, { is_nav_parent_only: e.target.checked || undefined })}
+                onChange={e => updateAnnotation(slug, { is_nav_parent_only: e.target.checked || undefined })}
               />
               <span>
                 Nav dropdown label only <span className="text-wm-text-subtle">— not a real page</span>
               </span>
             </label>
-            <label className="block mt-1">
-              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Purpose</span>
-              <textarea
-                defaultValue={p.purpose}
-                placeholder="What this page is for. One or two warm sentences the partner will read."
-                disabled={disabled}
-                rows={2}
-                onBlur={e => { if (e.target.value !== p.purpose) updatePage(p.id, { purpose: e.target.value }) }}
-                className="mt-1 w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-              />
-            </label>
+            {purpose && (
+              <p className="text-[11.5px] text-wm-text-muted italic mt-1 mb-2 leading-snug">
+                Purpose (from site_strategy): {purpose}
+              </p>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">What changed</span>
+                <textarea
+                  defaultValue={ann.what_changed ?? ''}
+                  placeholder="Optional. Partner-facing note about what changed for this page vs their current site."
+                  disabled={disabled}
+                  rows={2}
+                  onBlur={e => { if (e.target.value !== (ann.what_changed ?? '')) updateAnnotation(slug, { what_changed: e.target.value.trim() || undefined }) }}
+                  className="mt-1 w-full text-[11.5px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Why change</span>
+                <textarea
+                  defaultValue={ann.why_change ?? ''}
+                  placeholder="Optional. Partner-facing rationale for the change."
+                  disabled={disabled}
+                  rows={2}
+                  onBlur={e => { if (e.target.value !== (ann.why_change ?? '')) updateAnnotation(slug, { why_change: e.target.value.trim() || undefined }) }}
+                  className="mt-1 w-full text-[11.5px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Strategic alignment</span>
+                <textarea
+                  defaultValue={ann.strategic_alignment ?? ''}
+                  placeholder="Optional. How this page ties to the partner's approved vision."
+                  disabled={disabled}
+                  rows={2}
+                  onBlur={e => { if (e.target.value !== (ann.strategic_alignment ?? '')) updateAnnotation(slug, { strategic_alignment: e.target.value.trim() || undefined }) }}
+                  className="mt-1 w-full text-[11.5px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+                />
+              </label>
+            </div>
           </li>
-        ))}
+        )})}
       </ul>
     </Section>
   )
 }
 
 function PersonaPosturesEditor({
-  review, onChange, disabled,
-}: { review: SitemapReview; onChange: (next: SitemapReview) => Promise<void> | void; disabled: boolean }) {
+  review, strategyPages, onChange, disabled,
+}: {
+  review:        SitemapReview
+  strategyPages: StrategyPageOption[]
+  onChange:      (next: SitemapReview) => Promise<void> | void
+  disabled:      boolean
+}) {
   const updatePosture = (id: string, patch: Partial<PersonaPosture>) => {
     void onChange({
       ...review,
@@ -1085,7 +1166,7 @@ function PersonaPosturesEditor({
           // Only count key page slugs that still exist as real pages
           // — stale references from older strategy states get filtered
           // out so the count matches what the partner actually sees.
-          const validKeys = currentKeys.filter(s => review.pages.some(pg => pg.slug === s))
+          const validKeys = currentKeys.filter(s => strategyPages.some(pg => pg.slug === s))
           return (
           <div key={p.persona_id} className="border border-wm-border rounded p-3 bg-wm-bg">
             <div className="flex items-baseline gap-2 flex-wrap mb-1">
@@ -1131,7 +1212,7 @@ function PersonaPosturesEditor({
                 <p className="text-[10px] text-wm-text-subtle">{validKeys.length}/3 selected</p>
               </div>
               <div className="flex flex-wrap gap-1">
-                {review.pages.map(pg => {
+                {strategyPages.map(pg => {
                   const active   = currentKeys.includes(pg.slug)
                   const disable  = disabled || (!active && validKeys.length >= 3)
                   return (
@@ -1152,35 +1233,21 @@ function PersonaPosturesEditor({
                   )
                 })}
               </div>
-              {/* Inline description editor for each selected key page.
-                * The partner card renders page.purpose as the line under
-                * each key-page bullet ("What Doxology believes, in English
-                * and Spanish."). Edit it here without leaving the persona
-                * section — writes update review.pages[i].purpose, the same
-                * field the Pages editor edits. */}
+              {/* Selected key page descriptions render read-only from
+                * site_strategy.pages[].purpose. To rewrite a purpose,
+                * edit it in the site_strategy JSON block below (or run
+                * a cowork revise-site-strategy pass). */}
               {validKeys.length > 0 && (
                 <ul className="mt-3 space-y-2">
                   {validKeys.map(slug => {
-                    const pg = review.pages.find(x => x.slug === slug)
+                    const pg = strategyPages.find(x => x.slug === slug)
                     if (!pg) return null
                     return (
                       <li key={slug} className="rounded border border-wm-border bg-wm-bg-elevated px-2.5 py-2">
                         <div className="text-[11px] font-semibold text-wm-text mb-1">{pg.name}</div>
-                        <textarea
-                          defaultValue={pg.purpose ?? ''}
-                          disabled={disabled}
-                          rows={2}
-                          placeholder={`One sentence: what ${pg.name} does for ${p.persona_name}. Renders on the partner card under this key page.`}
-                          onBlur={e => {
-                            const v = e.target.value
-                            if (v === (pg.purpose ?? '')) return
-                            void onChange({
-                              ...review,
-                              pages: review.pages.map(row => row.slug === slug ? { ...row, purpose: v } : row),
-                            })
-                          }}
-                          className="w-full text-[11.5px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-                        />
+                        <p className="text-[11.5px] text-wm-text-muted italic leading-snug">
+                          {pg.purpose || <span className="text-wm-text-subtle">No purpose set on site_strategy for this page.</span>}
+                        </p>
                       </li>
                     )
                   })}
@@ -1434,11 +1501,12 @@ function PresentationEditor({
 // ─────────────────────────────────────────────────────────────────
 
 function NavPresentationEditor({
-  review, onChange, disabled,
+  review, strategyPages, onChange, disabled,
 }: {
-  review:   SitemapReview
-  onChange: (next: SitemapReview) => Promise<void> | void
-  disabled: boolean
+  review:        SitemapReview
+  strategyPages: StrategyPageOption[]
+  onChange:      (next: SitemapReview) => Promise<void> | void
+  disabled:      boolean
 }) {
   const np = review.nav_presentation
   const shell = (np?.shell
@@ -1503,14 +1571,14 @@ function NavPresentationEditor({
       </div>
 
       <TopnavItemsEditor
-        review={review}
+        strategyPages={strategyPages}
         np={np}
         disabled={disabled}
         onChange={next => void onChange({ ...review, nav_presentation: next })}
       />
 
       <HeaderCtasEditor
-        review={review}
+        strategyPages={strategyPages}
         np={np}
         disabled={disabled}
         onChange={next => void onChange({ ...review, nav_presentation: next })}
@@ -1571,12 +1639,12 @@ function NavPresentationEditor({
 // ─────────────────────────────────────────────────────────────────
 
 function TopnavItemsEditor({
-  review, np, disabled, onChange,
+  strategyPages, np, disabled, onChange,
 }: {
-  review:  SitemapReview
-  np:      SitemapReviewNavPresentation | undefined
-  disabled: boolean
-  onChange: (next: SitemapReviewNavPresentation) => void
+  strategyPages: StrategyPageOption[]
+  np:            SitemapReviewNavPresentation | undefined
+  disabled:      boolean
+  onChange:      (next: SitemapReviewNavPresentation) => void
 }) {
   type Item = NonNullable<SitemapReviewNavPresentation['visible_top_level']>[number]
   const items: Item[] = (np?.visible_top_level ?? []).map(i => ({ ...i }))
@@ -1619,7 +1687,7 @@ function TopnavItemsEditor({
               className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50"
             >
               <option value="">(no page)</option>
-              {review.pages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+              {strategyPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
             </select>
             {!disabled && (
               <button
@@ -1655,12 +1723,12 @@ function TopnavItemsEditor({
 // ─────────────────────────────────────────────────────────────────
 
 function HeaderCtasEditor({
-  review, np, disabled, onChange,
+  strategyPages, np, disabled, onChange,
 }: {
-  review:  SitemapReview
-  np:      SitemapReviewNavPresentation | undefined
-  disabled: boolean
-  onChange: (next: SitemapReviewNavPresentation) => void
+  strategyPages: StrategyPageOption[]
+  np:            SitemapReviewNavPresentation | undefined
+  disabled:      boolean
+  onChange:      (next: SitemapReviewNavPresentation) => void
 }) {
   type Cta = NonNullable<SitemapReviewNavPresentation['header_ctas']>[number]
   const ctas: Cta[] = (np?.header_ctas ?? []).map(c => ({ ...c }))
@@ -1696,7 +1764,7 @@ function HeaderCtasEditor({
               title={(cta.url ?? '').trim() ? 'Clear the URL to pick a page' : 'Pick a page'}
             >
               <option value="">(pick a page)</option>
-              {review.pages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+              {strategyPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
             </select>
             <input
               type="url"
@@ -1838,11 +1906,12 @@ function WhyCardsEditor({
 // ─────────────────────────────────────────────────────────────────
 
 function TierPageDescriptionsEditor({
-  review, onChange, disabled,
+  review, strategyPages, onChange, disabled,
 }: {
-  review:   SitemapReview
-  onChange: (next: SitemapReview) => Promise<void> | void
-  disabled: boolean
+  review:        SitemapReview
+  strategyPages: StrategyPageOption[]
+  onChange:      (next: SitemapReview) => Promise<void> | void
+  disabled:      boolean
 }) {
   const tiers = review.presentation?.tiers ?? []
   if (tiers.length === 0) {
@@ -1875,7 +1944,7 @@ function TierPageDescriptionsEditor({
           )}
           <div className="space-y-1.5">
             {(t.page_entries ?? []).map(entry => {
-              const page = review.pages.find(p => p.slug === entry.slug)
+              const page = strategyPages.find(p => p.slug === entry.slug)
               return (
                 <div key={entry.slug} className="flex items-start gap-2">
                   <div className="w-40 shrink-0 pt-1">
@@ -2597,6 +2666,93 @@ function WhatsChangingCardsEditor({
         onClick={add}
         className="text-[11.5px] font-semibold text-wm-accent-strong hover:underline disabled:opacity-50"
       >+ Add card</button>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// SiteStrategyJsonEditor. Paste-JSON affordance for the whole
+// site_strategy blob. Cowork's iteration has been unreliable
+// enough that the strategist sometimes needs to edit pages / nav /
+// meta directly. Validates that the parsed JSON is an object with
+// a `pages` array and a `nav` object before writing; the save
+// endpoint bumps `_meta.generated_at` so downstream tools see the
+// revision. Shows any validation error inline.
+// ─────────────────────────────────────────────────────────────────
+
+function SiteStrategyJsonEditor({
+  siteStrategy, onSave, disabled,
+}: {
+  siteStrategy: SiteStrategyBlob | null
+  onSave:       (parsed: SiteStrategyBlob) => Promise<{ ok: true } | { ok: false; error: string }>
+  disabled:     boolean
+}) {
+  const initial = useMemo(
+    () => siteStrategy ? JSON.stringify(siteStrategy, null, 2) : '{}',
+    [siteStrategy],
+  )
+  const [text,   setText]   = useState(initial)
+  const [error,  setError]  = useState<string | null>(null)
+  const [status, setStatus] = useState<string | null>(null)
+
+  useEffect(() => { setText(initial); setError(null); setStatus(null) }, [initial])
+
+  const save = async () => {
+    setError(null); setStatus(null)
+    let parsed: SiteStrategyBlob
+    try {
+      const raw = text.trim() ? JSON.parse(text) : {}
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw new Error('site_strategy must be a JSON object.')
+      }
+      if (!Array.isArray(raw.pages)) {
+        throw new Error('site_strategy must have a `pages` array.')
+      }
+      if (!raw.nav || typeof raw.nav !== 'object' || Array.isArray(raw.nav)) {
+        throw new Error('site_strategy must have a `nav` object.')
+      }
+      parsed = raw as SiteStrategyBlob
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Invalid JSON.')
+      return
+    }
+    const res = await onSave(parsed)
+    if (!res.ok) {
+      setError(res.error)
+      return
+    }
+    setStatus('Saved. _meta.generated_at bumped.')
+  }
+
+  const dirty = text !== initial
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11.5px] text-wm-text-muted leading-snug">
+        Direct-edit the <code>roadmap_state.site_strategy</code> blob. Use this to rename a page, tweak a purpose, or reshape nav without running a cowork revise pass. On save, the app validates that <code>pages</code> and <code>nav</code> exist, bumps <code>_meta.generated_at</code>, and stamps <code>_meta.skill_name = &apos;strategist-json-edit&apos;</code>. The partner view reads pages + nav live from this blob, so a save shows up immediately in the preview and on the partner portal.
+      </p>
+      <textarea
+        value={text}
+        onChange={e => { setText(e.target.value); setStatus(null) }}
+        disabled={disabled}
+        rows={20}
+        spellCheck={false}
+        className="w-full rounded-md border border-wm-border bg-white text-[12px] font-mono text-wm-text p-3 outline-none focus:border-wm-accent"
+        placeholder="{}"
+      />
+      {error && <div className="text-[11.5px] text-red-600">{error}</div>}
+      {status && !error && <div className="text-[11.5px] text-green-700">{status}</div>}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={disabled || !dirty}
+          onClick={() => void save()}
+          className="text-[12px] font-semibold px-4 py-1.5 rounded-full bg-wm-accent-strong text-white hover:bg-wm-accent disabled:opacity-50"
+        >
+          Save site_strategy
+        </button>
+        {dirty && <span className="text-[11px] text-wm-text-subtle">Unsaved changes</span>}
+      </div>
     </div>
   )
 }

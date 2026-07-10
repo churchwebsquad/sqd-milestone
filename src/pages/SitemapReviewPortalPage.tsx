@@ -36,6 +36,7 @@ import {
   approveReview,
   type PartnerEditRequest,
   type SitemapReview,
+  type SiteStrategyBlob,
 } from '../lib/sitemapReview'
 import { supabase } from '../lib/supabase'
 import SitemapPartnerViewV2 from '../components/wm/sitemapReview/SitemapPartnerViewV2'
@@ -45,6 +46,7 @@ const STORAGE_KEY = (token: string) => `sitemap_review_${token}_name`
 export default function SitemapReviewPortalPage() {
   const { token } = useParams<{ token: string }>()
   const [review, setReview] = useState<SitemapReview | null>(null)
+  const [siteStrategy, setSiteStrategy] = useState<SiteStrategyBlob | null>(null)
   const [churchName, setChurchName] = useState<string | null>(null)
   const [partnerPortalToken, setPartnerPortalToken] = useState<string | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>('loading')
@@ -73,6 +75,7 @@ export default function SitemapReviewPortalPage() {
     const res = await loadSitemapReviewByToken(token)
     if (!res) { setStatus('not-found'); return }
     setReview(res.review)
+    setSiteStrategy(res.site_strategy)
     setChurchName(res.church_name)
     setPartnerPortalToken(res.partner_portal_token)
     setStatus('ready')
@@ -250,6 +253,7 @@ export default function SitemapReviewPortalPage() {
       )}
       <SitemapPartnerViewV2
         review={review}
+        siteStrategy={siteStrategy}
         churchName={churchName}
         saving={saving}
         authorName={partnerName ?? undefined}

@@ -25,10 +25,12 @@ import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Check, Copy, Loader2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import {
+  loadSiteStrategy,
   loadSitemapReview,
   saveSitemapReview,
   approveReview,
   type SitemapReview,
+  type SiteStrategyBlob,
   type PartnerEditRequest,
 } from '../../lib/sitemapReview'
 // Inlined at build time so a fresh cowork session with zero project
@@ -60,20 +62,34 @@ function groupBySection(reqs: PartnerEditRequest[]): Array<{ section_id: string;
  *  sees exactly what the partner was looking at when they left their
  *  note. Falls back to a compact "n/a" pill when the section id doesn't
  *  match a known slot on the review (e.g. legacy section id from an
- *  older schema version). */
-function contextForSection(review: SitemapReview, sectionId: string): { label: string; body: string | null } {
-  // page-<slug> → look up the page
+ *  older schema version).
+ *
+ *  Post-2026-07 refactor: page-level facts (name, purpose, audience,
+ *  funnel) come from `siteStrategy.pages`; review-owned annotations
+ *  (what_changed, why_change, strategic_alignment) come from
+ *  `review.page_annotations`. */
+function contextForSection(
+  review: SitemapReview,
+  siteStrategy: SiteStrategyBlob | null,
+  sectionId: string,
+): { label: string; body: string | null } {
+  // page-<slug> → look up the page from site_strategy + annotations
   if (sectionId.startsWith('page-')) {
     const slug = sectionId.slice(5)
-    const page = review.pages.find(p => p.slug === slug)
-    if (page) {
+    const strategyPg = (siteStrategy?.pages ?? []).find(p => p.slug === slug)
+    const ann = review.page_annotations?.[slug]
+    if (strategyPg || ann) {
+      const lines = [
+        strategyPg?.purpose ? `Purpose: ${strategyPg.purpose}` : null,
+        strategyPg?.primary_audience ? `Audience: ${strategyPg.primary_audience}` : null,
+        strategyPg?.primary_funnel ? `Funnel: ${strategyPg.primary_funnel}` : null,
+        ann?.what_changed ? `What changed: ${ann.what_changed}` : null,
+        ann?.why_change ? `Why change: ${ann.why_change}` : null,
+        ann?.strategic_alignment ? `Strategic alignment: ${ann.strategic_alignment}` : null,
+      ].filter(Boolean)
       return {
-        label: `Page: ${page.name ?? slug}`,
-        body: [
-          page.purpose ? `Purpose: ${page.purpose}` : null,
-          page.primary_audience ? `Audience: ${page.primary_audience}` : null,
-          page.primary_funnel ? `Funnel: ${page.primary_funnel}` : null,
-        ].filter(Boolean).join('\n') || null,
+        label: `Page: ${strategyPg?.name ?? slug}`,
+        body: lines.length > 0 ? lines.join('\n') : null,
       }
     }
     return { label: `Page: ${slug}`, body: null }
@@ -88,10 +104,14 @@ function contextForSection(review: SitemapReview, sectionId: string): { label: s
     return { label: 'Navigation strategy', body: review.navigation_strategy ?? null }
   }
   if (sectionId === 'nav-primary') {
-    return { label: 'Primary nav', body: (review.nav_layout?.primary ?? []).join(' · ') || null }
+    const nav = siteStrategy?.nav?.primary ?? []
+    const labels = nav.map(item => typeof item === 'string' ? item : (item.label ?? item.slug ?? '')).filter(Boolean)
+    return { label: 'Primary nav', body: labels.join(' · ') || null }
   }
   if (sectionId === 'nav-secondary') {
-    return { label: 'Secondary nav', body: (review.nav_layout?.secondary ?? []).join(' · ') || null }
+    const nav = siteStrategy?.nav?.secondary ?? []
+    const labels = nav.map(item => typeof item === 'string' ? item : (item.label ?? item.slug ?? '')).filter(Boolean)
+    return { label: 'Secondary nav', body: labels.join(' · ') || null }
   }
   if (sectionId === 'footer') {
     return { label: 'Footer', body: review.footer_info ? JSON.stringify(review.footer_info, null, 2) : null }
@@ -285,6 +305,7 @@ export default function SitemapFeedbackPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const [project, setProject] = useState<ProjectSummary | null>(null)
   const [review, setReview]   = useState<SitemapReview | null>(null)
+  const [siteStrategy, setSiteStrategy] = useState<SiteStrategyBlob | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState<string | null>(null)
@@ -294,13 +315,15 @@ export default function SitemapFeedbackPage() {
     if (!projectId) return
     setLoading(true)
     setError(null)
-    const [projRes, rev] = await Promise.all([
+    const [projRes, rev, strategy] = await Promise.all([
       supabase.from('strategy_web_projects').select('id, member, name, church_name').eq('id', projectId).maybeSingle<ProjectSummary>(),
       loadSitemapReview(supabase, projectId),
+      loadSiteStrategy(supabase, projectId),
     ])
     if (projRes.error) setError(projRes.error.message)
     setProject(projRes.data ?? null)
     setReview(rev)
+    setSiteStrategy(strategy)
     setLoading(false)
   }, [projectId])
 
@@ -446,7 +469,7 @@ export default function SitemapFeedbackPage() {
           )}
 
           {groups.map(group => {
-            const context = contextForSection(review, group.section_id)
+            const context = contextForSection(review, siteStrategy, group.section_id)
             return (
               <article key={group.section_id} className="rounded-xl border border-wm-border bg-wm-bg-elevated overflow-hidden">
                 <header className="px-4 py-3 border-b border-wm-border flex items-baseline justify-between gap-3">

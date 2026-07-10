@@ -21,10 +21,34 @@ import type {
   ContentMigration,
   NavItem,
   PartnerEditRequest,
-  ReviewPage,
+  ReviewPageAnnotation,
   SitemapReview,
   SitemapReviewNavPresentation,
+  SiteStrategyBlob,
 } from '../../../lib/sitemapReview'
+import { siteStrategyNavToItems } from '../../../lib/sitemapReview'
+
+/** Per-page view row: page facts read live from site_strategy plus
+ *  the review's per-slug annotations. This is the render-time shape
+ *  the partner view uses now that pages[] on SitemapReview is dead. */
+interface PageView {
+  slug:              string
+  name:              string
+  purpose:           string
+  nav_position?:     string
+  parent_slug?:      string | null
+  nav_order:         number
+  primary_audience?: string | null
+  funnel_stage?:     string | null
+  nav_strategy?:     string | null
+  // annotation-side (per-slug overrides on the review)
+  sitemap_tag?:         ReviewPageAnnotation['sitemap_tag']
+  is_nav_parent_only?:  boolean
+  what_changed?:        string
+  why_change?:          string
+  strategic_alignment?: string
+  persona_relevance?:   string[]
+}
 
 // ── Styles (scoped to .dox · palette translated to Squad) ──────────
 
@@ -165,6 +189,12 @@ const scopedCss = `
 
 export interface SitemapPartnerViewV2Props {
   review:      SitemapReview
+  /** Source of truth for the page list, nav, and per-page facts.
+   *  Post-2026-07 refactor. Null when the cowork sitemap step has
+   *  not run yet — the partner view still renders explainers and
+   *  the presentation layer, but the Full Page List and Primary
+   *  Navigation are skipped. */
+  siteStrategy: SiteStrategyBlob | null
   churchName?: string | null
   saving?:     boolean
   authorName?: string
@@ -181,7 +211,7 @@ export interface SitemapPartnerViewV2Props {
 }
 
 export default function SitemapPartnerViewV2({
-  review, churchName, saving, authorName, readOnly = false,
+  review, siteStrategy, churchName, saving, authorName, readOnly = false,
   onAddEditRequest, onRemoveEditRequest,
   onUpdatePartnerNotes, onApprove, onSubmitFeedback,
 }: SitemapPartnerViewV2Props) {
@@ -248,13 +278,35 @@ export default function SitemapPartnerViewV2({
 
   const church = churchName ?? review.footer_info?.church_name ?? 'Your church'
   const hero = review.intro
-  const primaryNav = review.nav_layout.header ?? []
   const pres = review.presentation
+
+  // Build the render-time page list live from site_strategy + the
+  // review's page_annotations. site_strategy is the source of truth
+  // for names, purposes, audiences, funnels, nav positions; the
+  // review only carries review-owned annotations (sitemap_tag,
+  // is_nav_parent_only, what_changed, why_change, strategic_alignment).
+  const allPageViews = useMemo<PageView[]>(
+    () => buildPageViews(siteStrategy, review.page_annotations ?? {}),
+    [siteStrategy, review.page_annotations],
+  )
   // Nav-parent-only rows (Teaching, Life at Woodcreek — dropdown
   // labels, not real destinations) are hidden from the Full Page
   // List. They still show up as parents in the nav preview because
-  // that reads from nav_layout, not review.pages.
-  const realPages = useMemo(() => review.pages.filter(p => !p.is_nav_parent_only), [review.pages])
+  // that reads from site_strategy.nav.
+  const realPages = useMemo(() => allPageViews.filter(p => !p.is_nav_parent_only), [allPageViews])
+  const nameBySlug = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const p of allPageViews) m.set(p.slug, p.name)
+    return m
+  }, [allPageViews])
+  const primaryNav = useMemo<NavItem[]>(
+    () => siteStrategyNavToItems(siteStrategy?.nav?.primary as Array<unknown> | undefined, nameBySlug, true),
+    [siteStrategy, nameBySlug],
+  )
+  const ctaOnlyNav = useMemo<NavItem[]>(
+    () => siteStrategyNavToItems(siteStrategy?.nav?.cta_only as Array<unknown> | undefined, nameBySlug, false),
+    [siteStrategy, nameBySlug],
+  )
   const grouped = useMemo(
     () => pres?.tiers && pres.tiers.length > 0
       ? groupPagesByTiers(realPages, pres.tiers)
@@ -354,8 +406,8 @@ export default function SitemapPartnerViewV2({
               // Plan a Visit surface in the topnav's CTA row.
               const hydrated = hydrateNavPresentation(
                 review.nav_presentation,
-                review.nav_layout.header ?? [],
-                review.nav_layout.cta_only ?? [],
+                primaryNav,
+                ctaOnlyNav,
               )
               if (!hydrated) return null
               return <PrimaryNavPreview np={hydrated} church={church} featured={pres?.featured_highlight} congregations={pres?.congregations} />
@@ -593,7 +645,7 @@ export default function SitemapPartnerViewV2({
           </div>
         </section>
 
-        {review.pages.length > 0 && <section className="sec">
+        {allPageViews.length > 0 && <section className="sec">
           <div className="sec-head"><span className="sec-num">{pres?.congregations && pres.congregations.length > 0 ? '05' : '04'}</span><h2>Full Page List</h2></div>
           <p className="sec-note">{readOnly ? 'Every page in the sitemap, grouped by parent.' : 'Click any page to leave a note about it: rename, move, combine, or ask a question.'}</p>
           <div className="tiers">
@@ -614,7 +666,7 @@ export default function SitemapPartnerViewV2({
                       const desc      = overrides?.get(p.slug) ?? p.purpose ?? p.what_changed ?? 'No description yet.'
                       return (
                         <li
-                          key={p.id}
+                          key={p.slug}
                           className={isChild ? 'child' : undefined}
                           {...clickBind(sectionId, p.name)}
                           style={hasNote && !readOnly ? { background: '#FFF8EC' } : (readOnly ? { cursor: 'default' } : undefined)}
@@ -716,7 +768,7 @@ export default function SitemapPartnerViewV2({
             (p.key_page_slugs ?? []).length > 0,
           )
           if (visiblePostures.length === 0) return null
-          const pageBySlug = new Map(review.pages.map(p => [p.slug, p]))
+          const pageBySlug = new Map(allPageViews.map(p => [p.slug, p]))
           const congBase = pres?.congregations && pres.congregations.length > 0 ? 7 : 6
           return (
             <section className="sec">
@@ -738,7 +790,7 @@ export default function SitemapPartnerViewV2({
                     )}
                     {(() => {
                       const slugs = (p.key_page_slugs ?? []).slice(0, 3)
-                      const pages = slugs.map(s => pageBySlug.get(s)).filter((pg): pg is (typeof review.pages)[number] => !!pg)
+                      const pages = slugs.map(s => pageBySlug.get(s)).filter((pg): pg is PageView => !!pg)
                       if (pages.length === 0) return null
                       return (
                         <div>
@@ -1664,15 +1716,15 @@ function tagLabelFor(tag: 'kept' | 'unified' | 'consolidated' | 'new'): string {
   }
 }
 
-interface PageGroup { id: string; label: string; meta?: string; pages: ReviewPage[]; childSlugs?: Set<string>; overrides?: Map<string, string> }
+interface PageGroup { id: string; label: string; meta?: string; pages: PageView[]; childSlugs?: Set<string>; overrides?: Map<string, string> }
 
 /** Group pages according to strategist-authored tiers. Each tier's
- *  `page_slugs` (or `page_entries`) lists which review pages go in
+ *  `page_slugs` (or `page_entries`) lists which pages go in
  *  which tier, in what order. Any pages the strategist didn't
  *  assign land in a final "Other pages" tier so nothing is silently
  *  dropped. */
 function groupPagesByTiers(
-  pages: ReviewPage[],
+  pages: PageView[],
   tiers: NonNullable<SitemapReview['presentation']>['tiers'] & object,
 ): PageGroup[] {
   const bySlug = new Map(pages.map(p => [p.slug, p]))
@@ -1696,7 +1748,7 @@ function groupPagesByTiers(
     if (idx < 1 || idx > 4) return null
     return slug.slice(idx + 1)
   }
-  const suffixMap = new Map<string, ReviewPage[]>()
+  const suffixMap = new Map<string, PageView[]>()
   for (const p of pages) {
     const sfx = suffixOf(p.slug)
     if (!sfx) continue
@@ -1706,7 +1758,7 @@ function groupPagesByTiers(
   }
 
   for (const tier of tiers ?? []) {
-    const orderedPages: ReviewPage[] = []
+    const orderedPages: PageView[] = []
     const childSlugs = new Set<string>()
     const overrides = new Map<string, string>()
     // Prefix voting inside this tier. Once we've matched a couple
@@ -1789,10 +1841,10 @@ function groupPagesByTiers(
   return groups
 }
 
-function groupPagesForList(pages: ReviewPage[], primary: NavItem[]): Array<{ id: string; label: string; meta?: string; pages: ReviewPage[] }> {
+function groupPagesForList(pages: PageView[], primary: NavItem[]): Array<{ id: string; label: string; meta?: string; pages: PageView[] }> {
   // Group by top-level nav parent when derivable; else by parent_slug; else lump into "All pages".
-  const byParent = new Map<string, ReviewPage[]>()
-  const orphaned: ReviewPage[] = []
+  const byParent = new Map<string, PageView[]>()
+  const orphaned: PageView[] = []
   const primaryByLabel = new Map<string, NavItem>()
   for (const it of primary) primaryByLabel.set(it.label.toLowerCase(), it)
 
@@ -1808,21 +1860,21 @@ function groupPagesForList(pages: ReviewPage[], primary: NavItem[]): Array<{ id:
   if (byParent.size === 0) {
     return [{ id: 'all', label: 'All pages', pages: orphaned }]
   }
-  const groups: Array<{ id: string; label: string; meta?: string; pages: ReviewPage[] }> = []
-  if (orphaned.length > 0) groups.push({ id: 'top', label: 'Top-level pages', pages: orphaned.sort((a, b) => a.order - b.order) })
+  const groups: Array<{ id: string; label: string; meta?: string; pages: PageView[] }> = []
+  if (orphaned.length > 0) groups.push({ id: 'top', label: 'Top-level pages', pages: orphaned.sort((a, b) => a.nav_order - b.nav_order) })
   for (const [parentSlug, children] of byParent.entries()) {
     const parentPage = pages.find(pp => pp.slug === parentSlug)
     groups.push({
       id: `parent-${parentSlug}`,
       label: parentPage?.name ?? capitalize(parentSlug.replace(/-/g, ' ')),
       meta: `${children.length} page${children.length === 1 ? '' : 's'}`,
-      pages: children.sort((a, b) => a.order - b.order),
+      pages: children.sort((a, b) => a.nav_order - b.nav_order),
     })
   }
   return groups
 }
 
-function tagFor(p: ReviewPage, _migrations: ContentMigration[]): { label: string; className: string } | null {
+function tagFor(p: PageView, _migrations: ContentMigration[]): { label: string; className: string } | null {
   // Role tag: describes what the new page IS in the new site.
   // Migration status (kept/unified/consolidated/new) is legacy and
   // no longer rendered — see sitemap_tag docs in sitemapReview.ts.
@@ -1840,4 +1892,99 @@ function tagFor(p: ReviewPage, _migrations: ContentMigration[]): { label: string
 
 function capitalize(s: string): string {
   return s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+/** Build render-time PageView rows by merging site_strategy.pages
+ *  (source of truth for name / purpose / audience / funnel /
+ *  nav_strategy / parent_slug / nav_order) with the review's per-
+ *  slug page_annotations. Filters out cowork's `_meta` sentinel
+ *  and rows with no slug. Sorted by nav_order (nulls last). */
+function buildPageViews(
+  siteStrategy: SiteStrategyBlob | null,
+  annotations: Record<string, ReviewPageAnnotation>,
+): PageView[] {
+  const strategyPages = Array.isArray(siteStrategy?.pages) ? siteStrategy!.pages! : []
+  // Precompute a nav-position label per slug from strategy.nav +
+  // pages_considered_dropped, so partner cards can show "Header ·
+  // primary" or "Footer" next to a page name. Falls back to
+  // capitalized nav_strategy when the page isn't referenced in nav.
+  const navPositionBySlug = buildNavPositionMapFromStrategy(siteStrategy)
+  const views: PageView[] = strategyPages
+    .filter(sp => typeof sp.slug === 'string' && sp.slug && sp.slug !== '_meta')
+    .map(sp => {
+      const slug = sp.slug as string
+      const ann = annotations[slug] ?? {}
+      const navPos = navPositionBySlug.get(slug) ?? (sp.nav_strategy ? capitalize(sp.nav_strategy) : undefined)
+      return {
+        slug,
+        name:              sp.name ?? slug,
+        purpose:           sp.purpose ?? '',
+        nav_position:      navPos,
+        parent_slug:       sp.parent_slug ?? null,
+        nav_order:         typeof sp.nav_order === 'number' ? sp.nav_order : 0,
+        primary_audience:  sp.primary_audience ?? null,
+        funnel_stage:      sp.primary_funnel  ?? null,
+        nav_strategy:      sp.nav_strategy    ?? null,
+        // Annotation-side.
+        sitemap_tag:         ann.sitemap_tag,
+        is_nav_parent_only:  ann.is_nav_parent_only ?? (sp.has_children === true ? true : undefined),
+        what_changed:        ann.what_changed,
+        why_change:          ann.why_change,
+        strategic_alignment: ann.strategic_alignment,
+        persona_relevance:   ann.persona_relevance,
+      }
+    })
+    .sort((a, b) => a.nav_order - b.nav_order)
+  return views
+}
+
+/** Simple nav-position label lookup ("Header · primary", "Footer",
+ *  etc.) built from site_strategy.nav. Used only by buildPageViews
+ *  above; the exhaustive version (with "under X" nesting) that
+ *  formerly lived in the compose step is intentionally left off
+ *  since partner cards only surface the top-level label. */
+function buildNavPositionMapFromStrategy(
+  siteStrategy: SiteStrategyBlob | null,
+): Map<string, string> {
+  const map = new Map<string, string>()
+  if (!siteStrategy?.nav) return map
+  const asArr = <T,>(v: unknown): T[] => Array.isArray(v) ? (v as T[]) : []
+  const nav = siteStrategy.nav
+
+  for (const item of asArr<{ slug?: string; children?: unknown[] } | string>(nav.primary)) {
+    if (typeof item === 'string') { map.set(item, 'Header · primary'); continue }
+    if (item.slug) map.set(item.slug, 'Header · primary')
+    for (const c of asArr<{ slug?: string } | string>(item.children)) {
+      if (typeof c === 'string') map.set(c, 'Header · sub-menu')
+      else if (c.slug) map.set(c.slug, 'Header · sub-menu')
+    }
+  }
+  const secondaryLabel = nav.secondary_label ?? 'Secondary menu'
+  for (const item of asArr<{ slug?: string; children?: unknown[] } | string>(nav.secondary)) {
+    if (typeof item === 'string') { map.set(item, secondaryLabel); continue }
+    if (item.slug) map.set(item.slug, secondaryLabel)
+  }
+  // Footer: consume via the shared extractor so grouped + flat both
+  // tag their slugs as 'Footer'. Empty name-map is fine (we only
+  // need slugs, not labels).
+  const footerFlat = Array.isArray(nav.footer)
+    ? nav.footer
+    : (nav.footer && typeof nav.footer === 'object')
+      ? [
+          ...((nav.footer as { primary_links?: unknown[] }).primary_links ?? []),
+          ...((nav.footer as { explore?:       unknown[] }).explore       ?? []),
+          ...((nav.footer as { legal?:         unknown[] }).legal         ?? []),
+        ]
+      : []
+  for (const item of footerFlat) {
+    if (typeof item === 'string') { map.set(item, 'Footer'); continue }
+    if (item && typeof item === 'object' && typeof (item as { slug?: string }).slug === 'string') {
+      map.set((item as { slug: string }).slug, 'Footer')
+    }
+  }
+  for (const item of asArr<{ slug?: string } | string>(nav.cta_only)) {
+    if (typeof item === 'string') { map.set(item, 'CTA button only'); continue }
+    if (item.slug) map.set(item.slug, 'CTA button only')
+  }
+  return map
 }
