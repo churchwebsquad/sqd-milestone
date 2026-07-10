@@ -15,7 +15,7 @@ cowork skill](../cowork-skills/rehome-content-collection/SKILL.md).
 Follow the skill's discovery → propose → apply loop. Everything
 below is the concrete SELECT + UPDATE / DELETE / INSERT SQL,
 targeted at Timberline. Paste into the Supabase SQL Editor for
-project `squad-data` (project_id `jzsqmjfxvthvcdpiraam`).
+project `squad-data` (project_id `wttgwoxlezqoyzmesekt`).
 
 Timberline's `web_project_id` (used in every query below):
 

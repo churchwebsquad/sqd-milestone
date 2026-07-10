@@ -3,7 +3,7 @@
 -- =====================================================================
 --
 -- Paste the whole file into Supabase SQL Editor for project squad-data
--- (jzsqmjfxvthvcdpiraam) and run.
+-- (wttgwoxlezqoyzmesekt) and run.
 --
 -- BLOCK A: Reset Paradox 3005 sitemap_review status. Phantom
 --   partner_reviewed flag from an early manual JSON push; no partner

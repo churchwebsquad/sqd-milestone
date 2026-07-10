@@ -54,7 +54,7 @@ number). You do the rest.
 
 - **App**: Squad Strategy (`sqd-milestone`) — the internal Church
   Media Squad tool for web strategy + copy + review.
-- **Supabase project**: `squad-data` (project_id `jzsqmjfxvthvcdpiraam`).
+- **Supabase project**: `squad-data` (project_id `wttgwoxlezqoyzmesekt`).
   Use `mcp__claude_ai_Supabase__execute_sql` and
   `mcp__claude_ai_Supabase__apply_migration` to read + write.
   (Same MCP a fresh Claude Code session has by default.)
