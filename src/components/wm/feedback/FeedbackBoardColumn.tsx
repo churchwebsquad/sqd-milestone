@@ -7,11 +7,11 @@
  * list wraps it in a `<details>` for collapsibility; the kanban wraps
  * it in a fixed-width flex item.
  */
-import { ChevronDown, MoreHorizontal, Copy, Check, Pencil, X, Trash2 } from 'lucide-react'
+import { ChevronDown, MoreHorizontal, Copy, Check, Pencil, X, Trash2, Loader2, Zap } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { BoardStatusPill } from './BoardStatusPill'
 import { FeedbackCard } from './FeedbackCard'
-import { setBoardStatus } from '../../../lib/webReviews'
+import { bulkApplyRequestedEdits, setBoardStatus } from '../../../lib/webReviews'
 import { supabase } from '../../../lib/supabase'
 import type { FeedbackBoard } from '../../../lib/webReviews'
 import type { WebReviewComment } from '../../../types/database'
@@ -50,6 +50,7 @@ export function FeedbackBoardColumn({
   filter, footerSlot, onOpenEditor,
 }: FeedbackBoardColumnProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
+  const [bulkApplying, setBulkApplying] = useState(false)
   // Stable sort: open comments / edits first, completed below.
   // Within each tier, preserve incoming order (buildFeedbackBoards
   // already sorts by created_at). Strategist sees what still needs
@@ -64,6 +65,40 @@ export function FeedbackBoardColumn({
     return [...open, ...done]
   }, [board.comments])
   const comments = filter ? sortedAll.filter(filter) : sortedAll
+
+  // Count of partner-requested edits that can be bulk-applied (kind
+  // requested, still open, field_key + suggested_value populated).
+  // Only surfaces on partner boards — internal boards auto-apply on
+  // submit so there's nothing to bulk over. Plain "comment"-kind
+  // partner feedback (no proposed change) is excluded — those require
+  // a strategist judgment call, not a mechanical apply.
+  const bulkApplyableCount = useMemo(() => {
+    if (board.kind !== 'partner') return 0
+    return comments.filter(c =>
+      c.kind === 'requested'
+      && c.status === 'open'
+      && !!c.field_key
+      && c.suggested_value !== null
+      && c.suggested_value !== undefined,
+    ).length
+  }, [board.kind, comments])
+
+  const runBulkApply = async () => {
+    if (bulkApplyableCount === 0) return
+    if (!window.confirm(
+      `Apply all ${bulkApplyableCount} partner-requested edit${bulkApplyableCount === 1 ? '' : 's'}? Each pending edit lands on its section's field in one pass. Comment-only feedback (no proposed change) is left alone.`,
+    )) return
+    setBulkApplying(true)
+    const res = await bulkApplyRequestedEdits({
+      comments,
+      sectionFieldValuesFor: (sid) => sectionFieldValuesFor?.(sid) ?? {},
+    })
+    setBulkApplying(false)
+    if (res.failed > 0) {
+      window.alert(`Applied ${res.applied} edit${res.applied === 1 ? '' : 's'}. ${res.failed} failed — check console for details.`)
+    }
+    await onChanged()
+  }
 
   return (
     <div className="bg-wm-bg-hover/40 border border-wm-border rounded-xl flex flex-col min-h-0">
@@ -91,6 +126,18 @@ export function FeedbackBoardColumn({
           </span>
         </div>
         <div className="shrink-0 flex items-center gap-1">
+          {bulkApplyableCount > 0 && (
+            <button
+              type="button"
+              onClick={() => void runBulkApply()}
+              disabled={bulkApplying}
+              className="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-wm-accent-strong text-white text-[11px] font-semibold hover:bg-wm-accent transition-colors disabled:opacity-50"
+              title={`Apply all ${bulkApplyableCount} partner-requested edit${bulkApplyableCount === 1 ? '' : 's'} at once. Comment-only feedback (no proposed change) is left alone.`}
+            >
+              {bulkApplying ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
+              Apply {bulkApplyableCount} edit{bulkApplyableCount === 1 ? '' : 's'}
+            </button>
+          )}
           <BoardStatusPill
             status={board.status}
             onChange={async (next) => {

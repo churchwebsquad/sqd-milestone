@@ -661,6 +661,91 @@ function setNestedPath(
   return recur(root, 0) as Record<string, unknown>
 }
 
+/** Apply every open partner-requested edit on a set of comments in
+ *  one pass. Groups by section, chains setNestedPath so multiple edits
+ *  to the SAME section land in ONE web_sections update (no round-trip
+ *  race), then bulk-updates the comment rows to status='applied'.
+ *
+ *  Only touches comments where kind === 'requested', status === 'open',
+ *  field_key is set, and suggested_value is present. Everything else
+ *  (comments without an edit, kind='comment', already-applied, dismissed)
+ *  is left untouched. */
+export async function bulkApplyRequestedEdits(opts: {
+  comments:              WebReviewComment[]
+  sectionFieldValuesFor: (sectionId: string) => Record<string, unknown> | undefined
+}): Promise<{ applied: number; skipped: number; failed: number }> {
+  const applyable = opts.comments.filter(c =>
+    c.kind === 'requested'
+    && c.status === 'open'
+    && !!c.field_key
+    && c.suggested_value !== null
+    && c.suggested_value !== undefined
+    && !!c.web_section_id,
+  )
+  if (applyable.length === 0) return { applied: 0, skipped: 0, failed: 0 }
+
+  // Snapshot resolver name once so we don't spam the employees table.
+  const { data: user } = await supabase.auth.getUser()
+  const resolverName = await resolveStaffName(user?.user?.email ?? null)
+  const now = new Date().toISOString()
+
+  // Group comments by section so we can compute a single next
+  // field_values per section, chaining setNestedPath through each
+  // pending edit in original order.
+  const bySection = new Map<string, WebReviewComment[]>()
+  for (const c of applyable) {
+    const sid = c.web_section_id as string
+    const list = bySection.get(sid) ?? []
+    list.push(c)
+    bySection.set(sid, list)
+  }
+
+  let applied = 0, failed = 0
+  const successIds: string[] = []
+  for (const [sectionId, sectionComments] of bySection) {
+    let running = opts.sectionFieldValuesFor(sectionId) ?? {}
+    for (const c of sectionComments) {
+      running = setNestedPath(running, c.field_key as string, c.suggested_value)
+    }
+    const { error: patchErr } = await supabase
+      .from('web_sections')
+      .update({ field_values: running } as never)
+      .eq('id', sectionId)
+    if (patchErr) {
+      console.error('[reviews] bulkApplyRequestedEdits section patch failed:', sectionId, patchErr.message)
+      failed += sectionComments.length
+      continue
+    }
+    for (const c of sectionComments) {
+      successIds.push(c.id)
+      applied++
+    }
+  }
+
+  if (successIds.length > 0) {
+    const composedNote = resolverName ? `Bulk-applied by ${resolverName}` : 'Bulk-applied'
+    const { error: rowErr } = await supabase
+      .from('web_review_comments')
+      .update({
+        status:              'applied',
+        resolved_by_user_id: user?.user?.id ?? null,
+        resolved_by_name:    resolverName,
+        resolved_at:         now,
+        resolution_note:     composedNote,
+      } as never)
+      .in('id', successIds)
+    if (rowErr) {
+      console.error('[reviews] bulkApplyRequestedEdits row status update failed:', rowErr.message)
+      // Field writes already landed; the counter reflects that. The
+      // comment rows just stay open — user can retry the bulk apply
+      // (idempotent because setNestedPath with the same value is a
+      // no-op relative to the previous state) or resolve individually.
+    }
+  }
+
+  return { applied, skipped: 0, failed }
+}
+
 // ── Feedback board mutators ────────────────────────────────────────
 //
 // Surface the per-card / per-board edits the new feedback UI needs.

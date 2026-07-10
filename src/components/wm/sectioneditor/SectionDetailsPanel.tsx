@@ -38,6 +38,7 @@ import { PageVersionDrawer } from '../PageVersionDrawer'
 import { summarizeSlotPresence } from '../../../lib/webBrixiesLayoutParser'
 import { SECTION_ROLE_GROUPS, SECTION_ROLE_LABELS } from '../../../lib/webSectionRoles'
 import type { SectionRole } from '../../../types/database'
+import { resolveComment } from '../../../lib/webReviews'
 import { supabase } from '../../../lib/supabase'
 import {
   findPlacements, applyPlacement, previewConversion, isStructuredPlacement,
@@ -1271,14 +1272,45 @@ function ReviewCommentsBlock({
       payload.suggested_value = suggested
     }
 
-    const { error } = await supabase
-      .from('web_review_comments')
-      .insert(payload as never)
-    setSaving(false)
-    if (error) {
-      console.error('[reviews] insert comment failed:', error.message)
+    // Insert. When we plan to auto-apply (internal review + kind
+    // suggested), we .select the row so we have its id for the
+    // follow-up resolveComment call.
+    const willAutoApply = kind === 'suggested' && !!fieldKey
+    const inserted = willAutoApply
+      ? await supabase.from('web_review_comments').insert(payload as never).select('id').single()
+      : await supabase.from('web_review_comments').insert(payload as never)
+
+    if (inserted.error) {
+      console.error('[reviews] insert comment failed:', inserted.error.message)
+      setSaving(false)
       return
     }
+
+    // Internal "Edit copy" edits auto-apply on submit — no separate
+    // Apply click. Uses the same resolveComment path a manual Apply
+    // click takes, so audit trail is identical (row lands with
+    // status='applied', resolver name stamped, field write happens
+    // in the same transaction). Ashley 2026-07-10: staff shouldn't
+    // have to click Apply on every internal edit; the point of
+    // making the edit IS to apply it.
+    if (willAutoApply && 'data' in inserted && inserted.data) {
+      const insertedId = (inserted.data as { id: string }).id
+      const ok = await resolveComment({
+        commentId: insertedId,
+        outcome:   'applied',
+        finalValue: suggested,
+        sectionToPatch: {
+          sectionId:          section.id,
+          fieldKey:           fieldKey,
+          currentFieldValues: values,
+        },
+      })
+      if (!ok) {
+        console.error('[reviews] auto-apply after insert failed for comment', insertedId)
+      }
+    }
+
+    setSaving(false)
     // Clear the fields but keep the form open so the strategist can
     // immediately add another comment without re-clicking "Add note".
     setKind('comment'); setFieldKey(''); setBody(''); setSuggested('')
@@ -1345,12 +1377,15 @@ function ReviewCommentsBlock({
                 onChange={() => setKind('suggested')}
                 className="accent-wm-accent"
               />
-              <span className="text-wm-text">Suggest edit</span>
+              <span className="text-wm-text">Edit copy</span>
             </label>
           </div>
 
           {kind === 'suggested' && (
             <>
+              <p className="text-[10.5px] text-wm-text-muted -mt-1 leading-snug">
+                Saves + applies to the field immediately — no separate Apply click. The comment row records the change for the audit trail.
+              </p>
               <label className="block">
                 <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Field</span>
                 <select
@@ -1365,7 +1400,7 @@ function ReviewCommentsBlock({
                 </select>
               </label>
               <label className="block">
-                <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Suggested value</span>
+                <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">New copy</span>
                 <textarea
                   value={suggested}
                   onChange={(e) => setSuggested(e.target.value)}
@@ -1385,7 +1420,7 @@ function ReviewCommentsBlock({
               onChange={(e) => setBody(e.target.value)}
               rows={2}
               placeholder={kind === 'suggested'
-                ? 'Context for the suggestion (optional)…'
+                ? 'Context for the edit (optional)…'
                 : 'Drop a note for review…'}
               className="mt-0.5 w-full text-[12px] px-2 py-1 rounded border border-wm-border bg-wm-bg focus:border-wm-accent focus:outline-none resize-y"
             />
@@ -1405,7 +1440,7 @@ function ReviewCommentsBlock({
               disabled={saving || (!body.trim() && !suggested.trim()) || (kind === 'suggested' && !fieldKey)}
               className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-wm-accent text-wm-text-on-accent text-[11px] font-semibold hover:bg-wm-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {saving ? 'Saving…' : 'Add'}
+              {saving ? 'Saving…' : kind === 'suggested' ? 'Apply edit' : 'Add note'}
             </button>
           </div>
         </div>
