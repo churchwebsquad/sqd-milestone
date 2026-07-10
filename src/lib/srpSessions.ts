@@ -92,6 +92,7 @@ export async function createSession(input: {
   clickupTaskId?:         string | null
   sermonTitle?:           string | null
   suggestedDeliverables?: SrpDeliverable[] | null
+  videoUrl?:              string | null
 }): Promise<{ id: string; session_id: string }> {
   const session_id = makeSessionId(input.member, input.churchName)
   const memberNum = typeof input.member === 'number' ? input.member : Number(input.member)
@@ -113,6 +114,7 @@ export async function createSession(input: {
       ...(input.suggestedDeliverables?.length
           ? { selected_deliverables: input.suggestedDeliverables }
           : {}),
+      ...(input.videoUrl ? { video_url: input.videoUrl } : {}),
     })
     .select('id, session_id')
     .single()

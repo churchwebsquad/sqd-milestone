@@ -954,6 +954,22 @@ export default function SocialChurchPage() {
             }
 
             const sermonTitle = task.name.replace(/^\d+\s*-\s*/, '').trim()
+
+            // Fetch the video URL from the ClickUp task now so it's stored
+            // on the session row from the start — DeliverableSelectionStep
+            // can then kick off transcription immediately without waiting
+            // for the coach to reach the sermon step.
+            let videoUrl: string | null = null
+            try {
+              const tvRes = await fetch(`/api/clickup/task-video-url?taskId=${encodeURIComponent(task.id)}`)
+              if (tvRes.ok) {
+                const tvData = await tvRes.json()
+                if (tvData.videoUrl) videoUrl = tvData.videoUrl
+              }
+            } catch {
+              // Non-fatal — SermonInputStep will retry
+            }
+
             const { session_id } = await createSession({
               member: String(member),
               churchName: church.church_name ?? `Member ${member}`,
@@ -962,6 +978,7 @@ export default function SocialChurchPage() {
               sermonTitle,
               brandVoiceGuidelines,
               suggestedDeliverables: suggestedDeliverables.length ? suggestedDeliverables : null,
+              videoUrl,
             })
             navigate(`/social/srp/${encodeURIComponent(session_id)}`)
           } catch (err) {
