@@ -425,6 +425,15 @@ export async function closeReview(reviewId: string): Promise<ReviewMutationResul
     console.error('[reviews] closeReview failed:', error.message)
     return { ok: false, data: null, error: error.message }
   }
+  // Fire-and-forget #am-pm-web notification. The edge function reads
+  // the review's kind server-side and only posts when kind='internal'
+  // — partner-review closes go through notify-web-review-submitted
+  // instead. Failures are logged; we don't block the close on Slack.
+  void supabase.functions.invoke('notify-internal-review-completed', {
+    body: { review_id: reviewId },
+  }).catch(err => {
+    console.warn('[reviews] notify-internal-review-completed failed:', err)
+  })
   return { ok: true, data: null, error: null }
 }
 
