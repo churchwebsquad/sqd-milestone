@@ -115,6 +115,53 @@ export function CrawlInventory({ projectId }: Props) {
     // Track what intake docs got picked up this round so the Refresh
     // button can summarize what changed (briefly).
     const intakeFound: string[] = []
+
+    // Manual refresh actually re-fires the crawl-categorize +
+    // atomize edge functions before re-reading the DB. Prior to
+    // 2026-07 this button only re-read web_project_topics /
+    // web_project_snippets, so if the categorizer got stuck or a
+    // Postgres trigger missed a completed crawl_job (which happens
+    // when firecrawl-webhook lands during a schema deploy or the
+    // trigger regresses), staff would click Refresh and see no
+    // change even though the crawl was complete. Now Refresh:
+    //   1. Looks up the newest completed crawl_job for the project.
+    //   2. Fires crawl-categorize (aggregates across all jobs → topics).
+    //   3. Fires atomize-crawl-into-atoms (dedupes across all jobs → atoms).
+    //   4. Re-reads topics + snippets.
+    // Only runs on isManualRefresh so the initial page load stays
+    // cheap. Best-effort — if either edge call fails we still
+    // proceed to the DB re-read.
+    let refireError: string | null = null
+    if (opts.isManualRefresh) {
+      try {
+        const { data: latestJob } = await (supabase as any)
+          .schema('web-hub')
+          .from('crawl_jobs')
+          .select('id')
+          .eq('project_id', projectId)
+          .eq('status', 'complete')
+          .order('completed_at', { ascending: false, nullsFirst: false })
+          .limit(1)
+          .maybeSingle()
+        if (latestJob?.id) {
+          const [catRes, atomRes] = await Promise.allSettled([
+            supabase.functions.invoke('crawl-categorize', {
+              body: { project_id: projectId, crawl_job_id: latestJob.id },
+            }),
+            supabase.functions.invoke('atomize-crawl-into-atoms', {
+              body: { project_id: projectId },
+            }),
+          ])
+          if (catRes.status === 'rejected') refireError = `categorize failed: ${String(catRes.reason)}`
+          else if (catRes.value.error)      refireError = `categorize failed: ${catRes.value.error.message}`
+          if (!refireError && atomRes.status === 'rejected') refireError = `atomize failed: ${String(atomRes.reason)}`
+          else if (!refireError && atomRes.status === 'fulfilled' && atomRes.value.error) refireError = `atomize failed: ${atomRes.value.error.message}`
+        }
+      } catch (e) {
+        refireError = e instanceof Error ? e.message : String(e)
+        console.error('[CrawlInventory] manual re-fire failed:', e)
+      }
+    }
     const [topicsRes, snippetsRes, projRes] = await Promise.all([
       supabase.from('web_project_topics')
         .select('id, topic_key, topic_label, voice_signal, passages, items, added_snippet_tokens, source_page_urls, campus_slug')
@@ -241,11 +288,12 @@ export function CrawlInventory({ projectId }: Props) {
     // Manual-refresh-only confirmation. Auto-clears after 4s so it
     // doesn't linger across long sessions.
     if (opts.isManualRefresh) {
-      const msg = intakeFound.length > 0
-        ? `Refreshed · Picked up ${intakeFound.join(', ')}.`
-        : 'Refreshed · No intake docs found yet.'
+      const base = intakeFound.length > 0
+        ? `Refreshed · Recategorized crawl + picked up ${intakeFound.join(', ')}.`
+        : 'Refreshed · Recategorized crawl.'
+      const msg = refireError ? `${base} (Warning: ${refireError})` : base
       setRefreshFeedback(msg)
-      setTimeout(() => setRefreshFeedback(null), 4000)
+      setTimeout(() => setRefreshFeedback(null), refireError ? 8000 : 4000)
     }
   }
   useEffect(() => { void load() }, [projectId])
@@ -276,7 +324,7 @@ export function CrawlInventory({ projectId }: Props) {
             onClick={() => void load({ isManualRefresh: true })}
             disabled={loading}
             className="ml-2 inline-flex items-center gap-1 text-wm-accent hover:underline text-[11px] disabled:opacity-50"
-            title="Re-read crawl content + intake docs (strategy brief, discovery, photo library)"
+            title="Re-fire the crawl-categorize + atomize edge functions across every completed crawl_job for this project, then re-read topics, snippets, and intake docs. Use this after a 'Crawl more pages' run to force new pages to land."
           >
             {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
             Refresh content + intake docs
