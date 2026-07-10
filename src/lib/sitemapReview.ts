@@ -718,8 +718,29 @@ function syncToSiteStrategy(
     pages?:                    Array<Record<string, unknown>>
     nav?:                      { primary?: unknown; footer?: unknown; cta_only?: unknown } | Record<string, unknown>
     pages_considered_dropped?: Array<Record<string, unknown>>
+    _meta?:                    { generated_at?: string } & Record<string, unknown>
     [k: string]:               unknown
   }
+
+  // Stale-write guard. If site_strategy._meta.generated_at is newer
+  // than the review's last_synced_from_strategy_at watermark, the
+  // review is holding a stale snapshot — a cowork iteration ran
+  // (revise-site-strategy, plan-site-strategy re-run) after this
+  // review last composed, and the review's in-memory pages[] still
+  // carry the old names. Writing those old names back would stomp
+  // cowork's fresh output.
+  //
+  // When stale: skip syncing per-page name / purpose / audience /
+  // funnel / nav_strategy back to strategy. The next composeSitemapReview
+  // call will lift the fresh strategy names into the review (see the
+  // "strategy wins on resync" branch above), and normal sync
+  // resumes from there.
+  //
+  // Non-page fields (nav layout, migrations) still sync so the
+  // strategist's edits on those parts land regardless.
+  const strategyGeneratedAt = strategy._meta?.generated_at ?? null
+  const reviewSyncedAt      = review.last_synced_from_strategy_at ?? null
+  const reviewIsStale       = !!strategyGeneratedAt && strategyGeneratedAt > (reviewSyncedAt ?? '')
 
   // Sync pages by slug. Only the strategist-mutable fields are touched;
   // everything else on the site_strategy page (covers_cells, nav_order,
@@ -729,7 +750,7 @@ function syncToSiteStrategy(
     const slug = sp.slug as string | undefined
     if (!slug) return sp
     const rp = reviewBySlug.get(slug)
-    if (!rp) return sp
+    if (!rp || reviewIsStale) return sp
     return {
       ...sp,
       name:             rp.name,
