@@ -557,6 +557,13 @@ export default function SocialChurchPage() {
                 </div>
 
                 <div className="mb-3">
+                  <p className="text-xs text-gray-400 mb-0.5">Website</p>
+                  {church?.church_website
+                    ? <ExternalLinkBtn href={church.church_website.startsWith('http') ? church.church_website : `https://${church.church_website}`} label={church.church_website.replace(/^https?:\/\//, '')} />
+                    : <span className="text-sm text-gray-300">—</span>}
+                </div>
+
+                <div className="mb-3">
                   <p className="text-xs text-gray-400 mb-1 flex items-center gap-1"><Link2 size={11} /> Instagram</p>
                   {editingLinks ? (
                     <input value={linkDraft.instagram} onChange={e => setLinkDraft(d => ({ ...d, instagram: e.target.value }))}
@@ -648,14 +655,6 @@ export default function SocialChurchPage() {
                     className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-[#341756] hover:border-[#513DE5] hover:text-[#513DE5] transition-colors">
                     ClickUp: View All SRPs <ExternalLink size={13} />
                   </a>
-                  {church?.church_website
-                    ? <a href={church.church_website.startsWith('http') ? church.church_website : `https://${church.church_website}`} target="_blank" rel="noopener noreferrer"
-                        className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-[#341756] hover:border-[#513DE5] hover:text-[#513DE5] transition-colors">
-                        Website <ExternalLink size={13} />
-                      </a>
-                    : <div className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-100 rounded-xl text-sm text-gray-300">
-                        Website <ExternalLink size={13} />
-                      </div>}
                   {church?.strategy_brief
                     ? <a href={church.strategy_brief.startsWith('http') ? church.strategy_brief : `https://${church.strategy_brief}`} target="_blank" rel="noopener noreferrer"
                         className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-[#341756] hover:border-[#513DE5] hover:text-[#513DE5] transition-colors">
