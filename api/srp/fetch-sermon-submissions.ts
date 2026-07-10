@@ -79,7 +79,10 @@ export default async function handler(req: any, res: any) {
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
   const weekStart = computeWeekStart(new Date())
-  const weekStartIso = weekStart.toISOString()
+  // Show 2 weeks of submissions — go back one extra week from the current week start
+  const twoWeeksStart = new Date(weekStart)
+  twoWeeksStart.setUTCDate(twoWeeksStart.getUTCDate() - 7)
+  const weekStartIso = twoWeeksStart.toISOString()
 
   // ── Search-by-task-id mode ─────────────────────────────────────────
   if (searchTaskId) {
