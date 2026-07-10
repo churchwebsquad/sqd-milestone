@@ -206,6 +206,24 @@ export function SitemapReviewEditor({
     return { ok: true }
   }, [projectId, onChange])
 
+  // Race-safe variant. Reads the CURRENT siteStrategy state
+  // synchronously (via a functional-setter capture) and passes it to
+  // the mutator so parallel writes from PagesEditor + NavEditor +
+  // (in future) any other sub-editor all see the same fresh state
+  // and don't accidentally roll each other back. Prior to this,
+  // NavEditor could close over a siteStrategy prop from before
+  // PagesEditor's last write landed, and its next save would emit
+  // { ...oldSiteStrategy, nav: freshNav } — silently dropping the
+  // pages PagesEditor just added.
+  const mutateSiteStrategy = useCallback(async (
+    mutator: (current: SiteStrategyBlob | null) => SiteStrategyBlob,
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    let latest: SiteStrategyBlob | null = null
+    setSiteStrategy(current => { latest = current; return current })
+    const parsed = mutator(latest)
+    return await persistSiteStrategy(parsed)
+  }, [persistSiteStrategy])
+
   const shareUrl = useMemo(() => {
     if (!review?.token || review.status === 'draft') return null
     return buildPartnerReviewUrl(review.token)
@@ -385,7 +403,7 @@ export function SitemapReviewEditor({
                 review={review}
                 siteStrategy={siteStrategy}
                 onChange={persist}
-                onSaveSiteStrategy={persistSiteStrategy}
+                onMutateSiteStrategy={mutateSiteStrategy}
                 disabled={isApproved}
               />
               <div className="mt-4">
@@ -421,7 +439,7 @@ export function SitemapReviewEditor({
                   review={review}
                   siteStrategy={siteStrategy}
                   onChange={persist}
-                  onSaveSiteStrategy={persistSiteStrategy}
+                  onMutateSiteStrategy={mutateSiteStrategy}
                   disabled={isApproved}
                 />
               </div>
@@ -1024,13 +1042,13 @@ function FooterField({
 }
 
 function PagesEditor({
-  review, siteStrategy, onChange, onSaveSiteStrategy, disabled,
+  review, siteStrategy, onChange, onMutateSiteStrategy, disabled,
 }: {
-  review:             SitemapReview
-  siteStrategy:       SiteStrategyBlob | null
-  onChange:           (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
-  onSaveSiteStrategy: (updated: SiteStrategyBlob) => Promise<{ ok: true } | { ok: false; error: string }>
-  disabled:           boolean
+  review:               SitemapReview
+  siteStrategy:         SiteStrategyBlob | null
+  onChange:             (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
+  onMutateSiteStrategy: (mutator: (current: SiteStrategyBlob | null) => SiteStrategyBlob) => Promise<{ ok: true } | { ok: false; error: string }>
+  disabled:             boolean
 }) {
   const annotations = review.page_annotations ?? {}
 
@@ -1103,26 +1121,29 @@ function PagesEditor({
 
   const renamePage = async (slug: string, nextName: string) => {
     const trimmed = nextName.trim()
-    if (!trimmed || !siteStrategy) return
-    const currentPages = siteStrategy.pages ?? []
-    const idx = currentPages.findIndex(p => p.slug === slug)
-    if (idx < 0) return
-    if ((currentPages[idx].name ?? '') === trimmed) return
-    const nextPages = [...currentPages]
-    nextPages[idx] = { ...nextPages[idx], name: trimmed }
-    await onSaveSiteStrategy({ ...siteStrategy, pages: nextPages })
+    if (!trimmed) return
+    // Race-safe: read latest pages inside the mutator so a parallel
+    // NavEditor save can't roll a rename back.
+    await onMutateSiteStrategy(current => {
+      const pages = current?.pages ?? []
+      const idx = pages.findIndex(p => p.slug === slug)
+      if (idx < 0) return current ?? { pages: [], nav: {} }
+      if ((pages[idx].name ?? '') === trimmed) return current ?? { pages: [], nav: {} }
+      const nextPages = [...pages]
+      nextPages[idx] = { ...nextPages[idx], name: trimmed }
+      return { ...(current ?? {}), pages: nextPages }
+    })
   }
 
   const removePage = async (slug: string) => {
-    if (!siteStrategy) return
-    const pg = (siteStrategy.pages ?? []).find(p => p.slug === slug)
+    const pg = (siteStrategy?.pages ?? []).find(p => p.slug === slug)
     const label = pg?.name ?? slug
     if (!confirm(`Remove "${label}" from the sitemap? This drops it from site_strategy.pages and clears any review annotation. Nav references to this page are NOT auto-purged — check nav after saving.`)) return
-    const nextPages = (siteStrategy.pages ?? []).filter(p => p.slug !== slug)
-    const res = await onSaveSiteStrategy({ ...siteStrategy, pages: nextPages })
+    const res = await onMutateSiteStrategy(current => ({
+      ...(current ?? {}),
+      pages: (current?.pages ?? []).filter(p => p.slug !== slug),
+    }))
     if (!res.ok) return
-    // Clean up any annotation for the removed slug so the row doesn't
-    // reappear as an orphan.
     if (annotations[slug]) {
       void onChange((current: SitemapReview) => {
         const curAnns = { ...(current.page_annotations ?? {}) }
@@ -1142,16 +1163,17 @@ function PagesEditor({
   }
 
   const movePage = async (slug: string, direction: -1 | 1) => {
-    if (!siteStrategy) return
-    const currentPages = [...(siteStrategy.pages ?? [])]
-    const idx = currentPages.findIndex(p => p.slug === slug)
-    if (idx < 0) return
-    const target = idx + direction
-    if (target < 0 || target >= currentPages.length) return
-    const swapped = currentPages[idx]
-    currentPages[idx] = currentPages[target]
-    currentPages[target] = swapped
-    await onSaveSiteStrategy({ ...siteStrategy, pages: currentPages })
+    await onMutateSiteStrategy(current => {
+      const currentPages = [...(current?.pages ?? [])]
+      const idx = currentPages.findIndex(p => p.slug === slug)
+      if (idx < 0) return current ?? { pages: [], nav: {} }
+      const target = idx + direction
+      if (target < 0 || target >= currentPages.length) return current ?? { pages: [], nav: {} }
+      const swapped = currentPages[idx]
+      currentPages[idx] = currentPages[target]
+      currentPages[target] = swapped
+      return { ...(current ?? {}), pages: currentPages }
+    })
   }
 
   const addPage = async () => {
@@ -1160,16 +1182,17 @@ function PagesEditor({
     const name = addName.trim()
     if (!slug) { setAddError('Slug is required (letters, numbers, hyphens).'); return }
     if (!name) { setAddError('Label is required.'); return }
-    const currentPages = siteStrategy?.pages ?? []
-    if (currentPages.some(p => p.slug === slug)) {
+    if ((siteStrategy?.pages ?? []).some(p => p.slug === slug)) {
       setAddError(`A page with slug "${slug}" already exists.`); return
     }
     setAddSaving(true)
-    const next: SiteStrategyBlob = {
-      ...(siteStrategy ?? {}),
-      pages: [...currentPages, { slug, name }],
-    }
-    const res = await onSaveSiteStrategy(next)
+    const res = await onMutateSiteStrategy(current => {
+      // Guard against a race where the slug got added by another
+      // path between the pre-check above and this mutator running.
+      const pages = current?.pages ?? []
+      if (pages.some(p => p.slug === slug)) return current ?? { pages, nav: {} }
+      return { ...(current ?? {}), pages: [...pages, { slug, name }] }
+    })
     setAddSaving(false)
     if (!res.ok) { setAddError(res.error); return }
     setAddSlug(''); setAddName(''); setAddOpen(false)
@@ -1785,13 +1808,13 @@ function pruneNavList(items: NavChild[]): NavChild[] {
 }
 
 function NavEditor({
-  review, siteStrategy, onChange, onSaveSiteStrategy, disabled,
+  review, siteStrategy, onChange, onMutateSiteStrategy, disabled,
 }: {
-  review:             SitemapReview
-  siteStrategy:       SiteStrategyBlob | null
-  onChange:           (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
-  onSaveSiteStrategy: (updated: SiteStrategyBlob) => Promise<{ ok: true } | { ok: false; error: string }>
-  disabled:           boolean
+  review:               SitemapReview
+  siteStrategy:         SiteStrategyBlob | null
+  onChange:             (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
+  onMutateSiteStrategy: (mutator: (current: SiteStrategyBlob | null) => SiteStrategyBlob) => Promise<{ ok: true } | { ok: false; error: string }>
+  disabled:             boolean
 }) {
   const allPages = (siteStrategy?.pages ?? [])
     .filter(p => typeof p.slug === 'string' && p.slug && p.slug !== '_meta')
@@ -1815,13 +1838,17 @@ function NavEditor({
     const currentJson = JSON.stringify(siteStrategy?.nav ?? {})
     if (currentJson === lastSavedNavJsonRef.current) return
     // External change (someone else edited site_strategy.nav, or the
-    // composer just reloaded from DB). Re-sync local state.
+    // composer just reloaded from DB). Re-sync local state. This is
+    // the classic "sync-from-external-source" pattern React docs
+    // sanction — we mirror the site_strategy prop into local editing
+    // state ONLY when it differs from what we last wrote, so our own
+    // saves don't cause a resync mid-edit.
     const fresh = readSiteStrategyNav(siteStrategy)
     setPrimaryState(fresh.primary) // eslint-disable-line react-hooks/set-state-in-effect
     setCtaOnlyState(fresh.ctaOnly) // eslint-disable-line react-hooks/set-state-in-effect
     setFooterPrimaryLinksState(fresh.footerPrimaryLinks) // eslint-disable-line react-hooks/set-state-in-effect
-    setFooterExploreState(fresh.footerExplore)
-    setFooterLegalState(fresh.footerLegal)
+    setFooterExploreState(fresh.footerExplore) // eslint-disable-line react-hooks/set-state-in-effect
+    setFooterLegalState(fresh.footerLegal) // eslint-disable-line react-hooks/set-state-in-effect
     lastSavedNavJsonRef.current = currentJson
   }, [siteStrategy])
 
@@ -1832,21 +1859,35 @@ function NavEditor({
     nextFooterExplore:      NavChild[],
     nextFooterLegal:        NavChild[],
   ) => {
-    const nav: Record<string, unknown> = { ...(siteStrategy?.nav ?? {}) }
-    nav.primary  = pruneNavList(nextPrimary)
-    nav.cta_only = pruneNavList(nextCtaOnly)
-    nav.footer = {
-      // Preserve any non-standard fields on the existing footer blob
-      // (contact_block, service_times, connect_card, etc.) so we don't
-      // strip cowork-authored extras.
-      ...((siteStrategy?.nav as { footer?: Record<string, unknown> } | undefined)?.footer ?? {}),
-      primary_links: pruneNavList(nextFooterPrimaryLinks),
-      explore:       pruneNavList(nextFooterExplore),
-      legal:         pruneNavList(nextFooterLegal),
-    }
-    const next: SiteStrategyBlob = { ...(siteStrategy ?? {}), nav }
-    lastSavedNavJsonRef.current = JSON.stringify(next.nav ?? {})
-    await onSaveSiteStrategy(next)
+    // Race-safe: read the CURRENT siteStrategy inside the mutator so
+    // this write doesn't wipe pages/persona_journeys/anything else a
+    // parallel PagesEditor save just landed. Prior version closed
+    // over siteStrategy from render time — if PagesEditor added a
+    // page and then the strategist reordered nav before React
+    // re-rendered NavEditor with the new prop, our save would emit
+    // `{ ...oldSiteStrategy, nav: freshNav }` and drop the new page.
+    let sentJson = ''
+    const res = await onMutateSiteStrategy(current => {
+      const nav: Record<string, unknown> = { ...(current?.nav ?? {}) }
+      nav.primary  = pruneNavList(nextPrimary)
+      nav.cta_only = pruneNavList(nextCtaOnly)
+      nav.footer = {
+        // Preserve any non-standard fields on the existing footer blob
+        // (contact_block, service_times, connect_card, etc.) so we
+        // don't strip cowork-authored extras.
+        ...((current?.nav as { footer?: Record<string, unknown> } | undefined)?.footer ?? {}),
+        primary_links: pruneNavList(nextFooterPrimaryLinks),
+        explore:       pruneNavList(nextFooterExplore),
+        legal:         pruneNavList(nextFooterLegal),
+      }
+      const next: SiteStrategyBlob = { ...(current ?? {}), nav }
+      sentJson = JSON.stringify(next.nav ?? {})
+      return next
+    })
+    // Remember what we sent so the useEffect-sync doesn't treat the
+    // parent's echo of our write as an external change and reset
+    // local state mid-edit.
+    if (res.ok) lastSavedNavJsonRef.current = sentJson
   }
 
   // Any one-list mutation triggers a save with ALL current lists so
