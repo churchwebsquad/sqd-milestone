@@ -209,8 +209,8 @@ export function DevHandoffWorkspace({ project }: Props) {
    *  roadmap_state.content_model_plan_answers as a flat
    *  question_id → text map. Survives recomputes because the
    *  analyzer never touches this key. */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const _saveCmAnswer = async (questionId: string, answer: string) => {
+  // @ts-expect-error TS6133 — retained for future re-wiring
+  const _saveCmAnswer = async (questionId: string, answer: string) => { // eslint-disable-line @typescript-eslint/no-unused-vars
     const next = { ...cmAnswers, [questionId]: answer }
     setCmAnswers(next)
     const { data: row } = await supabase
@@ -1141,8 +1141,8 @@ function CmDownloadRow({ plan, answers, projectSlug }: { plan: ContentModelPlan;
  *  tagged (Strategist vs McNeel). Each question has an editable
  *  answer textarea that persists to roadmap_state via onSaveAnswer.
  *  Answers flow into the markdown download too. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function CmOpenQuestionsPanel({
+// @ts-expect-error TS6133 — retained for future re-wiring
+function CmOpenQuestionsPanel({ // eslint-disable-line @typescript-eslint/no-unused-vars
   plan, answers, onSaveAnswer,
 }: {
   plan: ContentModelPlan
@@ -1327,8 +1327,8 @@ function CmPartnerIntentPanel({ plan }: { plan: ContentModelPlan }) {
  *  change to a different canonical schema, or clear an existing
  *  override. Persists via setSchemaOverride and updates plan state
  *  optimistically. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function SchemaOverrideControl({
+// @ts-expect-error TS6133 — retained for future re-wiring
+function SchemaOverrideControl({ // eslint-disable-line @typescript-eslint/no-unused-vars
   section,
   projectId,
   plan,
