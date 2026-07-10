@@ -444,6 +444,33 @@ export function SitemapReviewEditor({
                   Copy partner link
                 </button>
               )}
+              {/* Retract-to-draft. Reverts published / partner_reviewed
+                  back to draft so the strategist can iterate before
+                  re-sharing. Partner-facing token stays valid so
+                  bookmarks don't 404; the partner view just hides the
+                  review while status is draft.
+                  Confirm dialog because this pulls a live link out
+                  from under any partner who might be reading. */}
+              <button
+                type="button"
+                onClick={() => {
+                  const suffix = status === 'partner_reviewed'
+                    ? ' Partner feedback stays attached to the review — nothing gets deleted.'
+                    : ''
+                  if (!confirm(`Retract this review to draft? The partner-facing link stops working until you publish again.${suffix}`)) return
+                  void persist({
+                    ...review,
+                    status:              'draft',
+                    published_at:        null,
+                    partner_reviewed_at: status === 'partner_reviewed' ? review.partner_reviewed_at : null,
+                    partner_reviewed_by: status === 'partner_reviewed' ? review.partner_reviewed_by : null,
+                  })
+                }}
+                disabled={saving}
+                className="text-[11px] font-semibold text-wm-text-muted hover:text-wm-text ml-auto"
+              >
+                Retract to draft
+              </button>
             </>
           )}
           {isApproved && (
