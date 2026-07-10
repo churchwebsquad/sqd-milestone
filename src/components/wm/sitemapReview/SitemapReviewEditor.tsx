@@ -460,16 +460,22 @@ export function SitemapReviewEditor({
               />
             </SectionBand>
 
-            <SectionBand num="Cowork" label="Presentation layer (authored by cowork sessions)">
-              <PresentationEditor review={review} onChange={persist} disabled={isApproved} />
-            </SectionBand>
-
-            <SectionBand num="JSON" label="Edit site_strategy JSON (pages, nav, cowork blob)">
-              <SiteStrategyJsonEditor
-                siteStrategy={siteStrategy}
-                onSave={persistSiteStrategy}
-                disabled={isApproved}
-              />
+            <SectionBand num="⚙" label="Advanced — edit site_strategy JSON directly">
+              <details>
+                <summary className="cursor-pointer text-[11.5px] font-semibold text-wm-text-muted hover:text-wm-text">
+                  Show raw JSON editor
+                </summary>
+                <div className="mt-3">
+                  <p className="text-[11.5px] text-wm-text-muted mb-2 leading-snug">
+                    Only edit this JSON directly if the structured editors above can't do what you need. Save bumps <code>_meta.generated_at</code> so downstream tools see the revision. Every field the composer surfaces above is edited more safely through its own control.
+                  </p>
+                  <SiteStrategyJsonEditor
+                    siteStrategy={siteStrategy}
+                    onSave={persistSiteStrategy}
+                    disabled={isApproved}
+                  />
+                </div>
+              </details>
             </SectionBand>
           </div>
         ) : (
@@ -1664,92 +1670,15 @@ function SectionBand({ num, label, children }: { num: string; label: string; chi
 // pastes its output into.
 // ─────────────────────────────────────────────────────────────────
 
-function PresentationEditor({
-  review, onChange, disabled,
-}: {
-  review:   SitemapReview
-  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
-  disabled: boolean
-}) {
-  const initial = useMemo(
-    () => JSON.stringify(review.presentation ?? {}, null, 2),
-    [review.presentation],
-  )
-  const [text,  setText]  = useState(initial)
-  const [error, setError] = useState<string | null>(null)
-
-  // Reset when the underlying data updates from elsewhere.
-  useEffect(() => { setText(initial); setError(null) }, [initial])
-
-  const save = () => {
-    setError(null)
-    try {
-      const parsed = text.trim() ? JSON.parse(text) : {}
-      if (typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('Must be a JSON object.')
-      }
-      // Race-safe write: read LATEST review inside the parent's
-      // functional setter so per-field editors saving in parallel
-      // don't stomp this JSON payload with stale local state.
-      void onChange((current: SitemapReview) => ({ ...current, presentation: parsed }))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Invalid JSON.')
-    }
-  }
-
-  const clear = () => {
-    if (!confirm('Clear the entire presentation layer? The partner view falls back to system defaults.')) return
-    setText('{}')
-    void onChange((current: SitemapReview) => ({ ...current, presentation: undefined }))
-  }
-
-  const dirty = text !== initial
-
-  return (
-    <div className="space-y-2">
-      <div className="text-[11.5px] text-wm-text-muted leading-snug">
-        Cowork sessions push their output here. Fields the schema accepts:
-        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">hero_em_phrase</code>,
-        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">congregations[]</code>,
-        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">featured_highlight</code>,
-        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">tiers[]</code>,
-        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">whats_changing_cards[]</code>,
-        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">why_cards[]</code>,
-        <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">your_turn_prompts[]</code>.
-        See <code className="bg-wm-bg px-1 mx-0.5 rounded text-[10.5px]">src/lib/sitemapReview.ts</code> for the full type.
-      </div>
-      <textarea
-        value={text}
-        onChange={e => setText(e.target.value)}
-        disabled={disabled}
-        rows={16}
-        spellCheck={false}
-        className="w-full rounded-md border border-wm-border bg-white text-[12px] font-mono text-wm-text p-3 outline-none focus:border-wm-accent"
-        placeholder="{}"
-      />
-      {error && <div className="text-[11.5px] text-red-600">{error}</div>}
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          disabled={disabled || !dirty}
-          onClick={save}
-          className="text-[12px] font-semibold px-4 py-1.5 rounded-full bg-wm-accent-strong text-white hover:bg-wm-accent disabled:opacity-50"
-        >
-          Save presentation
-        </button>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={clear}
-          className="text-[11.5px] text-wm-text-muted hover:text-red-600"
-        >
-          Clear presentation
-        </button>
-        {dirty && <span className="text-[11px] text-wm-text-subtle">Unsaved changes</span>}
-      </div>
-    </div>
-  )
-}
+// PresentationEditor (JSON textarea for review.presentation) was
+// retired in Phase E. Every field it edited has a dedicated
+// structured editor above (HeroEmPhraseEditor, AnnouncementBanner,
+// FeaturedHighlight, Tiers, WhyCards, WhatsChangingCards,
+// SharedHubsIntro, Congregations, InspirationImage). The JSON blob
+// was a "second surface" for the same data that racy-clobbered
+// dedicated-editor saves. For raw-JSON editing needs, use the
+// "Advanced" band at the bottom of the composer (site_strategy
+// JSON escape hatch).
 
 // ─────────────────────────────────────────────────────────────────
 // NavPresentationEditor. Shell selector (dropdowns / megamenu /
