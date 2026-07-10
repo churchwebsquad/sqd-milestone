@@ -906,6 +906,14 @@ export default function SocialChurchPage() {
         const handleTaskClick = async (task: CuTask & { member: number }) => {
           const existing = sessionByTaskId.get(task.id)
           if (existing) {
+            // If the existing session is stuck at 'account' (never advanced past setup),
+            // patch it to 'deliverables' before navigating so the coach lands in the right place.
+            if (existing.current_step === 'account') {
+              await srpPipeline
+                .from('sessions')
+                .update({ current_step: 'deliverables' })
+                .eq('session_id', existing.session_id)
+            }
             navigate(`/social/srp/${encodeURIComponent(existing.session_id)}`)
             return
           }
