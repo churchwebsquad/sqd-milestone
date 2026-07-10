@@ -31,6 +31,7 @@ interface SrpMeta {
 
 interface SessionMeta {
   member: number
+  session_id: string | null
   current_step: string | null
   status: string | null
   created_at: string | null
@@ -279,7 +280,7 @@ export default function SocialDashboardPage() {
         (supabase as any)
           .schema('srp_pipeline')
           .from('sessions')
-          .select('member, current_step, status, created_at, updated_at')
+          .select('member, session_id, current_step, status, created_at, updated_at')
           .not('status', 'eq', 'archived')
           .gte('updated_at', new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString())
           .order('updated_at', { ascending: false })
@@ -695,28 +696,30 @@ export default function SocialDashboardPage() {
                         </span>
                       )}
 
-                      {/* SRP Generator session step */}
-                      {session?.current_step && (() => {
+                      {/* SRP Generator session step — click to open that session */}
+                      {session?.current_step && session.session_id && (() => {
                         const step = session.current_step
                         const label = SRP_STEP_LABEL[step] ?? step
                         const isShipped = step === 'approved'
                         const isTranscript = step === 'sermon'
                         const isRendering = step === 'clipProcessing'
                         let bg = '#F3F4F6', text = '#6B7280'
-                        if (isShipped)   { bg = '#F0FDF4'; text = '#15803D' }
+                        if (isShipped)        { bg = '#F0FDF4'; text = '#15803D' }
                         else if (isTranscript) { bg = '#EFF6FF'; text = '#1D4ED8' }
                         else if (isRendering)  { bg = '#FDF4FF'; text = '#7E22CE' }
                         else if (step !== 'account') { bg = '#FFF7ED'; text = '#C2410C' }
                         return (
-                          <span
+                          <Link
+                            to={`/social/srp/${session.session_id}`}
+                            onClick={e => e.stopPropagation()}
                             style={{ background: bg, color: text }}
-                            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium"
+                            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium hover:opacity-80 transition-opacity"
                           >
                             {isRendering
                               ? <Loader2 size={10} className="animate-spin" />
                               : <Zap size={10} />}
                             {label}
-                          </span>
+                          </Link>
                         )
                       })()}
                     </div>
