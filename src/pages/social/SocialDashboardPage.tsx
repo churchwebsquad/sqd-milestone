@@ -392,9 +392,11 @@ export default function SocialDashboardPage() {
       const bThisWeek = thisWeekMemberSet.has(b.member)
       if (aThisWeek && !bThisWeek) return -1
       if (!aThisWeek && bThisWeek) return  1
-      // Both this week → earliest due date first
+      // Both this week → order by when the task was submitted (oldest first = came in first)
       if (aThisWeek && bThisWeek) {
-        return (thisWeekDueDateMap.get(a.member) ?? Infinity) - (thisWeekDueDateMap.get(b.member) ?? Infinity)
+        const aCreated = aSrp ? new Date(aSrp.createdAt).getTime() : Infinity
+        const bCreated = bSrp ? new Date(bSrp.createdAt).getTime() : Infinity
+        return aCreated - bCreated
       }
       // Neither this week → most recently active first
       const aTime = aSrp ? new Date(aSrp.updatedAt).getTime() : 0
