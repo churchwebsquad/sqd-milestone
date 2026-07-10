@@ -31,6 +31,10 @@ import {
   type SitemapReview,
   type PartnerEditRequest,
 } from '../../lib/sitemapReview'
+// Inlined at build time so a fresh cowork session with zero project
+// context has the entire revise-site-strategy contract in the paste.
+// Vite's ?raw suffix reads the file as a string at bundle time.
+import reviseSiteStrategySkill from '../../../cowork-skills/revise-site-strategy/SKILL.md?raw'
 
 interface ProjectSummary {
   id:          string
@@ -98,46 +102,182 @@ function contextForSection(review: SitemapReview, sectionId: string): { label: s
   return { label: sectionId, body: null }
 }
 
-/** Compose a cowork prompt the strategist can paste into a Content
- *  Engine session to re-emit site_strategy after applying feedback.
- *  The plan-site-strategy skill knows how to read partner_edit_requests
- *  off the review, but a paste-ready summary is faster for AMs. */
+/** Compose a self-contained cowork prompt the strategist can paste
+ *  into a fresh Claude Code session with zero project context and
+ *  have it run end-to-end. The prompt names the Supabase project,
+ *  inlines the full revise-site-strategy skill, provides the exact
+ *  load + persist SQL, and lists the partner-feedback note IDs so
+ *  the "resolve" step is unambiguous. */
 function buildCoworkPrompt(review: SitemapReview, projectId: string, churchName: string | null): string {
   const church = churchName ?? 'this partner'
   const openReqs = (review.partner_edit_requests ?? []).filter(r => r.status === 'open')
   const overallNotes = review.partner_notes?.trim() ?? ''
+  const submittedAt = review.partner_reviewed_at ?? 'recently'
+  const submittedBy = review.partner_reviewed_by ? ` by ${review.partner_reviewed_by}` : ''
+  const noteIds = openReqs.map(r => `'${r.id}'`).join(', ') || `''`
 
   const lines: string[] = []
-  lines.push(`The partner (${church}) submitted feedback on the sitemap review for project ${projectId}. Apply the following changes and re-emit site_strategy following the plan-site-strategy skill's contract.`)
+
+  // ── Preamble — orient a fresh session ──────────────────────────
+  lines.push(`# Sitemap feedback ingest — ${church}`)
   lines.push('')
-  lines.push(`Submitted ${review.partner_reviewed_at ?? 'recently'}${review.partner_reviewed_by ? ` by ${review.partner_reviewed_by}` : ''}.`)
+  lines.push('You are a fresh Claude Code session with zero project context. Everything you need is in this message — do not go hunting for other files. Read top-to-bottom, then execute the six steps at the bottom.')
+  lines.push('')
+  lines.push('## Environment')
+  lines.push('')
+  lines.push('- **App**: Squad Strategy (`sqd-milestone`) — the internal Church Media Squad tool for web strategy + copy + review.')
+  lines.push('- **Supabase project**: `squad-data` (project_id `wttgwoxlezqoyzmesekt`). Use the Supabase MCP tools (`mcp__claude_ai_Supabase__execute_sql`, `mcp__claude_ai_Supabase__apply_migration`) to read + write.')
+  lines.push('- **Row you are working on**: `strategy_web_projects` where `id = \'' + projectId + '\'` (church_name = "' + church + '"). Everything for this workflow lives inside the `roadmap_state` JSONB column on that row.')
+  lines.push('- **Relevant JSONB paths**:')
+  lines.push('    - `roadmap_state.site_strategy`   — the authored sitemap you are revising (pages, nav, persona_journeys, nav_presentation, report, _meta).')
+  lines.push('    - `roadmap_state.sitemap_review`  — the partner-facing snapshot + partner\'s feedback (partner_edit_requests, partner_notes, status).')
+  lines.push('    - `roadmap_state.strategic_goals` — the strategist-approved goals + voice + audience (read-only reference).')
+  lines.push('    - `roadmap_state.stage_1` / `ministry_model` / `acf_plan` — upstream foundation artifacts (read-only reference).')
+  lines.push('- **What "done" looks like**: `site_strategy._meta.generated_at` is newer than `sitemap_review.last_synced_from_strategy_at`, and every note in this feedback batch has `status: \'resolved\'` on `sitemap_review.partner_edit_requests`.')
+  lines.push('')
+
+  // ── Step 1: load ───────────────────────────────────────────────
+  lines.push('## Step 1 — Load current state')
+  lines.push('')
+  lines.push('Run this once via `mcp__claude_ai_Supabase__execute_sql`:')
+  lines.push('')
+  lines.push('```sql')
+  lines.push('SELECT')
+  lines.push('  roadmap_state->\'site_strategy\'   AS site_strategy,')
+  lines.push('  roadmap_state->\'sitemap_review\'  AS sitemap_review,')
+  lines.push('  roadmap_state->\'strategic_goals\' AS strategic_goals,')
+  lines.push('  roadmap_state->\'stage_1\'         AS stage_1,')
+  lines.push('  roadmap_state->\'ministry_model\'  AS ministry_model')
+  lines.push('FROM strategy_web_projects')
+  lines.push(`WHERE id = '${projectId}';`)
+  lines.push('```')
+  lines.push('')
+  lines.push('If `site_strategy` is null or missing `_meta.generated_at`, stop and tell the strategist — this project isn\'t ready for a revise pass.')
+  lines.push('')
+
+  // ── Step 2: partner feedback (this batch) ──────────────────────
+  lines.push('## Step 2 — The partner feedback you are applying')
+  lines.push('')
+  lines.push(`Submitted ${submittedAt}${submittedBy}. The note IDs you\'ll mark resolved in Step 5 are: ${noteIds}.`)
   lines.push('')
 
   if (overallNotes) {
-    lines.push('## Overall notes')
+    lines.push('### Overall notes')
+    lines.push('')
     lines.push(overallNotes)
     lines.push('')
   }
 
   if (openReqs.length > 0) {
-    lines.push('## Section notes')
+    lines.push('### Section notes')
+    lines.push('')
     const grouped = groupBySection(openReqs)
     for (const group of grouped) {
-      lines.push(`### ${group.section_label} (\`${group.section_id}\`)`)
+      lines.push(`**${group.section_label}** (\`${group.section_id}\`)`)
       for (const r of group.items) {
-        lines.push(`- ${r.comment}${r.author_name ? ` — ${r.author_name}` : ''}`)
-        if (r.suggested_change) lines.push(`  Suggested change: ${r.suggested_change}`)
+        lines.push(`- (note id \`${r.id}\`) ${r.comment}${r.author_name ? ` — ${r.author_name}` : ''}`)
+        if (r.suggested_change) lines.push(`  · Suggested change: ${r.suggested_change}`)
       }
       lines.push('')
     }
   }
 
-  lines.push('## What to do')
-  lines.push('1. Read the plan-site-strategy skill in cowork-skills/plan-site-strategy/SKILL.md.')
-  lines.push('2. Apply each item above to `roadmap_state.site_strategy` (pages, nav, per-page purpose/audience/funnel, presentation, tiers, congregations, footer) as appropriate.')
-  lines.push('3. Re-emit site_strategy end-to-end, including nav_presentation. Do a nav-sweep on any page that gets renamed or removed so no stale slugs remain in nav.primary/secondary/footer, nav_presentation.*, persona_journeys, presentation.tiers/congregations, or stage_2.nav_presentation.')
-  lines.push('4. Do NOT change fields the partner did not ask about. Leave strategist-authored fields intact unless a note explicitly asks for a change.')
-  lines.push('5. When done, re-open /web/' + projectId + '/sitemap-feedback and mark this batch resolved.')
+  // ── Step 3: skill inline ───────────────────────────────────────
+  lines.push('## Step 3 — The `revise-site-strategy` skill (INLINE, follow it verbatim)')
+  lines.push('')
+  lines.push('This is the load-bearing skill for this workflow. Follow every rule; it exists because past passes got things wrong. Ignore the frontmatter `allowed-tools` — you have Supabase MCP available regardless.')
+  lines.push('')
+  lines.push('<skill file="revise-site-strategy/SKILL.md">')
+  lines.push(reviseSiteStrategySkill.trim())
+  lines.push('</skill>')
+  lines.push('')
+
+  // ── Step 4: apply + persist ────────────────────────────────────
+  lines.push('## Step 4 — Apply the changes + persist site_strategy')
+  lines.push('')
+  lines.push('Walk each partner note above and produce the revised `site_strategy` per the skill\'s contract. Ground rules that trip past sessions up:')
+  lines.push('')
+  lines.push('- **Do not change fields the partner did not ask about.** Leave strategist-authored fields (purpose, primary_audience, primary_funnel, nav_strategy, key_pages, presentation.*, etc.) intact unless a note explicitly asks.')
+  lines.push('- **Re-emit `site_strategy` end-to-end** — a partial write breaks downstream compose. Every top-level key that existed before (`pages`, `nav`, `persona_journeys`, `pages_considered_dropped`, `report`, `nav_change_level`, `_meta`) must be present in the output.')
+  lines.push('- **Nav-sweep on renames/removals.** Any page you rename or remove: purge stale slugs from `nav.primary`, `nav.secondary`, `nav.footer`, `nav.cta_only`, every `nav_presentation.*` region (visible_top_level, header_ctas, megamenu_panels, standard_dropdowns, offcanvas_overlay), `persona_journeys[].journey_arc/entry_points`, and any `presentation.tiers` / `presentation.congregations` if authored.')
+  lines.push('- **`_meta.generated_at` MUST be strictly newer than the value you read in Step 1.** Set `_meta.revision_of` to the previous `generated_at`. Set `_meta.skill_name = \'revise-site-strategy\'` and `_meta.skill_version = \'1.0.0\'`. Bumping this watermark is what triggers the review composer to lift your fresh names on the next load — without it, the review stays stuck on the pre-revise snapshot.')
+  lines.push('- **Walk the strategist through each edit before persisting** — pause after each proposed change for pushback. Persist ONCE at the end, not per-edit.')
+  lines.push('')
+  lines.push('For the write itself, use the skill\'s "chunked staging-table" pattern (§ Persist) — it\'s the only reliable path once `site_strategy` grows past ~8 KB. The four-step shape:')
+  lines.push('')
+  lines.push('```sql')
+  lines.push('-- 1. Generate revised JSON locally + compute md5 of whole + each ~9KB chunk.')
+  lines.push('-- 2. Stage:')
+  lines.push('CREATE TEMP TABLE _staging_revise (ix int, body text);')
+  lines.push('INSERT INTO _staging_revise VALUES (0, $dollar$<chunk 0 text>$dollar$);')
+  lines.push('INSERT INTO _staging_revise VALUES (1, $dollar$<chunk 1 text>$dollar$);')
+  lines.push('-- ... one INSERT per chunk')
+  lines.push('')
+  lines.push('-- 3. Assemble + verify + write, wrapped in IS NOT NULL so the ~300KB return payload')
+  lines.push('--    doesn\'t blow the MCP output limit.')
+  lines.push('WITH assembled AS (')
+  lines.push('  SELECT string_agg(body, \'\' ORDER BY ix) AS body FROM _staging_revise')
+  lines.push(')')
+  lines.push('SELECT')
+  lines.push('  CASE WHEN md5(body) = \'<LOCAL-MD5>\'')
+  lines.push(`    THEN (roadmap_state_set('${projectId}'::uuid, ARRAY['site_strategy'], body::jsonb) IS NOT NULL)`)
+  lines.push('    ELSE FALSE')
+  lines.push('  END AS committed')
+  lines.push('FROM assembled;')
+  lines.push('')
+  lines.push('-- 4. Drop the staging table.')
+  lines.push('DROP TABLE _staging_revise;')
+  lines.push('```')
+  lines.push('')
+
+  // ── Step 5: mark notes resolved ────────────────────────────────
+  lines.push('## Step 5 — Mark this batch of partner notes resolved')
+  lines.push('')
+  lines.push('After Step 4\'s `committed = true` comes back, flip every note ID from this batch to `status: \'resolved\'`. Leaves the notes attached to the review so the audit trail survives; the composer just stops showing them as pending.')
+  lines.push('')
+  lines.push('```sql')
+  lines.push('UPDATE strategy_web_projects')
+  lines.push('SET roadmap_state = jsonb_set(')
+  lines.push('  roadmap_state,')
+  lines.push('  \'{sitemap_review,partner_edit_requests}\',')
+  lines.push('  (')
+  lines.push('    SELECT jsonb_agg(')
+  lines.push(`      CASE WHEN r->>'id' IN (${noteIds})`)
+  lines.push('        THEN r || \'{"status":"resolved"}\'::jsonb')
+  lines.push('        ELSE r')
+  lines.push('      END')
+  lines.push('    )')
+  lines.push('    FROM jsonb_array_elements(roadmap_state->\'sitemap_review\'->\'partner_edit_requests\') r')
+  lines.push('  )')
+  lines.push(`)  WHERE id = '${projectId}';`)
+  lines.push('```')
+  lines.push('')
+
+  // ── Step 6: verify + hand back ─────────────────────────────────
+  lines.push('## Step 6 — Verify + summarize for the strategist')
+  lines.push('')
+  lines.push('Confirm the write landed AND the watermark advanced:')
+  lines.push('')
+  lines.push('```sql')
+  lines.push('SELECT')
+  lines.push('  roadmap_state->\'site_strategy\'->\'_meta\'->>\'generated_at\'       AS strategy_generated_at,')
+  lines.push('  roadmap_state->\'sitemap_review\'->>\'last_synced_from_strategy_at\' AS review_synced_at,')
+  lines.push('  jsonb_array_length(roadmap_state->\'site_strategy\'->\'pages\')      AS strategy_page_count,')
+  lines.push('  (SELECT COUNT(*) FROM jsonb_array_elements(roadmap_state->\'sitemap_review\'->\'partner_edit_requests\') r WHERE r->>\'status\' = \'open\') AS open_partner_notes')
+  lines.push('FROM strategy_web_projects')
+  lines.push(`WHERE id = '${projectId}';`)
+  lines.push('```')
+  lines.push('')
+  lines.push('- `strategy_generated_at` must be strictly newer than the value from Step 1.')
+  lines.push('- `open_partner_notes` should be 0 (all this batch\'s notes resolved).')
+  lines.push('')
+  lines.push('Then tell the strategist:')
+  lines.push('  1. What you changed, page-by-page (rename, add, drop, move, purpose edit).')
+  lines.push('  2. Any partner note you did NOT apply, and why (e.g. contradicted an approved strategic_goal).')
+  lines.push('  3. Any open question you couldn\'t resolve — surfaced verbatim so they can decide.')
+  lines.push('')
+  lines.push('The strategist will re-open `/web/' + projectId + '/sitemap-feedback` and confirm the batch is resolved. Then they hit "Mark all resolved & approve" in the composer if they\'re happy.')
+
   return lines.join('\n')
 }
 
