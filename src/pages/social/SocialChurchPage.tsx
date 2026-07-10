@@ -1040,9 +1040,8 @@ export default function SocialChurchPage() {
                   const session = sessionByTaskId.get(task.id)
                   const isDone = session?.status === 'completed'
                   const hasSession = !!session
-                  const date = task.date_created
-                    ? new Date(Number(task.date_created)).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                    : new Date(task.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  const dateMs = Number(task.date_created) || new Date(task.updatedAt || '').getTime() || 0
+                  const date = dateMs ? new Date(dateMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'
                   const title = task.name.replace(/^\d+\s*-\s*/, '').trim()
 
                   return (
