@@ -387,8 +387,9 @@ export function SitemapReviewEditor({
                 <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Pages (annotations)</p>
                 <PagesEditor
                   review={review}
-                  strategyPages={strategyPageOptions}
+                  siteStrategy={siteStrategy}
                   onChange={persist}
+                  onSaveSiteStrategy={persistSiteStrategy}
                   disabled={isApproved}
                 />
               </div>
@@ -1053,23 +1054,42 @@ function FooterField({
 }
 
 function PagesEditor({
-  review, strategyPages, onChange, disabled,
+  review, siteStrategy, onChange, onSaveSiteStrategy, disabled,
 }: {
-  review:        SitemapReview
-  strategyPages: StrategyPageOption[]
-  onChange:      (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
-  disabled:      boolean
+  review:             SitemapReview
+  siteStrategy:       SiteStrategyBlob | null
+  onChange:           (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
+  onSaveSiteStrategy: (updated: SiteStrategyBlob) => Promise<{ ok: true } | { ok: false; error: string }>
+  disabled:           boolean
 }) {
   const annotations = review.page_annotations ?? {}
+
+  // Full unfiltered list from site_strategy (including nav-parent-only rows).
+  // We use this both to render the row and to detect "not in site_strategy"
+  // correctly. The picker widgets in this file take the FILTERED list
+  // (strategyPageOptions) because those pickers should not offer nav-parent
+  // labels as destinations — but the full-page-list editor needs the
+  // complete set so that toggling is_nav_parent_only doesn't make the row
+  // vanish or get mis-flagged as missing.
+  const allStrategyPages = (siteStrategy?.pages ?? [])
+    .filter(p => typeof p.slug === 'string' && p.slug && p.slug !== '_meta')
+    .map(p => ({
+      slug:    p.slug as string,
+      name:    p.name ?? (p.slug as string),
+      purpose: p.purpose ?? '',
+    }))
+
+  const [addOpen,   setAddOpen]   = useState(false)
+  const [addSlug,   setAddSlug]   = useState('')
+  const [addName,   setAddName]   = useState('')
+  const [addSaving, setAddSaving] = useState(false)
+  const [addError,  setAddError]  = useState<string | null>(null)
+
   const updateAnnotation = (slug: string, patch: Partial<ReviewPageAnnotation>) => {
-    // Race-safe: recompute the target annotation from latest state
-    // inside the functional updater so a parallel edit to another
-    // slug's annotation doesn't get stomped by this write.
     void onChange((current: SitemapReview) => {
       const curAnns = current.page_annotations ?? {}
       const prior = curAnns[slug] ?? {}
       const next: ReviewPageAnnotation = { ...prior, ...patch }
-      // Drop empty-string fields so annotations stay lean.
       if (next.what_changed && !next.what_changed.trim()) delete next.what_changed
       if (next.why_change && !next.why_change.trim()) delete next.why_change
       if (next.strategic_alignment && !next.strategic_alignment.trim()) delete next.strategic_alignment
@@ -1081,30 +1101,70 @@ function PagesEditor({
     })
   }
 
-  // Include all site_strategy pages (including nav-parent-only ones)
-  // in the editor list, otherwise the strategist can't un-check the
-  // is_nav_parent_only flag. We fetch strategyPages already filtered
-  // for the partner-facing widgets; for this editor we pull the full
-  // set from the review's annotations map + strategyPages.
+  const renamePage = async (slug: string, nextName: string) => {
+    const trimmed = nextName.trim()
+    if (!trimmed || !siteStrategy) return
+    const currentPages = siteStrategy.pages ?? []
+    const idx = currentPages.findIndex(p => p.slug === slug)
+    if (idx < 0) return
+    if ((currentPages[idx].name ?? '') === trimmed) return
+    const nextPages = [...currentPages]
+    nextPages[idx] = { ...nextPages[idx], name: trimmed }
+    await onSaveSiteStrategy({ ...siteStrategy, pages: nextPages })
+  }
+
+  const addPage = async () => {
+    setAddError(null)
+    const slug = addSlug.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
+    const name = addName.trim()
+    if (!slug) { setAddError('Slug is required (letters, numbers, hyphens).'); return }
+    if (!name) { setAddError('Label is required.'); return }
+    const currentPages = siteStrategy?.pages ?? []
+    if (currentPages.some(p => p.slug === slug)) {
+      setAddError(`A page with slug "${slug}" already exists.`); return
+    }
+    setAddSaving(true)
+    const next: SiteStrategyBlob = {
+      ...(siteStrategy ?? {}),
+      pages: [...currentPages, { slug, name }],
+    }
+    const res = await onSaveSiteStrategy(next)
+    setAddSaving(false)
+    if (!res.ok) { setAddError(res.error); return }
+    setAddSlug(''); setAddName(''); setAddOpen(false)
+  }
+
   const allSlugs = new Set<string>()
-  for (const p of strategyPages) allSlugs.add(p.slug)
+  for (const p of allStrategyPages) allSlugs.add(p.slug)
   for (const slug of Object.keys(annotations)) allSlugs.add(slug)
 
   return (
-    <Section title="Pages" subtitle={`${allSlugs.size} pages · names + purposes are read from site_strategy. Edit review-owned annotations (role tag, what changed) here.`}>
+    <Section title="Pages" subtitle={`${allSlugs.size} pages · edit labels inline, or add pages. Purposes live on site_strategy (edit via cowork or the JSON block).`}>
       <p className="text-[11.5px] text-wm-text-muted mb-2">
-        Page names + purposes live on <code>site_strategy</code> and are shown read-only here. To rename or rewrite a purpose, edit the JSON block at the bottom of this editor (or run a cowork revise-site-strategy pass).
+        Rename a page by editing its label below (saves on blur). Add a new page with the button at the bottom. Purposes still come from <code>site_strategy</code> — rewrite them via the JSON block or a cowork revise pass.
       </p>
       <ul className="space-y-2">
         {[...allSlugs].map(slug => {
-          const strategyPg = strategyPages.find(sp => sp.slug === slug)
+          const strategyPg = allStrategyPages.find(sp => sp.slug === slug)
           const ann = annotations[slug] ?? {}
           const name = strategyPg?.name ?? slug
           const purpose = strategyPg?.purpose ?? ''
           return (
           <li key={slug} className="border border-wm-border rounded p-2.5 bg-wm-bg">
             <div className="flex items-baseline gap-2 mb-1 flex-wrap">
-              <span className="text-[13px] font-semibold text-wm-text">{name}</span>
+              {strategyPg ? (
+                <input
+                  type="text"
+                  defaultValue={name}
+                  disabled={disabled}
+                  onBlur={e => { void renamePage(slug, e.target.value) }}
+                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                  className="text-[13px] font-semibold text-wm-text bg-transparent border-b border-transparent hover:border-wm-border focus:border-wm-accent focus:outline-none px-0.5 min-w-[10rem]"
+                  title="Edit page label. Saves to site_strategy on blur."
+                />
+              ) : (
+                <span className="text-[13px] font-semibold text-wm-text">{name}</span>
+              )}
               <code className="text-[11px] font-mono text-wm-text-muted">/{slug}</code>
               {!strategyPg && (
                 <span className="text-[10px] uppercase tracking-widest font-bold text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
@@ -1176,6 +1236,58 @@ function PagesEditor({
           </li>
         )})}
       </ul>
+      <div className="mt-3">
+        {!addOpen ? (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setAddOpen(true)}
+            className="text-[12px] font-semibold text-wm-accent hover:underline disabled:opacity-50"
+          >+ Add page</button>
+        ) : (
+          <div className="border border-wm-border rounded p-2.5 bg-wm-bg-elevated space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="text-[11px] text-wm-text-muted flex items-center gap-1.5">
+                <span className="uppercase tracking-wider font-semibold">Slug</span>
+                <input
+                  type="text"
+                  value={addSlug}
+                  onChange={e => setAddSlug(e.target.value)}
+                  placeholder="volunteer"
+                  disabled={addSaving || disabled}
+                  className="text-[12px] font-mono border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent"
+                />
+              </label>
+              <label className="text-[11px] text-wm-text-muted flex items-center gap-1.5">
+                <span className="uppercase tracking-wider font-semibold">Label</span>
+                <input
+                  type="text"
+                  value={addName}
+                  onChange={e => setAddName(e.target.value)}
+                  placeholder="Volunteer"
+                  disabled={addSaving || disabled}
+                  className="text-[12px] border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent min-w-[10rem]"
+                />
+              </label>
+            </div>
+            {addError && <div className="text-[11px] text-red-600">{addError}</div>}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={addSaving || disabled}
+                onClick={() => void addPage()}
+                className="text-[12px] font-semibold px-3 py-1 rounded-full bg-wm-accent-strong text-white hover:bg-wm-accent disabled:opacity-50"
+              >{addSaving ? 'Saving…' : 'Add page'}</button>
+              <button
+                type="button"
+                disabled={addSaving}
+                onClick={() => { setAddOpen(false); setAddSlug(''); setAddName(''); setAddError(null) }}
+                className="text-[12px] text-wm-text-muted hover:underline disabled:opacity-50"
+              >Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
     </Section>
   )
 }
