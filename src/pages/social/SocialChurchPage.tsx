@@ -280,7 +280,7 @@ export default function SocialChurchPage() {
     setSrpLoading(true)
     const { data } = await srpPipeline
       .from('sessions')
-      .select('id, session_id, church_name, member, user_email, current_step, status, sermon_title, created_at, updated_at')
+      .select('id, session_id, church_name, member, user_email, current_step, status, sermon_title, clickup_task_id, created_at, updated_at')
       .eq('member', member)
       .not('status', 'eq', 'archived')
       .order('updated_at', { ascending: false })
