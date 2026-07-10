@@ -2456,6 +2456,7 @@ export type SrpWorkflowStep =
   | 'sermon'
   | 'overview'
   | 'clips'
+  | 'creativeDirection'
   | 'preRenderEdit'
   | 'reelCaptions'
   | 'carousel'
@@ -2584,6 +2585,7 @@ export interface SrpPhotoRecapInput {
   promptType?: 'highlights' | 'teaching'
   lookingBack?: string
   guidance?: string
+  category?: string
   selectedIdx?: number | null
   selectedTags?: string[]
 }

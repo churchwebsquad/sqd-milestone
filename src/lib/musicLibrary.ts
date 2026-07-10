@@ -13,6 +13,7 @@ export interface MusicTrack {
   genre:            string
   url:              string
   duration_seconds: number
+  artist?:          string
 }
 
 export const MUSIC_GENRES = [

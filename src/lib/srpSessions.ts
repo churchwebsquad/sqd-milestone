@@ -180,7 +180,7 @@ export type { SrpPipelineSession, SrpWorkflowStep, SrpDeliverable, SrpClipSelect
  *  for conditional ordering based on selected deliverables. */
 export const SRP_ALL_STEPS: SrpWorkflowStep[] = [
   'account', 'deliverables', 'sermon',
-  'overview', 'clips', 'preRenderEdit', 'reelCaptions',
+  'overview', 'clips', 'creativeDirection', 'preRenderEdit', 'reelCaptions',
   'carousel', 'facebook', 'sundayInvite', 'photoRecap',
   'clipProcessing',
   'approved',
@@ -192,6 +192,7 @@ export const STEP_LABELS: Record<SrpWorkflowStep, string> = {
   sermon:            'Sermon input',
   overview:          'Service overview',
   clips:             'Clip selection',
+  creativeDirection: 'Creative direction',
   preRenderEdit:     'Music & edits',
   reelCaptions:      'Reel captions',
   carousel:          'Carousel',
@@ -208,6 +209,7 @@ export const STEP_DESCRIPTIONS: Record<SrpWorkflowStep, string> = {
   sermon:            'Drop sermon URL or paste transcript',
   overview:          'AI-generated summary, key insights, and scripture',
   clips:             'Pick the best moments for reels',
+  creativeDirection: 'Template, music, and designer notes',
   preRenderEdit:     'Title screens, outro logo, and caption text fixes',
   reelCaptions:      'Caption each reel',
   carousel:          '5-slide Instagram carousel',

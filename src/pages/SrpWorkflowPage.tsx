@@ -46,6 +46,7 @@ import { SundayInviteStep }         from '../components/srp/steps/SundayInviteSt
 import { PhotoRecapStep }           from '../components/srp/steps/PhotoRecapStep'
 import { ClipProcessingStep }       from '../components/srp/steps/ClipProcessingStep'
 import { ApprovedContentStep }      from '../components/srp/steps/ApprovedContentStep'
+import { CreativeDirectionStep }   from '../components/srp/steps/CreativeDirectionStep'
 import type { SrpWorkflowStep } from '../types/database'
 
 const STEP_ICONS: Record<SrpWorkflowStep, SrpSidebarStepperItem['icon']> = {
@@ -54,6 +55,7 @@ const STEP_ICONS: Record<SrpWorkflowStep, SrpSidebarStepperItem['icon']> = {
   sermon:            FileVideo,
   overview:          ClipboardList,
   clips:             Scissors,
+  creativeDirection: Sliders,
   preRenderEdit:     Sliders,
   reelCaptions:      Film,
   carousel:          LayoutGrid,
@@ -70,6 +72,7 @@ const STEP_COMPONENTS: Record<SrpWorkflowStep, () => ReactElement> = {
   sermon:            SermonInputStep,
   overview:          TranscriptOverviewStep,
   clips:             ClipSelectionStep,
+  creativeDirection: CreativeDirectionStep,
   preRenderEdit:     PreRenderEditStep,
   reelCaptions:      ReelCaptionsStep,
   carousel:          CarouselStep,
