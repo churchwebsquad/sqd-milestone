@@ -820,7 +820,7 @@ export default function SitemapPartnerViewV2({
                 <div style={{ minWidth: 0 }}>
                   <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Feedback shared. We're reviewing it now.</p>
                   <p style={{ fontSize: 13, margin: '2px 0 0', color: '#2E5A44' }}>
-                    Your Church Media Squad team has your notes and will follow up with next steps. If something else comes to mind, keep sharing below and we'll fold it into the same review.
+                    Your Web Squad has your notes and will follow up with next steps. If something else comes to mind, keep sharing below and we'll fold it into the same review.
                   </p>
                   {(review.partner_reviewed_at || review.partner_reviewed_by) && (
                     <p style={{ fontSize: 12, margin: '6px 0 0', color: '#2E5A44' }}>
@@ -921,7 +921,20 @@ export default function SitemapPartnerViewV2({
               </ul>
 
               <div className="actions">
-                {shareMode && onSubmitFeedback ? (
+                {/* Round 1 — approve/share-feedback lingo.
+                    Round 2 (partner has already submitted feedback and
+                    is now adding more) — swap both buttons for a single
+                    "Share additional thoughts" so the ask reads as
+                    supplementary, not a re-decision. */}
+                {review.status === 'partner_reviewed' ? (
+                  shareMode && onSubmitFeedback ? (
+                    <button
+                      type="button" className="btn pending"
+                      disabled={saving}
+                      onClick={() => void onSubmitFeedback()}
+                    >Share additional thoughts →</button>
+                  ) : null
+                ) : shareMode && onSubmitFeedback ? (
                   <button
                     type="button" className="btn pending"
                     disabled={saving}
@@ -934,7 +947,7 @@ export default function SitemapPartnerViewV2({
                     onClick={() => void onApprove()}
                   >Approve as-is →</button>
                 ) : null}
-                {shareMode && onApprove && (
+                {review.status !== 'partner_reviewed' && shareMode && onApprove && (
                   <button
                     type="button" className="btn ghost"
                     disabled={saving}
@@ -945,7 +958,7 @@ export default function SitemapPartnerViewV2({
                   {openReqs.length > 0 && `${openReqs.length} section feedback pending`}
                   {openReqs.length > 0 && hasNotes && ' · '}
                   {hasNotes && 'overall notes unsent'}
-                  {!shareMode && 'No pending feedback. Approve to lock as canonical.'}
+                  {!shareMode && review.status !== 'partner_reviewed' && 'No pending feedback. Approve to lock as canonical.'}
                 </span>
               </div>
             </div>
@@ -961,7 +974,7 @@ export default function SitemapPartnerViewV2({
               <button className="cx" onClick={closeDrawer} aria-label="Close">×</button>
               <div className="status-chip">Section feedback</div>
               <h3 style={{ marginTop: 10 }}>{drawer.label}</h3>
-              <p>Your feedback is pinned to this section and shared with the Church Media Squad team.</p>
+              <p>Your feedback is pinned to this section and shared with your Web Squad.</p>
             </div>
             <div className="db">
               {authorName && (

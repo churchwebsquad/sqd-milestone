@@ -152,7 +152,7 @@ export default function SitemapReviewPortalPage() {
   const handleSubmitFeedback = useCallback(async () => {
     if (!review) return
     const openCount = (review.partner_edit_requests ?? []).filter(r => r.status === 'open').length
-    if (!confirm(`Share your feedback with the Church Media Squad team? ${openCount} section note${openCount === 1 ? '' : 's'} plus your overall notes will be sent.`)) return
+    if (!confirm(`Share your feedback with your Web Squad? ${openCount} section note${openCount === 1 ? '' : 's'} plus your overall notes will be sent.`)) return
     const submittedAt = new Date().toISOString()
     const next: SitemapReview = {
       ...review,
@@ -292,7 +292,7 @@ function NameGate({ projectName, onSubmit }: { projectName: string; onSubmit: (n
         <p style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.16em', textTransform: 'uppercase', color: '#513DE5', margin: 0 }}>{projectName}</p>
         <h1 style={{ fontSize: 22, fontWeight: 650, color: '#341756', margin: '6px 0 8px' }}>Welcome to your sitemap review</h1>
         <p style={{ fontSize: 13.5, color: '#6B6180', lineHeight: 1.55, margin: '0 0 20px' }}>
-          Let us know who's reviewing so your Church Media Squad can credit your feedback.
+          Let us know who's reviewing so your Web Squad can credit your feedback.
         </p>
         <label style={{ display: 'block', textAlign: 'left', marginBottom: 18 }}>
           <span style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: '.14em', textTransform: 'uppercase', color: '#6B6180', marginBottom: 6 }}>Your name</span>
