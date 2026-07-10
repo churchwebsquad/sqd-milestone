@@ -52,6 +52,7 @@ interface CuTask {
   name: string
   status: string
   date_created: string
+  updatedAt?: string
   assignees: string[]
   url: string
 }
@@ -195,7 +196,7 @@ export default function SocialChurchPage() {
               facebook  = facebook  ?? acct.facebook
             }
           }
-          setChurch({ ...data, photos_link: photoUrl, instagram, facebook } as Church | null)
+          setChurch({ ...(data as object), photos_link: photoUrl, instagram, facebook } as Church | null)
         } else {
           // Fallback — check strategy_social_pro_profiles for Social Pro churches
           const { data: proData } = await (supabase as any)
@@ -310,7 +311,7 @@ export default function SocialChurchPage() {
       notion_dashboard: linkDraft.notion_dashboard.trim() || null,
     }
     const [{ error }, brandErr] = await Promise.all([
-      supabase.from('strategy_account_progress').update(updates).eq('member', member),
+      (supabase as any).from('strategy_account_progress').update(updates).eq('member', member),
       linkDraft.brand_guide_link.trim()
         ? (supabase as any).from('prf_brand_guides').upsert({ account: member, brand_guide_link: linkDraft.brand_guide_link.trim() }, { onConflict: 'account' })
         : Promise.resolve({ error: null }),
@@ -342,7 +343,7 @@ export default function SocialChurchPage() {
       css_rep:      mgmtDraft.css_rep.trim() || null,
       sms_notes:    mgmtDraft.sms_notes.trim() || null,
     }
-    const { error } = await supabase.from('strategy_account_progress').update(updates).eq('member', member)
+    const { error } = await (supabase as any).from('strategy_account_progress').update(updates).eq('member', member)
     if (!error) {
       setChurch(prev => prev ? { ...prev, ...updates } : prev)
       setEditingMgmt(false)
