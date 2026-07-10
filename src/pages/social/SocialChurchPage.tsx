@@ -106,8 +106,8 @@ function TaskRow({ task }: { task: CuTask }) {
           {date && <span className="text-xs text-gray-400">Created: {date}</span>}
         </div>
       </div>
-      {task.url && (
-        <a href={task.url} target="_blank" rel="noopener noreferrer" className="text-[#513DE5] hover:opacity-70 flex-shrink-0 mt-0.5">
+      {(task.url || task.id) && (
+        <a href={task.url || `https://app.clickup.com/t/${task.id}`} target="_blank" rel="noopener noreferrer" className="text-[#513DE5] hover:opacity-70 flex-shrink-0 mt-0.5">
           <ExternalLink size={14} />
         </a>
       )}
@@ -232,11 +232,10 @@ export default function SocialChurchPage() {
         .eq('cache_key', 'srp_tasks')
         .single()
         .then(({ data: row }: { data: { data: { allTasks?: CuTask[] } } | null }) => {
-          const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
           const all: CuTask[] = ((row?.data?.allTasks ?? []) as (CuTask & { member: number })[])
             .filter(t => t.member === member)
-            .filter(t => !t.date_created || new Date(t.date_created).getTime() >= cutoff)
             .sort((a, b) => new Date(b.date_created ?? 0).getTime() - new Date(a.date_created ?? 0).getTime())
+            .slice(0, 4)
           setSrpTasks(tab === 'srp' ? all : all.slice(0, 3))
         }),
       fetch(`/api/clickup/church-tasks?member=${member}`)
@@ -1004,7 +1003,7 @@ export default function SocialChurchPage() {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h2 className="font-bold text-[#341756]">SRP Generator</h2>
-                <p className="text-xs text-gray-400 mt-0.5">ClickUp tasks tagged <span className="font-mono">sms-sermon-recap</span> · last 30 days</p>
+                <p className="text-xs text-gray-400 mt-0.5">ClickUp tasks tagged <span className="font-mono">sms-sermon-recap</span> · most recent 4</p>
               </div>
             </div>
 
@@ -1049,8 +1048,10 @@ export default function SocialChurchPage() {
                   const session = sessionByTaskId.get(task.id)
                   const isDone = session?.status === 'completed'
                   const hasSession = !!session
-                  const dateMs = Number(task.date_created) || new Date(task.updatedAt || '').getTime() || 0
-                  const date = dateMs ? new Date(dateMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'
+                  const dateMs = task.date_created
+                    ? (isNaN(Number(task.date_created)) ? new Date(task.date_created).getTime() : Number(task.date_created))
+                    : 0
+                  const date = dateMs > 0 ? new Date(dateMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'
                   const title = task.name.replace(/^\d+\s*-\s*/, '').trim()
 
                   return (
