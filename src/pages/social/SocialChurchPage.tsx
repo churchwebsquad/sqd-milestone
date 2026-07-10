@@ -234,7 +234,7 @@ export default function SocialChurchPage() {
         .then(({ data: row }: { data: { data: { allTasks?: CuTask[] } } | null }) => {
           const all: CuTask[] = ((row?.data?.allTasks ?? []) as (CuTask & { member: number })[])
             .filter(t => t.member === member)
-            .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
+            .sort((a, b) => new Date(b.date_created ?? 0).getTime() - new Date(a.date_created ?? 0).getTime())
           setSrpTasks(tab === 'srp' ? all : all.slice(0, 3))
         }),
       fetch(`/api/clickup/church-tasks?member=${member}`)
