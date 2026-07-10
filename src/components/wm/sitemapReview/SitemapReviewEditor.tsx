@@ -27,7 +27,6 @@ import {
   type PersonaPosture,
   type ReviewPageAnnotation,
   type SitemapReview,
-  type SitemapReviewNavPresentation,
   type SiteStrategyBlob,
 } from '../../../lib/sitemapReview'
 import { buildCoworkPrompt } from '../../../lib/sitemapReviewCoworkPrompt'
@@ -382,10 +381,9 @@ export function SitemapReviewEditor({
 
             <SectionBand num="02" label="Primary Navigation">
               <NavigationStrategyEditor review={review} onChange={persist} disabled={isApproved} />
-              <NavPresentationEditor
-                review={review}
-                strategyPages={strategyPageOptions}
-                onChange={persist}
+              <NavEditor
+                siteStrategy={siteStrategy}
+                onSaveSiteStrategy={persistSiteStrategy}
                 disabled={isApproved}
               />
               <div className="mt-4">
@@ -1762,330 +1760,389 @@ function PresentationEditor({
 // for the nav shell + preview content.
 // ─────────────────────────────────────────────────────────────────
 
-function NavPresentationEditor({
-  review, strategyPages, onChange, disabled,
+// ─────────────────────────────────────────────────────────────────
+// NavEditor. Structured writer for site_strategy.nav.{primary,
+// cta_only, footer}. Replaces the four retired zombie editors that
+// used to write to review.nav_presentation (a field the partner
+// view now ignores per commit 8814b6d). Every mutation here lands
+// in site_strategy — so the partner view, all pickers, and the
+// composer preview reflect the change on the next render.
+//
+// Primary nav: reorderable top-level items, each with an optional
+// children array. Children use slug pickers from site_strategy.pages.
+//
+// CTA-only: separate reorderable list (Visit, Give style pills).
+//
+// Footer: three named columns (primary_links, explore, legal) each
+// reorderable and edit-in-place.
+//
+// The old NavPresentationEditor / TopnavItemsEditor / HeaderCtasEditor
+// wrote to review.nav_presentation, which is now dead data. Existing
+// review.nav_presentation blobs stay on rows (no destructive
+// migration) but this editor writes to site_strategy so the partner
+// view sees changes immediately.
+// ─────────────────────────────────────────────────────────────────
+
+type NavChild = { slug?: string; label?: string; children?: NavChild[] }
+
+function siteStrategyNavPrimary(strategy: SiteStrategyBlob | null): NavChild[] {
+  const raw = (strategy?.nav?.primary ?? []) as unknown[]
+  return raw.map(coerceNavItem).filter(i => (i.label ?? i.slug ?? '').length > 0)
+}
+
+function siteStrategyNavCtaOnly(strategy: SiteStrategyBlob | null): NavChild[] {
+  const raw = (strategy?.nav?.cta_only ?? []) as unknown[]
+  return raw.map(coerceNavItem).filter(i => (i.label ?? i.slug ?? '').length > 0)
+}
+
+function coerceNavItem(item: unknown): NavChild {
+  if (typeof item === 'string') return { slug: item }
+  if (!item || typeof item !== 'object') return {}
+  const it = item as { slug?: unknown; label?: unknown; children?: unknown }
+  const out: NavChild = {}
+  if (typeof it.slug === 'string')  out.slug = it.slug
+  if (typeof it.label === 'string') out.label = it.label
+  if (Array.isArray(it.children)) {
+    out.children = it.children.map(coerceNavItem).filter(c => (c.slug ?? c.label ?? '').length > 0)
+  }
+  return out
+}
+
+function NavEditor({
+  siteStrategy, onSaveSiteStrategy, disabled,
 }: {
-  review:        SitemapReview
-  strategyPages: StrategyPageOption[]
-  onChange:      (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
-  disabled:      boolean
+  siteStrategy:       SiteStrategyBlob | null
+  onSaveSiteStrategy: (updated: SiteStrategyBlob) => Promise<{ ok: true } | { ok: false; error: string }>
+  disabled:           boolean
 }) {
-  const np = review.nav_presentation
-  const shell = (np?.shell
-    ?? (np?.megamenu_panels && np.megamenu_panels.length > 0 ? 'megamenu'
-        : np?.standard_dropdowns ? 'standard_dropdowns'
-        : np?.offcanvas_overlay ? 'offcanvas' : 'megamenu')) as 'standard_dropdowns' | 'megamenu' | 'offcanvas'
+  const allPages = (siteStrategy?.pages ?? [])
+    .filter(p => typeof p.slug === 'string' && p.slug && p.slug !== '_meta')
+    .map(p => ({ slug: p.slug as string, name: p.name ?? (p.slug as string) }))
+  const nameBySlug = new Map(allPages.map(p => [p.slug, p.name]))
 
-  const initial = useMemo(() => JSON.stringify(np ?? {}, null, 2), [np])
-  const [text,  setText]  = useState(initial)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => { setText(initial); setError(null) }, [initial])
+  const primary = siteStrategyNavPrimary(siteStrategy)
+  const ctaOnly = siteStrategyNavCtaOnly(siteStrategy)
 
-  const setShell = (nextShell: typeof shell) => {
-    // Race-safe: read latest review.nav_presentation at commit time.
-    void onChange((current: SitemapReview) => ({
-      ...current,
-      nav_presentation: { ...(current.nav_presentation ?? {}), shell: nextShell },
-    }))
+  const setPrimary = async (next: NavChild[]) => {
+    const nav = { ...(siteStrategy?.nav ?? {}), primary: next }
+    await onSaveSiteStrategy({ ...(siteStrategy ?? {}), nav })
+  }
+  const setCtaOnly = async (next: NavChild[]) => {
+    const nav = { ...(siteStrategy?.nav ?? {}), cta_only: next }
+    await onSaveSiteStrategy({ ...(siteStrategy ?? {}), nav })
   }
 
-  const saveJson = () => {
-    setError(null)
-    try {
-      const parsed = text.trim() ? JSON.parse(text) : {}
-      if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Must be a JSON object.')
-      // Race-safe: wholesale-replace nav_presentation with the parsed
-      // JSON, computed against latest client state so a parallel
-      // per-field write can't clobber this payload.
-      void onChange((current: SitemapReview) => ({ ...current, nav_presentation: parsed }))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Invalid JSON.')
+  const renderChildRow = (
+    child: NavChild,
+    childIdx: number,
+    parentIdx: number,
+    parentItems: NavChild[],
+    setParentChildren: (next: NavChild[]) => void,
+  ) => {
+    const kids = parentItems[parentIdx].children ?? []
+    const move = (dir: -1 | 1) => {
+      const target = childIdx + dir
+      if (target < 0 || target >= kids.length) return
+      const next = [...kids]
+      const swapped = next[childIdx]; next[childIdx] = next[target]; next[target] = swapped
+      setParentChildren(next)
     }
+    const patch = (p: Partial<NavChild>) => {
+      const next = kids.map((c, i) => i === childIdx ? { ...c, ...p } : c)
+      setParentChildren(next)
+    }
+    const remove = () => setParentChildren(kids.filter((_, i) => i !== childIdx))
+    return (
+      <div key={childIdx} className="flex items-center gap-1.5 ml-6 mb-1">
+        <div className="flex items-center gap-0.5">
+          <button type="button" onClick={() => move(-1)} disabled={disabled || childIdx === 0} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↑</button>
+          <button type="button" onClick={() => move(1)}  disabled={disabled || childIdx === kids.length - 1} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↓</button>
+        </div>
+        <select
+          value={child.slug ?? ''}
+          disabled={disabled}
+          onChange={e => patch({ slug: e.target.value || undefined })}
+          className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[180px]"
+        >
+          <option value="">(no page)</option>
+          {allPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+        </select>
+        <input
+          type="text"
+          defaultValue={child.label ?? (child.slug ? nameBySlug.get(child.slug) ?? child.slug : '')}
+          placeholder="Label"
+          disabled={disabled}
+          onBlur={e => patch({ label: e.target.value.trim() || undefined })}
+          className="flex-1 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+        />
+        <button type="button" onClick={remove} disabled={disabled} className="text-wm-text-subtle hover:text-red-600 text-[14px] leading-none px-1">×</button>
+      </div>
+    )
   }
-  const dirty = text !== initial
 
-  const shellOptions: Array<{ key: typeof shell; label: string; hint: string }> = [
-    { key: 'megamenu',           label: 'Mega menu',           hint: 'Rich dropdowns with columns + featured tiles. Best for churches with several ministries under one top-level item.' },
-    { key: 'standard_dropdowns', label: 'Standard dropdowns',  hint: 'Simple link lists per top-level item. Best for small sites with clear parent-child structure.' },
-    { key: 'offcanvas',          label: 'Off-canvas overlay',  hint: 'Full nav lives behind the hamburger with a short header. Best when mobile-first or when the top nav needs to stay minimal.' },
-  ]
+  const renderPrimaryRow = (item: NavChild, idx: number, list: NavChild[]) => {
+    const move = (dir: -1 | 1) => {
+      const target = idx + dir
+      if (target < 0 || target >= list.length) return
+      const next = [...list]
+      const swapped = next[idx]; next[idx] = next[target]; next[target] = swapped
+      void setPrimary(next)
+    }
+    const patch = (p: Partial<NavChild>) => {
+      const next = list.map((c, i) => i === idx ? { ...c, ...p } : c)
+      void setPrimary(next)
+    }
+    const remove = () => {
+      if (!confirm(`Remove "${item.label ?? item.slug ?? 'this item'}" from the primary nav? (Page stays in site_strategy.pages — this only removes it from the nav.)`)) return
+      void setPrimary(list.filter((_, i) => i !== idx))
+    }
+    const setChildren = (nextKids: NavChild[]) => {
+      const next = list.map((c, i) => i === idx ? { ...c, children: nextKids } : c)
+      void setPrimary(next)
+    }
+    const addChild = () => {
+      const next = list.map((c, i) => i === idx ? { ...c, children: [...(c.children ?? []), {}] } : c)
+      void setPrimary(next)
+    }
+    return (
+      <li key={idx} className="border border-wm-border rounded p-2 bg-wm-bg">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center gap-0.5">
+            <button type="button" onClick={() => move(-1)} disabled={disabled || idx === 0} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↑</button>
+            <button type="button" onClick={() => move(1)}  disabled={disabled || idx === list.length - 1} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↓</button>
+          </div>
+          <select
+            value={item.slug ?? ''}
+            disabled={disabled}
+            onChange={e => patch({ slug: e.target.value || undefined })}
+            className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[180px]"
+            title="Which page this item links to. Leave empty for a nav parent that only opens a dropdown."
+          >
+            <option value="">(dropdown label only)</option>
+            {allPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+          </select>
+          <input
+            type="text"
+            defaultValue={item.label ?? (item.slug ? nameBySlug.get(item.slug) ?? item.slug : '')}
+            placeholder="Label"
+            disabled={disabled}
+            onBlur={e => patch({ label: e.target.value.trim() || undefined })}
+            className="flex-1 text-[12px] font-semibold text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50 min-w-[10rem]"
+          />
+          <button type="button" onClick={remove} disabled={disabled} className="text-[11px] font-semibold text-wm-text-muted hover:text-red-600 disabled:opacity-40">Remove</button>
+        </div>
+        {(item.children ?? []).length > 0 && (
+          <div className="mt-2">
+            <div className="text-[10px] uppercase tracking-wider font-bold text-wm-text-subtle mb-1 ml-6">Dropdown children</div>
+            {(item.children ?? []).map((child, ci) => renderChildRow(child, ci, idx, list, setChildren))}
+          </div>
+        )}
+        {!disabled && (
+          <button type="button" onClick={addChild} className="text-[11px] font-semibold text-wm-accent-strong hover:underline ml-6 mt-1">+ Add dropdown child</button>
+        )}
+      </li>
+    )
+  }
+
+  const renderFlatRow = (item: NavChild, idx: number, list: NavChild[], set: (next: NavChild[]) => Promise<void>) => {
+    const move = (dir: -1 | 1) => {
+      const target = idx + dir
+      if (target < 0 || target >= list.length) return
+      const next = [...list]
+      const swapped = next[idx]; next[idx] = next[target]; next[target] = swapped
+      void set(next)
+    }
+    const patch = (p: Partial<NavChild>) => {
+      const next = list.map((c, i) => i === idx ? { ...c, ...p } : c)
+      void set(next)
+    }
+    return (
+      <div key={idx} className="flex items-center gap-1.5">
+        <div className="flex items-center gap-0.5">
+          <button type="button" onClick={() => move(-1)} disabled={disabled || idx === 0} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↑</button>
+          <button type="button" onClick={() => move(1)}  disabled={disabled || idx === list.length - 1} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↓</button>
+        </div>
+        <select
+          value={item.slug ?? ''}
+          disabled={disabled}
+          onChange={e => patch({ slug: e.target.value || undefined })}
+          className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[180px]"
+        >
+          <option value="">(no page)</option>
+          {allPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+        </select>
+        <input
+          type="text"
+          defaultValue={item.label ?? (item.slug ? nameBySlug.get(item.slug) ?? item.slug : '')}
+          placeholder="Label"
+          disabled={disabled}
+          onBlur={e => patch({ label: e.target.value.trim() || undefined })}
+          className="flex-1 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+        />
+        <button type="button" onClick={() => void set(list.filter((_, i) => i !== idx))} disabled={disabled} className="text-wm-text-subtle hover:text-red-600 text-[14px] leading-none px-1">×</button>
+      </div>
+    )
+  }
 
   return (
-    <div className="space-y-3">
-      <div>
-        <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">Nav shell</div>
-        <div className="flex flex-wrap gap-1.5">
-          {shellOptions.map(opt => (
-            <button
-              key={opt.key}
-              type="button"
-              disabled={disabled}
-              onClick={() => setShell(opt.key)}
-              className={
-                'text-[12px] font-medium px-3 py-1.5 rounded-full border ' +
-                (shell === opt.key
-                  ? 'bg-wm-accent-strong text-white border-wm-accent-strong'
-                  : 'bg-white text-wm-text-muted border-wm-border hover:border-wm-accent')
-              }
-              title={opt.hint}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-        <p className="text-[11px] text-wm-text-muted mt-1.5">
-          {shellOptions.find(o => o.key === shell)?.hint}
-        </p>
-      </div>
-
-      <TopnavItemsEditor
-        strategyPages={strategyPages}
-        np={np}
-        disabled={disabled}
-        onChange={next => void onChange((current: SitemapReview) => ({ ...current, nav_presentation: next }))}
-      />
-
-      <HeaderCtasEditor
-        strategyPages={strategyPages}
-        np={np}
-        disabled={disabled}
-        onChange={next => void onChange((current: SitemapReview) => ({ ...current, nav_presentation: next }))}
-      />
-
-      {shell === 'offcanvas' && (
-        <div className="rounded border border-wm-border bg-wm-bg-elevated/40 px-3 py-2 text-[11px] text-wm-text-muted">
-          The extra-large primary column inside the offcanvas panel
-          mirrors the Topnav Items above. Edit that list once and both
-          surfaces stay in sync.
-        </div>
-      )}
+    <div className="space-y-4">
+      <p className="text-[11.5px] text-wm-text-muted leading-snug">
+        Writes to <code>site_strategy.nav</code>. Partner view + all page-pickers read from here live — no compose step, no manual refresh. Add / remove / reorder any time.
+      </p>
 
       <div>
-        <div className="flex items-baseline justify-between gap-2 mb-1">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Nav content (visible header, panels, columns)</div>
-          <span className="text-[10.5px] text-wm-text-subtle">JSON matching <code className="bg-wm-bg px-1 rounded">SitemapReviewNavPresentation</code></span>
+        <div className="flex items-baseline justify-between gap-2 mb-1.5">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Primary nav</div>
+          <span className="text-[10.5px] text-wm-text-subtle">{primary.length} top-level {primary.length === 1 ? 'item' : 'items'}</span>
         </div>
-        <textarea
-          value={text}
-          onChange={e => setText(e.target.value)}
-          disabled={disabled}
-          rows={16}
-          spellCheck={false}
-          className="w-full rounded-md border border-wm-border bg-white text-[12px] font-mono text-wm-text p-3 outline-none focus:border-wm-accent"
-        />
-        {error && <div className="text-[11.5px] text-red-600 mt-1">{error}</div>}
-        <div className="flex items-center gap-2 mt-1.5">
+        <ul className="space-y-1.5">
+          {primary.map((it, i) => renderPrimaryRow(it, i, primary))}
+        </ul>
+        {!disabled && (
           <button
             type="button"
-            disabled={disabled || !dirty}
-            onClick={saveJson}
-            className="text-[12px] font-semibold px-4 py-1.5 rounded-full bg-wm-accent-strong text-white hover:bg-wm-accent disabled:opacity-50"
-          >Save nav content</button>
-          {dirty && <span className="text-[11px] text-wm-text-subtle">Unsaved changes</span>}
-          <span className="ml-auto text-[10.5px] text-wm-text-subtle">
-            Rich per-field editors (add / remove megamenu columns, featured tiles) coming next; JSON round-trip works today.
-          </span>
+            onClick={() => void setPrimary([...primary, {}])}
+            className="mt-2 text-[11px] font-semibold text-wm-accent-strong hover:underline"
+          >+ Add primary nav item</button>
+        )}
+      </div>
+
+      <div>
+        <div className="flex items-baseline justify-between gap-2 mb-1.5">
+          <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">CTA-only items (pill buttons, e.g. Visit, Give)</div>
+          <span className="text-[10.5px] text-wm-text-subtle">{ctaOnly.length}/3 · keep it tight</span>
         </div>
+        <div className="space-y-1.5">
+          {ctaOnly.map((it, i) => renderFlatRow(it, i, ctaOnly, setCtaOnly))}
+        </div>
+        {!disabled && ctaOnly.length < 3 && (
+          <button
+            type="button"
+            onClick={() => void setCtaOnly([...ctaOnly, {}])}
+            className="mt-2 text-[11px] font-semibold text-wm-accent-strong hover:underline"
+          >+ Add CTA item</button>
+        )}
       </div>
+
+      <NavFooterEditor
+        siteStrategy={siteStrategy}
+        onSaveSiteStrategy={onSaveSiteStrategy}
+        disabled={disabled}
+        allPages={allPages}
+        nameBySlug={nameBySlug}
+      />
     </div>
   )
 }
 
-// FooterPageLinksEditor removed. FooterInfoEditor already renders
-// the authoring surface for footer_info.footer_page_links; keeping a
-// second wrapper here caused the double-render bug on the edit tab.
-
-// ─────────────────────────────────────────────────────────────────
-// TopnavItemsEditor. Compact list editor for nav_presentation
-// .visible_top_level — drives the horizontal items next to the
-// hamburger / logo in the topnav preview across every shell.
-// Independent from the offcanvas featured links below so the
-// strategist can promote a compact set here and a fuller set in
-// the offcanvas panel. Each row: label + kind + (optional) slug.
-// External URLs on topnav items aren't supported (topnav items in
-// this schema key off internal slugs); use featured_links for that.
-// ─────────────────────────────────────────────────────────────────
-
-function TopnavItemsEditor({
-  strategyPages, np, disabled, onChange,
+// Footer groups editor. Writes to site_strategy.nav.footer as a
+// CoworkGroupedFooter (primary_links, explore, legal). Each column
+// is an ordered list of {slug, label} items with add/remove/reorder.
+function NavFooterEditor({
+  siteStrategy, onSaveSiteStrategy, disabled, allPages, nameBySlug,
 }: {
-  strategyPages: StrategyPageOption[]
-  np:            SitemapReviewNavPresentation | undefined
-  disabled:      boolean
-  onChange:      (next: SitemapReviewNavPresentation) => void
+  siteStrategy:       SiteStrategyBlob | null
+  onSaveSiteStrategy: (updated: SiteStrategyBlob) => Promise<{ ok: true } | { ok: false; error: string }>
+  disabled:           boolean
+  allPages:           Array<{ slug: string; name: string }>
+  nameBySlug:         Map<string, string>
 }) {
-  type Item = NonNullable<SitemapReviewNavPresentation['visible_top_level']>[number]
-  const items: Item[] = (np?.visible_top_level ?? []).map(i => ({ ...i }))
-  const setItems = (next: Item[]) => onChange({ ...(np ?? {}), visible_top_level: next })
-  const add = () => setItems([...items, { kind: 'page', label: '', slug: '' }])
-  const remove = (i: number) => setItems(items.filter((_, j) => j !== i))
-  const patch = (i: number, p: Partial<Item>) => setItems(items.map((it, j) => j === i ? { ...it, ...p } : it))
-  return (
+  const rawFooter = (siteStrategy?.nav as { footer?: unknown } | undefined)?.footer
+  const grouped = (rawFooter && typeof rawFooter === 'object' && !Array.isArray(rawFooter))
+    ? (rawFooter as Record<string, unknown>)
+    : {}
+  const readGroup = (key: 'primary_links' | 'explore' | 'legal'): NavChild[] => {
+    const raw = grouped[key]
+    if (!Array.isArray(raw)) return []
+    return raw.map(coerceNavItem).filter(i => (i.slug ?? i.label ?? '').length > 0)
+  }
+  const primaryLinks = readGroup('primary_links')
+  const explore      = readGroup('explore')
+  const legal        = readGroup('legal')
+
+  const writeGroup = async (key: 'primary_links' | 'explore' | 'legal', next: NavChild[]) => {
+    const newFooter = { ...grouped, [key]: next }
+    const nav = { ...(siteStrategy?.nav ?? {}), footer: newFooter }
+    await onSaveSiteStrategy({ ...(siteStrategy ?? {}), nav })
+  }
+
+  const renderRow = (
+    item: NavChild, idx: number, list: NavChild[], set: (next: NavChild[]) => Promise<void>,
+  ) => {
+    const move = (dir: -1 | 1) => {
+      const target = idx + dir
+      if (target < 0 || target >= list.length) return
+      const next = [...list]
+      const swapped = next[idx]; next[idx] = next[target]; next[target] = swapped
+      void set(next)
+    }
+    const patch = (p: Partial<NavChild>) => {
+      const next = list.map((c, i) => i === idx ? { ...c, ...p } : c)
+      void set(next)
+    }
+    return (
+      <div key={idx} className="flex items-center gap-1.5">
+        <div className="flex items-center gap-0.5">
+          <button type="button" onClick={() => move(-1)} disabled={disabled || idx === 0} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↑</button>
+          <button type="button" onClick={() => move(1)}  disabled={disabled || idx === list.length - 1} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↓</button>
+        </div>
+        <select
+          value={item.slug ?? ''}
+          disabled={disabled}
+          onChange={e => patch({ slug: e.target.value || undefined })}
+          className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[180px]"
+        >
+          <option value="">(no page)</option>
+          {allPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+        </select>
+        <input
+          type="text"
+          defaultValue={item.label ?? (item.slug ? nameBySlug.get(item.slug) ?? item.slug : '')}
+          placeholder="Label"
+          disabled={disabled}
+          onBlur={e => patch({ label: e.target.value.trim() || undefined })}
+          className="flex-1 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+        />
+        <button type="button" onClick={() => void set(list.filter((_, i) => i !== idx))} disabled={disabled} className="text-wm-text-subtle hover:text-red-600 text-[14px] leading-none px-1">×</button>
+      </div>
+    )
+  }
+
+  const renderColumn = (
+    key: 'primary_links' | 'explore' | 'legal',
+    heading: string,
+    hint: string,
+    items: NavChild[],
+  ) => (
     <div>
-      <div className="flex items-baseline justify-between gap-2 mb-1.5">
-        <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Topnav items (next to the hamburger)</div>
-        <span className="text-[10.5px] text-wm-text-subtle">{items.length}/6 · keep it tight</span>
+      <div className="flex items-baseline gap-2 mb-1">
+        <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">{heading}</div>
+        <span className="text-[10.5px] text-wm-text-subtle">{hint}</span>
       </div>
       <div className="space-y-1.5">
-        {items.map((it, i) => (
-          <div key={i} className="flex items-center gap-1.5">
-            <select
-              value={it.kind ?? 'page'}
-              disabled={disabled}
-              onChange={e => patch(i, { kind: e.target.value as Item['kind'] })}
-              className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50"
-            >
-              <option value="page">Link</option>
-              <option value="group">Group ▾</option>
-              <option value="button">Button</option>
-              <option value="hamburger">Hamburger</option>
-            </select>
-            <input
-              type="text"
-              defaultValue={it.label ?? it.group_label ?? ''}
-              placeholder="Label (e.g. About)"
-              disabled={disabled}
-              onBlur={e => patch(i, it.kind === 'group' ? { group_label: e.target.value } : { label: e.target.value })}
-              className="flex-1 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-            />
-            <select
-              value={it.slug ?? ''}
-              disabled={disabled || it.kind === 'hamburger'}
-              onChange={e => patch(i, { slug: e.target.value || undefined })}
-              className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50"
-            >
-              <option value="">(no page)</option>
-              {strategyPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
-            </select>
-            {!disabled && (
-              <button
-                type="button"
-                onClick={() => remove(i)}
-                className="text-wm-text-subtle hover:text-wm-danger text-[14px] leading-none px-1"
-              >×</button>
-            )}
-          </div>
-        ))}
+        {items.map((it, i) => renderRow(it, i, items, next => writeGroup(key, next)))}
       </div>
-      {!disabled && items.length < 6 && (
+      {!disabled && (
         <button
           type="button"
-          onClick={add}
+          onClick={() => void writeGroup(key, [...items, {}])}
           className="mt-1.5 text-[11px] font-semibold text-wm-accent-strong hover:underline"
-        >
-          + Add item
-        </button>
+        >+ Add link to {heading.toLowerCase()}</button>
       )}
     </div>
   )
-}
 
-// ─────────────────────────────────────────────────────────────────
-// HeaderCtasEditor. The pill buttons on the far right of the
-// primary nav row (Give / Plan a Visit). Rendered on standard_
-// dropdowns and megamenu at the topnav right edge; on offcanvas
-// at the bottom of the slide-out panel. Each row = label + slug
-// (in-site page) XOR url (external) + style pill_primary/secondary.
-// Independent from the topnav items above and from the offcanvas
-// featured links below.
-// ─────────────────────────────────────────────────────────────────
-
-function HeaderCtasEditor({
-  strategyPages, np, disabled, onChange,
-}: {
-  strategyPages: StrategyPageOption[]
-  np:            SitemapReviewNavPresentation | undefined
-  disabled:      boolean
-  onChange:      (next: SitemapReviewNavPresentation) => void
-}) {
-  type Cta = NonNullable<SitemapReviewNavPresentation['header_ctas']>[number]
-  const ctas: Cta[] = (np?.header_ctas ?? []).map(c => ({ ...c }))
-  const setCtas = (next: Cta[]) => onChange({ ...(np ?? {}), header_ctas: next })
-  const add = () => setCtas([...ctas, { label: '', slug: '', style: ctas.length === 0 ? 'pill_primary' : 'pill_secondary' }])
-  const remove = (i: number) => setCtas(ctas.filter((_, j) => j !== i))
-  const patch = (i: number, p: Partial<Cta>) => setCtas(ctas.map((c, j) => j === i ? { ...c, ...p } : c))
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-2 mb-1.5">
-        <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Header CTAs</div>
-        <span className="text-[10.5px] text-wm-text-subtle">{ctas.length}/3 · pill buttons on the nav</span>
+      <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-2">Footer link groups</div>
+      <div className="space-y-4">
+        {renderColumn('primary_links', 'Take a next step', 'prominent footer links (Give / Prayer / Contact)', primaryLinks)}
+        {renderColumn('explore',       'Explore',           'secondary footer links (About / Ministries / etc.)', explore)}
+        {renderColumn('legal',         'Fine print',        'legal + gated (Privacy / Terms / Staff login)',      legal)}
       </div>
-      <p className="text-[10.5px] text-wm-text-subtle mb-1.5">
-        Render as pill buttons on the far-right of the topnav (standard dropdowns + mega menu) or at the bottom of the offcanvas panel. Each row is either an in-site page OR an external URL.
-      </p>
-      <div className="space-y-1.5">
-        {ctas.map((cta, i) => (
-          <div key={i} className="flex items-center gap-1.5">
-            <input
-              type="text"
-              defaultValue={cta.label ?? ''}
-              placeholder="Label (e.g. Give)"
-              disabled={disabled}
-              onBlur={e => patch(i, { label: e.target.value })}
-              className="flex-1 min-w-0 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-            />
-            <select
-              value={cta.slug ?? ''}
-              disabled={disabled || !!(cta.url ?? '').trim()}
-              onChange={e => patch(i, { slug: e.target.value || undefined, url: e.target.value ? undefined : cta.url })}
-              className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[140px]"
-              title={(cta.url ?? '').trim() ? 'Clear the URL to pick a page' : 'Pick a page'}
-            >
-              <option value="">(pick a page)</option>
-              {strategyPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
-            </select>
-            <input
-              type="url"
-              defaultValue={cta.url ?? ''}
-              placeholder="or external URL"
-              disabled={disabled || !!(cta.slug ?? '').trim()}
-              onBlur={e => {
-                const v = e.target.value.trim()
-                patch(i, { url: v || undefined, slug: v ? undefined : cta.slug })
-              }}
-              className="w-[140px] text-[11px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-              title={(cta.slug ?? '').trim() ? 'Clear the page picker to enter a URL' : 'External URL'}
-            />
-            <select
-              value={cta.style ?? 'pill_secondary'}
-              disabled={disabled}
-              onChange={e => patch(i, { style: e.target.value as Cta['style'] })}
-              className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50"
-              title="Visual style — primary is deep-plum filled, secondary is outlined"
-            >
-              <option value="pill_primary">Primary</option>
-              <option value="pill_secondary">Secondary</option>
-            </select>
-            {!disabled && (
-              <button
-                type="button"
-                onClick={() => remove(i)}
-                className="text-wm-text-subtle hover:text-wm-danger text-[14px] leading-none px-1"
-              >×</button>
-            )}
-          </div>
-        ))}
-      </div>
-      {!disabled && ctas.length < 3 && (
-        <button
-          type="button"
-          onClick={add}
-          className="mt-1.5 text-[11px] font-semibold text-wm-accent-strong hover:underline"
-        >
-          + Add header CTA
-        </button>
-      )}
     </div>
   )
 }
-
-// OffcanvasFeaturedLinksEditor removed — the offcanvas panel's
-// extra-large primary column is now synced with the Topnav Items
-// editor above. One source of truth (nav_presentation.visible_top_level)
-// drives both surfaces; no separate offcanvas-only list to maintain.
-// The offcanvas_overlay.featured_links field remains on the schema
-// as a legacy holder for older reviews' data, but is no longer read
-// by the partner view.
 
 
 // ─────────────────────────────────────────────────────────────────
