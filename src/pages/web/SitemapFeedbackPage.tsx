@@ -34,7 +34,7 @@ export default function SitemapFeedbackPage() {
   const [error, setError]     = useState<string | null>(null)
 
   useEffect(() => {
-    if (!projectId) { setLoading(false); return }
+    if (!projectId) { setLoading(false); return } // eslint-disable-line react-hooks/set-state-in-effect
     let cancelled = false
     void (async () => {
       const res = await supabase
