@@ -192,6 +192,53 @@ async function fetchSrpTasks(squadApiKey: string) {
   return { tasks, allTasks };
 }
 
+// ── ClickUp v2 direct: fetch timestamps for all sms-sermon-recap tasks ────────
+// Squad API strips date_created/date_updated so we call ClickUp v2 directly
+// for the last 90 days and return a map of taskId → { date_created, date_updated }.
+async function fetchTaskTimestamps(clickupToken: string): Promise<Map<string, { date_created: string; updatedAt: string }>> {
+  const since90 = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  const result = new Map<string, { date_created: string; updatedAt: string }>();
+  let page = 0;
+
+  while (true) {
+    const url = new URL(`https://api.clickup.com/api/v2/team/${CLICKUP_TEAM_ID}/task`);
+    url.searchParams.set("tags[]", "sms-sermon-recap");
+    url.searchParams.set("include_closed", "true");
+    url.searchParams.set("date_updated_gt", String(since90));
+    url.searchParams.set("page", String(page));
+
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 25_000);
+    let res: Response | null = null;
+    try {
+      const r = await fetch(url.toString(), { headers: { Authorization: clickupToken }, signal: ac.signal });
+      if (r.ok) res = r;
+    } catch { /* ignore */ } finally { clearTimeout(timer); }
+    if (!res) break;
+
+    const payload = await res.json();
+    const rows: Array<{ id?: string; date_created?: string | number; date_updated?: string | number }> =
+      Array.isArray(payload?.tasks) ? payload.tasks : [];
+    if (rows.length === 0) break;
+
+    for (const t of rows) {
+      if (!t.id) continue;
+      const createdMs = Number(t.date_created ?? 0);
+      const updatedMs = Number(t.date_updated ?? 0);
+      result.set(t.id, {
+        date_created: createdMs ? new Date(createdMs).toISOString() : "",
+        updatedAt:    updatedMs ? new Date(updatedMs).toISOString() : "",
+      });
+    }
+
+    if (payload?.last_page !== false) break;
+    page += 1;
+    if (page > 20) break;
+  }
+
+  return result;
+}
+
 // ── ClickUp v2 direct: this week's SRP tasks (Fri–Thu work week) ─────────────
 // Calls ClickUp's v2 API directly (not Squad API gateway) because the gateway
 // strips due_date. Uses due_date_gt to filter server-side so we only fetch
@@ -348,12 +395,32 @@ Deno.serve(async (req: Request) => {
   // Squad API gateway strips due_date — without it we can't filter by week.
   const clickupToken = Deno.env.get("CLICKUP_STRATEGY_MILESTONE_TOKEN") ?? Deno.env.get("CLICKUP_API_KEY") ?? "";
   try {
-    const [srpData, srpWeekData] = await Promise.all([
+    const [srpData, srpWeekData, timestamps] = await Promise.all([
       fetchSrpTasks(squadApiKey),
       clickupToken
         ? fetchSrpTasksThisWeek(clickupToken)
         : Promise.resolve({ tasks: [], total: 0 }),
+      clickupToken
+        ? fetchTaskTimestamps(clickupToken)
+        : Promise.resolve(new Map<string, { date_created: string; updatedAt: string }>()),
     ]);
+
+    // Merge real timestamps from ClickUp v2 into allTasks (Squad API strips them)
+    for (const t of srpData.allTasks) {
+      const ts = timestamps.get(t.id);
+      if (ts) {
+        if (ts.date_created) t.date_created = ts.date_created;
+        if (ts.updatedAt)    t.updatedAt    = ts.updatedAt;
+      }
+    }
+    // Also patch the per-member summary tasks
+    for (const t of srpData.tasks) {
+      const ts = timestamps.get(t.taskId);
+      if (ts) {
+        if (ts.date_created) t.createdAt = ts.date_created;
+        if (ts.updatedAt)    t.updatedAt = ts.updatedAt;
+      }
+    }
     await Promise.all([
       supabase.from("strategy_srp_hub_cache").upsert({
         cache_key:    "srp_tasks",
