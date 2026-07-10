@@ -49,6 +49,14 @@ export interface PartnerReviewLink {
   /** When the partner submitted / approved. Used to stamp completed
    *  cards. ISO string. */
   submitted_at?: string | null
+  /** Round number for this review, when the surface tracks rounds.
+   *  - Web partner review carries `round_number` from web_reviews
+   *    (auto-incremented per project + kind on insert).
+   *  - Content collection is round = count of sessions to date.
+   *  - Sitemap review is a single ongoing artifact — no rounds — so
+   *    the field stays undefined and the sidebar card omits the pill.
+   */
+  round?: number
 }
 
 /** Fetch every live partner review link for this member — both
@@ -93,26 +101,36 @@ export async function fetchPartnerReviewLinks(
   //   'submitted' → submitted   (partner has sent it in)
   //   'closed'    → filtered out (staff has archived it)
   if (portalToken) {
+    // Pull every session for this project (any status, chronological)
+    // so we can both surface the latest AND compute the round number
+    // (= 1-based index of the latest session in the ordered list).
+    // Closed sessions still count as prior rounds — a partner in
+    // round 2 shouldn't reset just because we archived round 1.
     const ccRes = await supabase
       .from('strategy_content_collection_sessions')
-      .select('id, status, due_at, submitted_at')
+      .select('id, status, due_at, submitted_at, created_at')
       .eq('web_project_id', projectId)
-      .neq('status', 'closed')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (ccRes.data?.id) {
+      .order('created_at', { ascending: true })
+    const sessions = ccRes.data ?? []
+    const liveSessions = sessions.filter(s => s.status !== 'closed')
+    const latest = liveSessions.length > 0 ? liveSessions[liveSessions.length - 1] : null
+    if (latest?.id) {
       const state: PartnerReviewLinkState =
-        ccRes.data.status === 'submitted' ? 'submitted' : 'outstanding'
+        latest.status === 'submitted' ? 'submitted' : 'outstanding'
+      // Round = 1-based index of the latest session across ALL history
+      // for this project, so a re-opened round shows as round 2 even
+      // if round 1 was closed.
+      const round = sessions.findIndex(s => s.id === latest.id) + 1
       links.push({
-        id:           `content_collection:${ccRes.data.id}`,
+        id:           `content_collection:${latest.id}`,
         label:        'Website Content Collection',
         description:  'Review what we found on your current site, tell us what to update or leave alone, and answer a few questions about how you\'d like the new site to work.',
-        url:          `${origin}/portal/${portalToken}/hub/content-collection/${ccRes.data.id}`,
+        url:          `${origin}/portal/${portalToken}/hub/content-collection/${latest.id}`,
         source:       'content_collection',
         state,
-        due_at:       ccRes.data.due_at ?? null,
-        submitted_at: ccRes.data.submitted_at ?? null,
+        due_at:       latest.due_at ?? null,
+        submitted_at: latest.submitted_at ?? null,
+        round:        round > 0 ? round : undefined,
       })
     }
   }
@@ -158,7 +176,7 @@ export async function fetchPartnerReviewLinks(
   //   completed | closed                                   → submitted
   const wrRes = await supabase
     .from('web_reviews')
-    .select('partner_token, status, closed_at')
+    .select('partner_token, status, closed_at, round_number')
     .eq('web_project_id', projectId)
     .eq('kind', 'partner')
     .not('partner_token', 'is', null)
@@ -169,6 +187,9 @@ export async function fetchPartnerReviewLinks(
     const wrStatus = wrRes.data.status
     const wrState: PartnerReviewLinkState =
       wrStatus === 'completed' || wrStatus === 'closed' ? 'submitted' : 'outstanding'
+    const wrRound = typeof wrRes.data.round_number === 'number' && wrRes.data.round_number > 0
+      ? wrRes.data.round_number
+      : undefined
     links.push({
       id:           `web_partner_review:${wrRes.data.partner_token}`,
       label:        'Website Content Review',
@@ -177,6 +198,7 @@ export async function fetchPartnerReviewLinks(
       source:       'web_partner_review',
       state:        wrState,
       submitted_at: wrRes.data.closed_at ?? null,
+      round:        wrRound,
     })
   }
 

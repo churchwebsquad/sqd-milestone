@@ -735,7 +735,14 @@ function ReviewSidebarCard({ link }: { link: PartnerReviewLink }) {
           : 'border-lavender/60 bg-lavender-tint/40'
       }`}
     >
-      <p className="text-[13px] font-semibold text-deep-plum leading-snug">{link.label}</p>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[13px] font-semibold text-deep-plum leading-snug">{link.label}</p>
+        {link.round != null && (
+          <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-lavender-tint text-primary-purple">
+            Round {link.round}
+          </span>
+        )}
+      </div>
       <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
         {isOutstanding ? (
           <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-purple">
