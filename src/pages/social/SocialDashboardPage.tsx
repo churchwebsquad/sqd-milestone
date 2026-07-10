@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Search, Brain, Sparkles, ArrowUpDown, Plus, X, Loader2, Save, AlertCircle, Zap } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
@@ -216,6 +216,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function SocialDashboardPage() {
+  const navigate = useNavigate()
   const [churches, setChurches]   = useState<Church[]>([])
   const [intelMap, setIntelMap]   = useState<Map<number, IntelMeta>>(new Map())
   const [srpMap, setSrpMap]       = useState<Map<number, SrpMeta>>(new Map())
@@ -626,10 +627,13 @@ export default function SocialDashboardPage() {
 
               return (
                 <div key={c.member} className="relative">
-                  <Link
-                    to={`/social/${c.member}`}
+                  <div
+                    role="link"
+                    tabIndex={0}
+                    onClick={() => navigate(`/social/${c.member}`)}
+                    onKeyDown={e => { if (e.key === 'Enter') navigate(`/social/${c.member}`) }}
                     className={[
-                      'group bg-white border rounded-2xl p-5 hover:border-[#513DE5] hover:shadow-sm transition-all flex flex-col gap-3 h-full',
+                      'group bg-white border rounded-2xl p-5 hover:border-[#513DE5] hover:shadow-sm transition-all flex flex-col gap-3 h-full cursor-pointer',
                       thisWeek ? 'border-[#513DE5]/40 ring-1 ring-[#513DE5]/10' : 'border-[#CFC9F8]',
                     ].join(' ')}
                   >
@@ -681,18 +685,20 @@ export default function SocialDashboardPage() {
                       {srp ? (() => {
                         const { bg, text } = srpStatusBadge(srp.status ?? '')
                         const taskId = thisWeekTaskIdMap.get(c.member) || srp.taskId
-                        const taskUrl = srp.url || (taskId ? `https://app.clickup.com/t/${taskId}` : null)
+                        const taskUrl = srp.url || (taskId ? `https://app.clickup.com/t/${taskId}` : '#')
                         return (
-                          <button
-                            type="button"
+                          <a
+                            href={taskUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
                             title={srp.status ?? ''}
                             style={{ background: bg, color: text }}
-                            onClick={e => { e.preventDefault(); e.stopPropagation(); if (taskUrl) window.open(taskUrl, '_blank') }}
                             className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium hover:opacity-80 transition-opacity"
                           >
                             <Sparkles size={10} />
                             SRP{srpDate ? ` · ${srpDate}` : ''}
-                          </button>
+                          </a>
                         )
                       })() : (
                         <span className="inline-flex items-center gap-1 text-[11px] bg-gray-100 text-gray-300 px-2 py-0.5 rounded-full">
@@ -718,9 +724,9 @@ export default function SocialDashboardPage() {
                         else if (isRendering)  { bg = '#FDF4FF'; text = '#7E22CE' }
                         else if (step !== 'account') { bg = '#FFF7ED'; text = '#C2410C' }
                         return (
-                          <Link
-                            to={`/social/srp/${session.session_id}`}
-                            onClick={e => e.stopPropagation()}
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); navigate(`/social/srp/${session.session_id}`) }}
                             style={{ background: bg, color: text }}
                             className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium hover:opacity-80 transition-opacity"
                           >
@@ -728,11 +734,11 @@ export default function SocialDashboardPage() {
                               ? <Loader2 size={10} className="animate-spin" />
                               : <Zap size={10} />}
                             {label}
-                          </Link>
+                          </button>
                         )
                       })()}
                     </div>
-                  </Link>
+                  </div>
 
                   {/* Add profile button — shown on Social Pro cards with no name */}
                   {c.socialPro && noName && (
