@@ -72,7 +72,7 @@ export async function fetchPartnerReviewLinks(
 
   // Resolve the active web project + the partner's portal token.
   const [projectRes, apRes] = await Promise.all([
-    supabase
+    (supabase as any)
       .from('strategy_web_projects')
       .select('id')
       .eq('member', memberNumber)
@@ -80,7 +80,7 @@ export async function fetchPartnerReviewLinks(
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
-    supabase
+    (supabase as any)
       .from('strategy_account_progress')
       .select('portal_token')
       .eq('member', memberNumber)
@@ -106,7 +106,7 @@ export async function fetchPartnerReviewLinks(
     // (= 1-based index of the latest session in the ordered list).
     // Closed sessions still count as prior rounds — a partner in
     // round 2 shouldn't reset just because we archived round 1.
-    const ccRes = await supabase
+    const ccRes = await (supabase as any)
       .from('strategy_content_collection_sessions')
       .select('id, status, due_at, submitted_at, created_at')
       .eq('web_project_id', projectId)
@@ -142,7 +142,7 @@ export async function fetchPartnerReviewLinks(
   //   'published'        → outstanding (waiting on partner)
   //   'partner_reviewed' → submitted   (partner sent feedback)
   //   'approved'         → approved    (locked as canonical)
-  const smRes = await supabase
+  const smRes = await (supabase as any)
     .from('strategy_web_projects')
     .select('roadmap_state')
     .eq('id', projectId)
@@ -174,7 +174,7 @@ export async function fetchPartnerReviewLinks(
   //   no_status | open_for_review | editing_content | open → outstanding
   //   on_hold                                              → outstanding (staff pause, partner card still visible)
   //   completed | closed                                   → submitted
-  const wrRes = await supabase
+  const wrRes = await (supabase as any)
     .from('web_reviews')
     .select('partner_token, status, closed_at, round_number')
     .eq('web_project_id', projectId)

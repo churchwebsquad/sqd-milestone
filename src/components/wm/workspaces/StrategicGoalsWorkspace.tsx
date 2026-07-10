@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Web Manager — Strategic Goals review workspace.
  *
@@ -282,10 +283,6 @@ export function StrategicGoalsWorkspace({ project, onChange }: Props) {
             })
             if (filteredFields.length === 0) return null
 
-            const draftCount = fieldsInCategory.filter(def => {
-              const f = snapshot[catDef.key]?.[def.key]
-              return f?.status === 'draft' && f?.value != null
-            }).length
             const isCollapsed = collapsed.has(catDef.key)
 
             return (

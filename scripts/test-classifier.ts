@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // Standalone sanity check for the schema classifier.
 // Feeds synthetic 3672 sections; prints schema_name + confidence +
 // field diagnostics + CTA breakdown for each. Used to validate the
@@ -106,7 +107,7 @@ for (const s of SECTIONS) {
   console.log(`   fill rates: ${result.schema_field_diagnostics.map(d => `${d.key}=${d.fill_count}/${d.fill_total}${d.in_bound_template ? '' : ' ⚠dropped'}`).join('  ')}`)
   if (result.build_time_issues.length > 0) {
     for (const issue of result.build_time_issues) {
-      console.log(`   🔴 ${issue.kind} on ${issue.template_id} — dropped: [${issue.dropped_fields.join(', ')}] (${issue.severity})`)
+      console.log(`   🔴 ${issue.kind} on ${(issue as any).template_id} — dropped: [${issue.dropped_fields.join(', ')}] (${issue.severity})`)
     }
   }
   // Print top 3 candidate scores for visibility

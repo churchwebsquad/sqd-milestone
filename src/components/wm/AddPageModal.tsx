@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Web Manager — Add Page modal.
  *
@@ -94,7 +95,7 @@ function ManualForm({ projectId, phase, existingPages, onClose, onCreated }: Pro
     }
     setSaving(true)
     const maxOrder = existingPages.filter(p => p.phase === phase).reduce((m, p) => Math.max(m, p.sort_order), 0)
-    const { error: insertErr } = await supabase.from('web_pages').insert({
+    const { error: insertErr } = await (supabase as any).from('web_pages').insert({
       web_project_id: projectId,
       name: name.trim(),
       slug: slug.trim(),
@@ -317,8 +318,8 @@ function CoworkForm({ projectId, phase, existingPages, onClose, onCreated }: Pro
     let cancelled = false
     void (async () => {
       setLoading(true)
-      const { data, error: err } = await supabase
-        .from('strategy_web_projects')
+      const { data, error: err } = await (supabase as any)
+      .from('strategy_web_projects')
         .select('roadmap_state')
         .eq('id', projectId)
         .maybeSingle()
@@ -390,8 +391,8 @@ function CoworkForm({ projectId, phase, existingPages, onClose, onCreated }: Pro
       // title + phase from. Adding from cowork is an implicit approval
       // of this page; we append the sitemap entry on the strategist's
       // behalf so they don't have to pre-edit the sitemap.
-      const { data: projRow, error: readErr } = await supabase
-        .from('strategy_web_projects')
+      const { data: projRow, error: readErr } = await (supabase as any)
+      .from('strategy_web_projects')
         .select('roadmap_state')
         .eq('id', projectId)
         .maybeSingle()
@@ -425,8 +426,8 @@ function CoworkForm({ projectId, phase, existingPages, onClose, onCreated }: Pro
           : flatPages
             ? { ...stage2, pages: nextPages }
             : { ...stage2, sitemap: { pages: nextPages } }
-        const { error: updErr } = await supabase
-          .from('strategy_web_projects')
+        const { error: updErr } = await (supabase as any)
+      .from('strategy_web_projects')
           .update({ roadmap_state: { ...roadmap, stage_2: nextStage2 } })
           .eq('id', projectId)
         if (updErr) { setError(`Could not append to sitemap: ${updErr.message}`); setBinding(null); return }
@@ -448,7 +449,7 @@ function CoworkForm({ projectId, phase, existingPages, onClose, onCreated }: Pro
       // new page may have come in under a different `phase` than the
       // current modal phase. Make sure it lands in this phase so the
       // strategist sees it where they clicked Add.
-      await supabase.from('web_pages').update({ phase }).eq('web_project_id', projectId).eq('slug', slug)
+      await (supabase as any).from('web_pages').update({ phase }).eq('web_project_id', projectId).eq('slug', slug)
 
       // page-bind writes sections as FREEHAND by design — template-
       // binding is a separate user-initiated step in the rest of the

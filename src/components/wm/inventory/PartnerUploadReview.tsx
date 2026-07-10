@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * PartnerUploadReview — strategist surface for the partner-uploaded
  * structured files ingested by /api/web/cowork/ingest-partner-upload.
@@ -188,7 +189,7 @@ export function PartnerUploadReview({ projectId }: Props) {
       if (e) throw new Error(e.message)
       // Mark attachment so we don't keep surfacing it; ingestor's
       // force=true is still available to re-process if needed.
-      await supabase
+      await (supabase as any)
         .from('strategy_content_collection_attachments')
         .update({ parsed_destination: 'rejected' })
         .eq('id', att.id)

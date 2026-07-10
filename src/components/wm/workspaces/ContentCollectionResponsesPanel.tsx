@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * ContentCollectionResponsesPanel — staff view of what the partner
  * answered on the Content Collection portal.
@@ -87,7 +88,7 @@ export function ContentCollectionResponsesPanel({ projectId }: Props) {
   const load = async () => {
     setLoading(true)
     // Most-recent non-closed session for the project
-    const { data: s } = await supabase
+    const { data: s } = await (supabase as any)
       .from('strategy_content_collection_sessions')
       .select('*')
       .eq('web_project_id', projectId)
@@ -100,7 +101,7 @@ export function ContentCollectionResponsesPanel({ projectId }: Props) {
     }
     setSession(s as SessionRow)
     const [marksRes, attRes] = await Promise.all([
-      supabase
+      (supabase as any)
         .from('strategy_content_collection_marks')
         .select('id, target_path, target_kind, status, client_note, proposed_program_name, proposed_program_description, marked_at')
         .eq('session_id', s.id)
@@ -159,7 +160,7 @@ export function ContentCollectionResponsesPanel({ projectId }: Props) {
     )) return
     setReopening(true)
     setRefreshMsg(null)
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('strategy_content_collection_sessions')
       .update({ status: 'open', submitted_at: null })
       .eq('id', session.id)

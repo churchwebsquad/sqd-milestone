@@ -1,4 +1,5 @@
 /* eslint-disable */
+// @ts-ignore TS2307 — jsdom types not installed in this tsconfig
 import { JSDOM } from 'jsdom'
 import { createClient } from '@supabase/supabase-js'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'

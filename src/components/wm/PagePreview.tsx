@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Full-page Brixies preview — read-only render of every section in the
  * page via the actual Brixies HTML with current field_values + snippet

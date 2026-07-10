@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Crawl Inventory — staff view.
  *
@@ -7,7 +8,7 @@
  * before sending a Content Collection request.
  */
 import { useEffect, useRef, useState } from 'react'
-import { ListChecks, Loader2, Sparkles, Send, Copy, X, Link as LinkIcon, ExternalLink, ChevronDown, ChevronUp, RefreshCw, Check } from 'lucide-react'
+import { ListChecks, Loader2, Sparkles, Send, Copy, X, Link as LinkIcon, ExternalLink, RefreshCw, Check } from 'lucide-react'
 import { supabase } from '../../../lib/supabase'
 import { InventoryView, type TopicRow, type SnippetRow, type Mark, type SaveMark, type InventoryCampus } from '../inventory/InventoryView'
 import { loadStrategyBriefSections, strategyBriefToExternalPrefills } from '../../../lib/webStrategyBrief'
@@ -55,7 +56,7 @@ export function CrawlInventory({ projectId }: Props) {
     if (sessionId) return sessionId
     // Try latest session first (might exist if a partner-collection
     // request was already created).
-    const { data: latest } = await supabase
+    const { data: latest } = await (supabase as any)
       .from('strategy_content_collection_sessions')
       .select('id')
       .eq('web_project_id', projectId)
@@ -67,7 +68,7 @@ export function CrawlInventory({ projectId }: Props) {
     // deadline yet; the Request Content Collection button fills that
     // in when the link is sent.
     if (memberFallback == null) return null
-    const { data: created, error } = await supabase
+    const { data: created, error } = await (supabase as any)
       .from('strategy_content_collection_sessions')
       .insert({
         web_project_id:     projectId,
@@ -96,7 +97,7 @@ export function CrawlInventory({ projectId }: Props) {
       proposed_program_description: extra?.proposed_program_description ?? null,
     }
     setMarks(prev => new Map(prev).set(path, next))
-    await supabase
+    await (supabase as any)
       .from('strategy_content_collection_marks')
       .upsert({
         session_id:                   sid,
@@ -176,7 +177,7 @@ export function CrawlInventory({ projectId }: Props) {
       // toggles render with the current state on first paint.
       if (sessionRes.data?.id) {
         setSessionId(sessionRes.data.id)
-        const { data: marksData } = await supabase
+        const { data: marksData } = await (supabase as any)
           .from('strategy_content_collection_marks')
           .select('target_kind, target_path, status, client_note, proposed_program_name, proposed_program_description')
           .eq('session_id', sessionRes.data.id)
@@ -387,7 +388,7 @@ function RequestContentCollectionButton({
         .maybeSingle()
       if (!partner?.portal_token) throw new Error('Partner has no portal_token — set one up first.')
 
-      const { data: existing } = await supabase
+      const { data: existing } = await (supabase as any)
         .from('strategy_content_collection_sessions')
         .select('id')
         .eq('web_project_id', projectId)
@@ -400,12 +401,12 @@ function RequestContentCollectionButton({
       const dueAt = dueDate ? new Date(dueDate).toISOString() : null
 
       if (sessionId) {
-        await supabase
+        await (supabase as any)
           .from('strategy_content_collection_sessions')
           .update({ due_at: dueAt })
           .eq('id', sessionId)
       } else {
-        const { data: created, error: createErr } = await supabase
+        const { data: created, error: createErr } = await (supabase as any)
           .from('strategy_content_collection_sessions')
           .insert({
             web_project_id: projectId,

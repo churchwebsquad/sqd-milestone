@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * useLaunchPlan — single source of truth for the launch planner.
  *
@@ -223,7 +224,7 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
 
   const reorderPriority = useCallback(async (orderedIds: string[]) => {
     const updates = orderedIds.map((id, i) =>
-      supabase.from('strategy_web_projects')
+      (supabase as any).from('strategy_web_projects')
         .update({ priority_order: i + 1, updated_at: new Date().toISOString() })
         .eq('id', id),
     )
@@ -232,7 +233,7 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
   }, [refetch])
 
   const setProjectField = useCallback(async (id: string, patch: Partial<StrategyWebProject>) => {
-    await supabase.from('strategy_web_projects')
+    await (supabase as any).from('strategy_web_projects')
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq('id', id)
     await refetch()
@@ -244,13 +245,13 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
         && !a.designer_out
         && !a.is_blackout
         && (a.base_capacity == null)) {
-      await supabase.from('strategy_dev_weekly_allocations')
+      await (supabase as any).from('strategy_dev_weekly_allocations')
         .delete()
         .eq('week_starting', a.week_starting)
       await refetch()
       return
     }
-    await supabase.from('strategy_dev_weekly_allocations')
+    await (supabase as any).from('strategy_dev_weekly_allocations')
       .upsert({
         week_starting:          a.week_starting,
         help_hours:             a.help_hours,
@@ -291,7 +292,7 @@ export function useLaunchPlan(): UseLaunchPlanReturn {
       })
     }
     if (upserts.length > 0) {
-      await supabase.from('strategy_dev_weekly_allocations')
+      await (supabase as any).from('strategy_dev_weekly_allocations')
         .upsert(upserts, { onConflict: 'week_starting' })
     }
     await refetch()

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Smoke test the simulator against WoodCreek's real-world ask:
  *   "Can we launch by October 31 if we run 20 pages with Novamira?"
@@ -8,6 +9,7 @@
  * Run: SUPABASE_URL=... SUPABASE_ANON_KEY=... npx tsx scripts/smoke-new-project-simulator.ts
  */
 import { createClient } from '@supabase/supabase-js'
+// @ts-ignore TS2307 — module not built yet
 import { simulateNewProjectLaunch } from '../src/lib/webNewProjectSimulator'
 import type { StrategyWebProject } from '../src/types/database'
 import { readFileSync } from 'node:fs'

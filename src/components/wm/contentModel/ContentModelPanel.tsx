@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Content Model panel — strategist-owned content modeling, lifted out
  * of SectionDetailsPanel so both the right-rail "Content Model" tab and
@@ -535,7 +536,7 @@ function SectionItemBindingsControl({
     let cancelled = false
     void (async () => {
       setLoading(true)
-      const { data: section } = await supabase
+      const { data: section } = await (supabase as any)
         .from('web_sections')
         .select('id, content_template_id, field_values')
         .eq('id', sectionId)

@@ -21,7 +21,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Tag, BookOpen, Mic, MessageSquare, AlertTriangle, RotateCw, Search,
+  Tag, Mic, MessageSquare, AlertTriangle, RotateCw, Search,
   Loader2, SquarePen, Inbox, Plus, Copy, X, Check, ChevronRight, ChevronDown,
   Globe, UserPlus, Database,
 } from 'lucide-react'
@@ -30,7 +30,7 @@ import { supabase } from '../../lib/supabase'
 import { runAudit } from '../../lib/webAudit'
 import type { AuditFinding, AuditSeverity } from '../../lib/webAudit'
 import type {
-  StrategyWebProject, WebReview, WebReviewComment, WebReviewEdit,
+  StrategyWebProject, WebReviewComment, WebReviewEdit,
   CoworkHandoffPageMeta, CoworkHandoffSectionMeta,
 } from '../../types/database'
 import {
@@ -49,7 +49,6 @@ import { useSectionDetail } from './sectioneditor/SectionEditingContext'
 import { ProjectIdProvider } from './sectioneditor/ProjectIdContext'
 import { SnippetsWorkspace } from './workspaces/SnippetsWorkspace'
 import { VoiceWorkspace } from './workspaces/VoiceWorkspace'
-import { HeuristicsWorkspace } from './workspaces/HeuristicsWorkspace'
 import { SeoPanel } from './SeoPanel'
 import { CopywriterNotesPanel } from './CopywriterNotesPanel'
 import { RequestReviewModal } from './RequestReviewModal'
@@ -489,18 +488,6 @@ function FeedbackTab({
     }
   }
 
-  const handleClose = async (reviewId: string) => {
-    if (!confirm('Close this review? Open comments stay attached to their pages and carry into the next session.')) return
-    const res = await closeReview(reviewId)
-    if (res.ok) await load()
-  }
-
-  const copyPortalLink = (token: string, reviewId: string) => {
-    const url = `${window.location.origin}/portal/review/${token}`
-    void navigator.clipboard.writeText(url)
-    setCopied(reviewId)
-    setTimeout(() => setCopied(c => c === reviewId ? null : c), 1500)
-  }
 
   const q = query.trim().toLowerCase()
   const filterFn = useCallback((c: WebReviewComment) => {
@@ -663,6 +650,7 @@ function FeedbackTab({
 
 // ── Audit tab ─────────────────────────────────────────────────────────
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function AuditTab({
   projectId: _projectId, activePageId, query, onCount,
 }: {

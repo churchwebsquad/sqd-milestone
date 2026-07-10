@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Brixies live-render — substitute field_values into the template's
  * source_html for the section iframes and the Preview pane.
@@ -1008,19 +1009,6 @@ function hasMeaningfulButtonContent(el: Element): boolean {
 }
 
 /** True if `el` has at least one descendant whose computed display
- *  isn't `none` (via inline style). We can't read live CSS in the
- *  static render, so we approximate by checking the inline style for
- *  display:none. Any non-hidden descendant counts as "has content." */
-function hasVisibleChild(el: Element): boolean {
-  for (const c of Array.from(el.querySelectorAll('*'))) {
-    const s = (c as HTMLElement).getAttribute?.('style') ?? ''
-    if (/display\s*:\s*none/i.test(s)) continue
-    // Element exists and isn't display:none → counts as visible content.
-    return true
-  }
-  return false
-}
-
 /** Hide decorative TEXT-ONLY top-level groups that cowork doesn't fill.
  *
  *  Scope (deliberately narrow — easy to revert if any side effect):

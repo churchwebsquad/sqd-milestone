@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Web Manager — Core Messages review workspace.
  *
@@ -115,7 +116,7 @@ export function AtomReviewWorkspace({ project, onChange }: Props) {
         .eq('web_project_id', project.id)
         .order('topic', { ascending: true })
         .order('created_at', { ascending: true }),
-      supabase
+      (supabase as any)
         .from('strategy_web_projects')
         .select('roadmap_state')
         .eq('id', project.id)

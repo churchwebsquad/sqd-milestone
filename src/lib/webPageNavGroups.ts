@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Helpers for the page-nav-group surface in the Pages workspace.
  *
@@ -228,13 +229,13 @@ export async function moveNavGroup(
     .from('web_pages')
     .update({ nav_group_sort_order: b.sortOrder } as never)
     .eq('web_project_id', webProjectId)
-    .eq('nav_group_label', a.label)
+    .eq('nav_group_label', a.label ?? '')
   if (e1) return { ok: false, error: e1.message }
   const { error: e2 } = await supabase
     .from('web_pages')
     .update({ nav_group_sort_order: a.sortOrder } as never)
     .eq('web_project_id', webProjectId)
-    .eq('nav_group_label', b.label)
+    .eq('nav_group_label', b.label ?? '')
   if (e2) return { ok: false, error: e2.message }
 
   // Mirror the swap in nav_group_definitions so the registry order

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Web Manager — Crawl workspace.
  *
@@ -92,7 +93,7 @@ export function CrawlWorkspace({ project, onProjectChange }: Props) {
       { data: projRow },
     ] = await Promise.all([
       supabase.from('web_crawl_intent').select('*').eq('web_project_id', project.id).maybeSingle(),
-      supabase.schema('web-hub').from('crawl_jobs').select('*').eq('project_id', project.id)
+      (supabase as any).schema('web-hub').from('crawl_jobs').select('*').eq('project_id', project.id)
         .order('started_at', { ascending: false }),
       // Pull the church's site URL so the manual-fire input pre-fills.
       supabase.from('strategy_account_progress')
@@ -152,7 +153,7 @@ export function CrawlWorkspace({ project, onProjectChange }: Props) {
   const toggleExclusion = async () => {
     setTogglingExclusion(true)
     const next = !crawlExcluded
-    const { error: err } = await supabase.rpc('web_crawl_set_excluded', {
+    const { error: err } = await (supabase as any).rpc('web_crawl_set_excluded', {
       p_web_project_id: project.id,
       p_excluded:       next,
     })
@@ -219,7 +220,7 @@ export function CrawlWorkspace({ project, onProjectChange }: Props) {
   const fireManualCrawl = async () => {
     setFiring(true)
     setError(null)
-    const { data, error: err } = await supabase.rpc('web_crawl_fire_manual', {
+    const { data, error: err } = await (supabase as any).rpc('web_crawl_fire_manual', {
       p_web_project_id: project.id,
       p_target_url:     manualUrl?.trim() || null,
     })
@@ -244,7 +245,7 @@ export function CrawlWorkspace({ project, onProjectChange }: Props) {
     if (!confirm('Re-crawl this site? The existing crawl will stay in history but a fresh run will start now.')) return
     setFiring(true)
     setError(null)
-    const { data, error: err } = await supabase.rpc('web_crawl_recrawl', {
+    const { data, error: err } = await (supabase as any).rpc('web_crawl_recrawl', {
       p_web_project_id: project.id,
       p_target_url:     manualUrl?.trim() || null,
     })
@@ -268,7 +269,7 @@ export function CrawlWorkspace({ project, onProjectChange }: Props) {
     if (!confirm('Crawl more pages? The existing crawl stays put; this expansion adds new pages while excluding anything already grabbed (and post-style repeat slugs).')) return
     setFiring(true)
     setError(null)
-    const { data, error: err } = await supabase.rpc('web_crawl_expand', {
+    const { data, error: err } = await (supabase as any).rpc('web_crawl_expand', {
       p_web_project_id: project.id,
     })
     if (err) {

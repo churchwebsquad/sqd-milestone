@@ -1349,6 +1349,7 @@ export interface StrategyWebProject {
    *  Per-section overrides on web_sections.figma_template_override_id
    *  win when both apply. */
   figma_layout_swaps:       Record<string, FigmaLayoutSwapEntry>
+  crawl_excluded?:          boolean | null
 
   [key: string]: unknown
 }
@@ -1574,6 +1575,7 @@ export interface WebGroupDef {
   kind: 'group'
   key: string
   layer_name: string
+  label?: string
   default_count: number
   item_schema: WebFieldDef[]
   // Component / section reference markers — emitted when the group's

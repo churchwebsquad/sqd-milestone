@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Design Handoff — Layout Swap Board.
  *
@@ -144,7 +145,7 @@ export function LayoutSwapBoard({ project, onChange, loadedTemplateIds, onToggle
     setSavingSwap(fromTemplateId)
     setSwaps(nextSwaps)
     setSaveError(null)
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('strategy_web_projects')
       .update({ figma_layout_swaps: nextSwaps })
       .eq('id', project.id)
@@ -430,7 +431,7 @@ function SectionOverrideRow({
   const saveOverride = async (toId: string, noteVal: string) => {
     setSaving(true)
     const { data: { session } } = await supabase.auth.getSession()
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('web_sections')
       .update({
         figma_template_override_id: toId || null,
@@ -471,9 +472,9 @@ function SectionOverrideRow({
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[11.5px] text-wm-text flex-1 min-w-0 truncate" title={display}>{display}</span>
         <span className="text-[10px] text-wm-text-subtle shrink-0">
-          {effective.source === 'section_override' && <>Override → <b className="text-wm-accent">{effectiveTemplate?.layer_name ?? overrideId}</b></>}
-          {effective.source === 'project_swap'     && <>Site-wide → <b>{swapTemplate?.layer_name}</b></>}
-          {effective.source === 'wireframe'        && <>Wireframe → <b>{wireframeTemplate?.layer_name}</b></>}
+          {effective.source === 'section_override' && <>Override → <b className="text-wm-accent">{(effectiveTemplate as any)?.layer_name ?? overrideId}</b></>}
+          {effective.source === 'project_swap'     && <>Site-wide → <b>{(swapTemplate as any)?.layer_name}</b></>}
+          {effective.source === 'wireframe'        && <>Wireframe → <b>{(wireframeTemplate as any)?.layer_name}</b></>}
         </span>
       </div>
       <div className="mt-1.5 flex items-center gap-2">

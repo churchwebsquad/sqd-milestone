@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Web Manager — Review workspace.
  *
@@ -15,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Loader2, Plus, Copy, Check, UserPlus, Inbox, X, Trash2,
+  Loader2, Plus, Copy, Check, UserPlus, Inbox, X,
 } from 'lucide-react'
 import {
   loadProjectReviewState, loadProjectReviewEdits, listReviewRequests,

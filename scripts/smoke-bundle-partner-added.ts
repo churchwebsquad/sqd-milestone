@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Smoke test: project bundle must surface partner-added inventory.
  *
@@ -43,15 +44,15 @@ const res: any = {
 
 await handler(req, res)
 if (statusCode !== 200 || !body) {
-  console.error(`✗ FAIL — handler returned ${statusCode}: ${body?.slice(0, 200) ?? '<empty>'}`)
+  console.error(`✗ FAIL — handler returned ${statusCode}: ${(body as string | null)?.slice(0, 200) ?? '<empty>'}`)
   process.exit(1)
 }
 
-const bundle = JSON.parse(body)
+const bundle = JSON.parse(body as string)
 const inv: any[] = Array.isArray(bundle.partner_added_inventory) ? bundle.partner_added_inventory : []
 
 console.log(`\nproject_id              ${ARVADA_PROJECT_ID}`)
-console.log(`bundle bytes            ${body.length}`)
+console.log(`bundle bytes            ${(body as string).length}`)
 console.log(`partner_added_inventory ${inv.length} entries\n`)
 
 let failures = 0

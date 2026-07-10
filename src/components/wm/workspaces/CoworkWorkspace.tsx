@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Web Manager — Cowork workspace (redesigned 2026-06-13).
  *
@@ -848,8 +849,8 @@ function FoundationPipelineBanner({
  *  written) — at that point the standard workflow is running and
  *  offering the shortcut would be confusing.
  */
-function IngestExternalStrategyBanner({ projectId, state }: {
-  projectId: string
+function IngestExternalStrategyBanner({ state }: {
+  projectId?: string
   state:     CoworkPipelineState | null
 }) {
   const [copied, setCopied] = useState(false)

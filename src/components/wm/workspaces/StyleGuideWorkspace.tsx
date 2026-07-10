@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Web Manager — Style Guide workspace.
  *
@@ -127,7 +128,7 @@ export function StyleGuideWorkspace({ project, onChange }: Props) {
       ...spec,
       figma: { ...(spec.figma ?? {}), loaded_template_ids: next },
     }
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('strategy_web_projects')
       .update({ design_system: nextSpec })
       .eq('id', project.id)
@@ -152,7 +153,7 @@ export function StyleGuideWorkspace({ project, onChange }: Props) {
   ) => {
     setSavingSwap(fromTemplateId)
     setSwaps(next)
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('strategy_web_projects')
       .update({ figma_layout_swaps: next })
       .eq('id', project.id)

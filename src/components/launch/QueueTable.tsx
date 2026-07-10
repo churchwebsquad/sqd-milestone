@@ -11,11 +11,10 @@
  * help hours land the church back on target — they enter that number
  * in the Help hrs column themselves.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Download, ExternalLink, Flag, GripVertical } from 'lucide-react'
 import {
-  weekStart,
   type SchedulerSite, type SchedulerConfig, type SiteSchedule,
 } from '../../lib/launchScheduler'
 import type { RecoveryResult } from '../../lib/launchRecoverySolver'

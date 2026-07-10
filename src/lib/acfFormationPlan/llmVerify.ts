@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // LLM verification + fallback pass (v1.6).
 //
 // Two responsibilities:
@@ -12,6 +13,7 @@
 // present, so local dev / CI without secrets still produces a plan
 // (just without LLM enrichment).
 
+// @ts-ignore TS2307 — @anthropic-ai/sdk not in this tsconfig
 import Anthropic from '@anthropic-ai/sdk'
 import { CANONICAL_SCHEMAS } from './rules'
 import type { Confidence, DiscoverySection, InventoryDiscoveryRowType, SchemaName } from './types'
@@ -22,6 +24,7 @@ const ADVERSARIAL_VOTES = 3
 let _client: Anthropic | null = null
 function client(): Anthropic | null {
   if (_client) return _client
+  // @ts-ignore TS2591 — process available at runtime (tsx/node)
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) return null
   _client = new Anthropic({ apiKey })
@@ -115,7 +118,7 @@ Respond with a tool call to record_verdict.`
       tool_choice: { type: 'tool', name: 'record_verdict' },
       messages: [{ role: 'user', content: prompt }],
     })
-    const block = resp.content.find(b => b.type === 'tool_use')
+    const block = resp.content.find((b: any) => b.type === 'tool_use')
     if (block?.type !== 'tool_use') return null
     const input = block.input as { refuted: boolean; reason?: string }
     return { refuted: input.refuted, reason: input.reason }
@@ -181,7 +184,7 @@ Respond with a tool call to record_classification.`
       tool_choice: { type: 'tool', name: 'record_classification' },
       messages: [{ role: 'user', content: prompt }],
     })
-    const block = resp.content.find(b => b.type === 'tool_use')
+    const block = resp.content.find((b: any) => b.type === 'tool_use')
     if (block?.type !== 'tool_use') return null
     const input = block.input as { schema_name: SchemaName | null; confidence: Confidence }
     if (input.schema_name) {

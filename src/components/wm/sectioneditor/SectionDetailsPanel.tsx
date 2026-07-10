@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Right-side details panel — the editor for one selected section.
  *
@@ -14,11 +15,11 @@
  * No freehand __extras. If a section needs a CTA / card / etc. the
  * strategist swaps the variant.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   X, Image as ImageIcon, LayoutGrid, MousePointerClick, FormInput,
   ChevronDown, ChevronRight, RotateCw, Archive, Trash2,
-  MessageSquarePlus, Clock, AlertTriangle, Sparkles, Loader2,
+  MessageSquarePlus, AlertTriangle, Sparkles, Loader2,
   History,
 } from 'lucide-react'
 import { SlotEditor } from './SlotEditor'
@@ -27,7 +28,6 @@ import { GroupEditor } from './GroupEditor'
 import { GridEditor, detectGridChain } from './GridEditor'
 import { SnippetMenu } from './SnippetMenu'
 import { RichContentCompanion } from './RichContentCompanion'
-import { CommentActions } from './CommentActions'
 import { FeedbackCard } from '../feedback/FeedbackCard'
 import { SaveToLibraryButton } from './SaveToLibraryButton'
 import { ProjectPagesProvider } from './ProjectPagesContext'

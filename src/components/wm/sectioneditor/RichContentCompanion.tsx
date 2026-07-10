@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Rich Content Companion — the durable source-of-truth surface for
  * cowork-produced sections.
@@ -195,27 +196,6 @@ export function RichContentCompanion({ section, template, onChange }: Props) {
       } as any,
     })
     setTimeout(() => setSaving(false), 300)   // visual ack
-  }
-
-  const switchVariant = (_concept: string, newEntry: ManifestEntry) => {
-    if (!newEntry.template_id) return
-    setSwitching(newEntry.template_id)
-    const slotValues = buildSlotValues()
-    const slotValuesRec = slotValues as unknown as Record<string, unknown>
-    const bind = composeFieldValuesForBrixies(slotValuesRec, newEntry)
-    onChange({
-      content_template_id: newEntry.template_id,
-      cowork_slot_values:  slotValuesRec,
-      field_values:        bind.field_values,
-      source_field_values: slotValuesRec,
-      cowork_section_meta: {
-        ...(meta ?? {}),
-        bind_quality: bind.bind_quality,
-        gaps:         bind.gaps,
-      } as any,
-    })
-    setShowVariants(false)
-    setTimeout(() => setSwitching(null), 300)
   }
 
   // Hide entirely if there's no cowork content on this section.

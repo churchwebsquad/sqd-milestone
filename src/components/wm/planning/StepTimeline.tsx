@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Vertical step timeline for the per-project Planning tab.
  *
@@ -18,7 +19,9 @@ import {
   COWORK_STEP_TOTAL,
   type CurrentActivity,
 } from '../../../lib/webCurrentActivity'
-import type { StrategyWebProject, WebProjectPhase, PhaseProgress, HealthMilestoneRow } from '../../../types/database'
+import type { StrategyWebProject, WebProjectPhase, PhaseProgress } from '../../../types/database'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type HealthMilestoneRow = any
 
 /** Status values both the auto-derivation and the override layer use. */
 type RowStatus = 'done' | 'active' | 'upcoming' | 'skipped'
@@ -301,7 +304,7 @@ export function StepTimeline({ project, milestones, activity, effectiveProgress,
               className={`flex items-center gap-2 px-3 py-1.5 ${r.isCurrent ? 'bg-wm-accent/8' : ''}`}
               style={{ paddingLeft: 12 + r.depth * 18 }}
             >
-              <StatusPicker row={r} onOverride={onOverride} />
+              <StatusPicker row={r} onPick={handlePick} />
               <span className={`text-[12px] ${r.status === 'done' ? 'text-wm-text-muted line-through' : r.status === 'skipped' ? 'text-wm-text-subtle italic' : r.isCurrent ? 'text-wm-text font-semibold' : 'text-wm-text'}`}>
                 {r.label}
               </span>

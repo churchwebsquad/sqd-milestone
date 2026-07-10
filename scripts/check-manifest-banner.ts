@@ -20,8 +20,8 @@ async function main(){
   const banners = pickable.filter((p: any) => String(p.template_id ?? p).includes('banner') || String(p.template_id ?? p).includes('Banner'))
   console.log('banner-tagged pickable_templates:', banners)
   const psm = m.page_section_templates ?? {}
-  const psmBanners = Object.entries(psm).filter(([k,v]: any) => String(v.template_id ?? '').includes('banner'))
+  const psmBanners = Object.entries(psm).filter(([_k,v]: any) => String(v.template_id ?? '').includes('banner'))
   console.log('page_section_templates banner entries:')
-  for (const [k, v] of psmBanners) console.log(' ', k, JSON.stringify(v).slice(0,200))
+  for (const [_k, v] of psmBanners) console.log(' ', _k, JSON.stringify(v).slice(0,200))
 }
 main()

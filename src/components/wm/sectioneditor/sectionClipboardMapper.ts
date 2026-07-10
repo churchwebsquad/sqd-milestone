@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Shape-mapping helper: turn a SOURCE section's field_values into an
  * ITEM object that fits a TARGET group's item_schema.
@@ -83,7 +84,7 @@ function collectCandidates(
       if (isButtonsGroup && items.length > 0) {
         // Look for a contact-like leaf inside the first button item.
         const first = items[0]
-        for (const [k, v] of Object.entries(first)) {
+        for (const [, v] of Object.entries(first)) {
           if (typeof v === 'string' && v.length > 0) {
             // Heuristic: treat as a CTA label. URL might be alongside.
             const urlVal = first['url']

@@ -60,7 +60,7 @@ export function useApprovedPagePurposesBySlug(projectId: string | null | undefin
   const approved = useApprovedSitemapReview(projectId)
   const map = new Map<string, string>()
   if (!approved) return map
-  for (const p of approved.pages) {
+  for (const p of (approved.pages ?? [])) {
     if (p.slug && p.purpose && p.purpose.trim()) map.set(p.slug, p.purpose.trim())
   }
   return map

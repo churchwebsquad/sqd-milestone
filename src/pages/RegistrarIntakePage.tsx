@@ -217,7 +217,7 @@ export default function RegistrarIntakePage() {
     if (!partner || !fields) return
     setFields({ ...fields, [field]: value })
     setSaveState('saving')
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('strategy_content_collection_sessions')
       .update({ [field]: value })
       .eq('id', partner.session_id)

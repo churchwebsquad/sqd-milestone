@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * InventoryView — the shared content-inventory surface used by both
  * staff (WM Crawl Inventory tab) and partner (Content Collection
@@ -24,7 +25,7 @@ import {
   Mic2, ClipboardList, Sparkles, HelpCircle, Quote, ArrowRight, BookOpen,
   ExternalLink, CheckCircle2, Edit3, Circle, EyeOff, Check, Pencil,
   Calendar, MapPin, MessageCircle, ListChecks, Hash, Plus,
-  ChevronDown, ChevronUp, AlertCircle, Loader2, Newspaper, Layers,
+  ChevronDown, ChevronUp, Loader2, Newspaper, Layers,
 } from 'lucide-react'
 import { PARTNER_GROUPS, type PartnerBucket } from '../../../lib/webPartnerGroups'
 import { computeBaselineCoverage, type BaselineCoverage } from '../../../lib/webPartnerBaselines'

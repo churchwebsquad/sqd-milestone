@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Per-slot editor for the section details panel.
  *
@@ -46,7 +47,7 @@ interface Props {
   aiContext?: SlotAiContext
 }
 
-export function SlotEditor({ slot, value, onChange, snippets, depth = 0, aiContext }: Props) {
+export function SlotEditor({ slot, value, onChange, snippets, depth = 0 }: Props) {
   // Image slots aren't editable in v4 — the count appears in the
   // panel's bottom "Contents" chip.
   if (slot.type === 'image') return null

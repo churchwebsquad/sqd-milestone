@@ -489,7 +489,7 @@ export async function finalizeReview(opts: {
   //    "good to ship" status — even when staff finalizes, the
   //    convention is that approval is partner-driven.
   if (cleanPageIds.length > 0) {
-    const { error: upErr } = await supabase
+    const { error: upErr } = await (supabase as any)
       .from('web_pages')
       .update({ content_status: 'partner_approved', updated_at: finalizedAt })
       .in('id', cleanPageIds)

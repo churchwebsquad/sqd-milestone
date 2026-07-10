@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Recovery solver — port of solveHelp from the prototype.
  *
@@ -16,9 +17,9 @@
  *                    still misses. Reports best achievable date.
  */
 import {
-  computeSchedule, parseD, weekStart, type SchedulerSite,
+  computeSchedule, weekStart, type SchedulerSite,
   type WeekAdjustment, type SchedulerConfig, type SiteSchedule,
-  type HelpMap, type WeekFlag,
+  type HelpMap,
   buildHelpMap, buildDesignerOutMap, buildBlackoutMap, buildBaseCapMap,
 } from './launchScheduler'
 

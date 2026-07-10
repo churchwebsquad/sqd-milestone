@@ -128,7 +128,7 @@ export default function PortalReviewPage() {
         // share an internal-only review link with teammates the same
         // way they share partner links. The UI is the same surface —
         // the only difference is which review row carries it.
-        const { data: review, error: rErr } = await supabase
+        const { data: review, error: rErr } = await (supabase as any)
           .from('web_reviews')
           .select('*')
           .eq('partner_token', token)
@@ -817,7 +817,7 @@ export default function PortalReviewPage() {
 // ── Feedback tracker (right rail) ─────────────────────────────────
 
 function FeedbackTracker({
-  comments, pages, sectionsByPage, templates, finishedAt, finishing,
+  comments, pages, sectionsByPage, templates: _templates, finishedAt, finishing,
   isInternalReview, onRefresh, token,
   onJumpToSection, onFinish, onApprove,
 }: {
@@ -862,12 +862,12 @@ function FeedbackTracker({
   // No-feedback approve modal — only triggers when the partner hits
   // "Complete Review" with zero comments on the project.
   const [approveModalOpen, setApproveModalOpen] = useState(false)
-  const pageById = useMemo(() => {
+  const _pageById = useMemo(() => {
     const m = new Map<string, WebPage>()
     for (const p of pages) m.set(p.id, p)
     return m
   }, [pages])
-  const sectionById = useMemo(() => {
+  const _sectionById = useMemo(() => {
     const m = new Map<string, WebSection>()
     for (const list of Object.values(sectionsByPage)) for (const s of list) m.set(s.id, s)
     return m

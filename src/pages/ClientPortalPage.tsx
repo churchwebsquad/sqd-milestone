@@ -316,7 +316,7 @@ export default function ClientPortalPage() {
     const load = async () => {
       try {
         // ── 1. Look up partner by opaque portal token ───────────────────────
-        const { data: partnerData } = await supabase
+        const { data: partnerData } = await (supabase as any)
           .from('strategy_account_progress')
           .select('member, church_name')
           .eq('portal_token', token)

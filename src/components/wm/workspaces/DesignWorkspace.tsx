@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Web Manager — Design workspace.
  *
@@ -193,7 +194,7 @@ export function DesignWorkspace({ project, onChange }: Props) {
       // one is older. Score every candidate by (a) published status,
       // (b) how many color rows it has filled in, (c) date as final
       // tiebreaker. The "most complete" guide wins.
-      const { data: guides, error: guideErr } = await supabase
+      const { data: guides, error: guideErr } = await (supabase as any)
         .from('strategy_brand_guides')
         .select('id, is_published, last_updated_at, updated_at')
         .eq('member', project.member)
@@ -207,8 +208,8 @@ export function DesignWorkspace({ project, onChange }: Props) {
         return
       }
 
-      const guideIds = guides.map(g => g.id)
-      const { data: colorRowsForRank } = await supabase
+      const guideIds = guides.map((g: any) => g.id)
+      const { data: colorRowsForRank } = await (supabase as any)
         .from('strategy_brand_colors')
         .select('brand_guide_id')
         .in('brand_guide_id', guideIds)
@@ -216,14 +217,14 @@ export function DesignWorkspace({ project, onChange }: Props) {
       for (const r of (colorRowsForRank ?? []) as Array<{ brand_guide_id: string }>) {
         colorCount.set(r.brand_guide_id, (colorCount.get(r.brand_guide_id) ?? 0) + 1)
       }
-      const scored = guides.map(g => ({
+      const scored = guides.map((g: any) => ({
         g,
         score:
           (g.is_published ? 1_000_000 : 0) +
           (colorCount.get(g.id) ?? 0) * 1_000 +
           new Date(g.last_updated_at ?? g.updated_at ?? 0).getTime() / 1_000_000_000,
       }))
-      scored.sort((a, b) => b.score - a.score)
+      scored.sort((a: any, b: any) => b.score - a.score)
       const guide = scored[0].g
 
       const [{ data: colors, error: colorsErr }, { data: typography, error: typeErr }] =
@@ -283,7 +284,7 @@ export function DesignWorkspace({ project, onChange }: Props) {
     try {
       // Match the same scoring used by populateFromIntake so we hit the
       // same brand guide row both surfaces have agreed is canonical.
-      const { data: guides, error: guideErr } = await supabase
+      const { data: guides, error: guideErr } = await (supabase as any)
         .from('strategy_brand_guides')
         .select('id, is_published, last_updated_at, updated_at, assets_zip_url')
         .eq('member', project.member)
@@ -293,8 +294,8 @@ export function DesignWorkspace({ project, onChange }: Props) {
         return
       }
 
-      const guideIds = guides.map(g => g.id)
-      const { data: logoRowsForRank } = await supabase
+      const guideIds = guides.map((g: any) => g.id)
+      const { data: logoRowsForRank } = await (supabase as any)
         .from('strategy_brand_logos')
         .select('brand_guide_id')
         .in('brand_guide_id', guideIds)
@@ -302,14 +303,14 @@ export function DesignWorkspace({ project, onChange }: Props) {
       for (const r of (logoRowsForRank ?? []) as Array<{ brand_guide_id: string }>) {
         logoCount.set(r.brand_guide_id, (logoCount.get(r.brand_guide_id) ?? 0) + 1)
       }
-      const scored = guides.map(g => ({
+      const scored = guides.map((g: any) => ({
         g,
         score:
           (g.is_published ? 1_000_000 : 0) +
           (logoCount.get(g.id) ?? 0) * 1_000 +
           new Date(g.last_updated_at ?? g.updated_at ?? 0).getTime() / 1_000_000_000,
       }))
-      scored.sort((a, b) => b.score - a.score)
+      scored.sort((a: any, b: any) => b.score - a.score)
       const guide = scored[0].g
 
       const slug = (project.church_short_name || project.name || 'project')
@@ -322,7 +323,7 @@ export function DesignWorkspace({ project, onChange }: Props) {
         return
       }
 
-      const { data: logos, error: logosErr } = await supabase
+      const { data: logos, error: logosErr } = await (supabase as any)
         .from('strategy_brand_logos')
         .select('id, kind, label, preview_url, download_url, sort_order')
         .eq('brand_guide_id', guide.id)
@@ -713,9 +714,10 @@ function BrandAnchorsSection({
     for (const role of ACSS_ROLES) {
       const shadeMap = spec.role_shades[role]
       if (!shadeMap) { nextMatrix[role] = {}; continue }
-      const cleaned: Partial<Record<AcssShadeStep, string>> = {}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cleaned: Partial<Record<any, string>> = {}
       for (const [step, anchorId] of Object.entries(shadeMap)) {
-        if (anchorId && anchorId !== removed?.id) cleaned[step as AcssShadeStep] = anchorId
+        if (anchorId && anchorId !== removed?.id) cleaned[step] = anchorId
       }
       nextMatrix[role] = cleaned
     }
@@ -1177,8 +1179,8 @@ function FigmaStyleGuideSection({
   // checklist; that name carries forward to the dev handoff + Figma
   // plugin without making them leave the style-guide surface.
   const [swaps, setSwaps] = useState<StrategyWebProject['figma_layout_swaps']>(project.figma_layout_swaps ?? {})
-  const [savingSwap, setSavingSwap] = useState<string | null>(null)
-  const [swapError, setSwapError] = useState<string | null>(null)
+  const [_savingSwap, setSavingSwap] = useState<string | null>(null)
+  const [_swapError, setSwapError] = useState<string | null>(null)
   useEffect(() => { setSwaps(project.figma_layout_swaps ?? {}) }, [project.figma_layout_swaps])
 
   const saveSwapMap = useCallback(async (
@@ -1188,7 +1190,7 @@ function FigmaStyleGuideSection({
     setSavingSwap(fromTemplateId)
     setSwaps(next)
     setSwapError(null)
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('strategy_web_projects')
       .update({ figma_layout_swaps: next })
       .eq('id', projectId)
@@ -1291,7 +1293,7 @@ function FigmaStyleGuideSection({
       entry.instances += 1
       usage.set(tplId, entry)
     }
-    const { data: project } = await supabase
+    const { data: project } = await (supabase as any)
       .from('strategy_web_projects')
       .select('primary_header_template_id, primary_footer_template_id, megamenu_template_ids, offcanvas_template_ids')
       .eq('id', projectId)
@@ -1895,7 +1897,7 @@ function SquadFigmaPluginSection({
       let activeToken = token
       if (!activeToken) {
         activeToken = crypto.randomUUID()
-        const { error: tokenErr } = await supabase
+        const { error: tokenErr } = await (supabase as any)
           .from('strategy_web_projects')
           .update({ figma_share_token: activeToken })
           .eq('id', project.id)
@@ -1965,7 +1967,7 @@ function SquadFigmaPluginSection({
     )) return
     setBusy(true)
     setError(null)
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('strategy_web_projects')
       .update({ figma_share_token: crypto.randomUUID() })
       .eq('id', project.id)
@@ -1981,7 +1983,7 @@ function SquadFigmaPluginSection({
     )) return
     setBusy(true)
     setError(null)
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('strategy_web_projects')
       .update({ figma_share_token: null })
       .eq('id', project.id)
@@ -2293,7 +2295,7 @@ function ImageCountChecklist({ projectId }: { projectId: string }) {
 
   const toggleReady = async (pageId: string, next: boolean) => {
     setBusyPageId(pageId)
-    const { error } = await supabase.from('web_pages').update({ images_ready: next }).eq('id', pageId)
+    const { error } = await (supabase as any).from('web_pages').update({ images_ready: next }).eq('id', pageId)
     if (!error) {
       setRows(prev => prev?.map(r => r.page_id === pageId ? { ...r, images_ready: next } : r) ?? null)
     }

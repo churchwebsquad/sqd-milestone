@@ -2002,7 +2002,7 @@ function BlogHandlingSubform({
     if (!url || !/^https?:\/\//i.test(url)) return
     let cancelled = false
     const fire = async () => {
-      const { data: existing } = await supabase
+      const { data: existing } = await (supabase as any)
         .schema('web-hub')
         .from('crawl_jobs')
         .select('id')

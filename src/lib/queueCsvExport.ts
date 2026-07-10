@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * CSV export for the Website Launch Planner build queue.
  *
@@ -91,11 +92,11 @@ export function buildQueueCsv({ rows, sites, schedule }: QueueCsvArgs): string {
       design_due:       designDue,
       dev_start:        devStartIso,
       sprint_span:      sprintSpan,
-      dev_hours:        row.planned_dev_hours ?? '',
-      help_hours:       row.help_hours_needed ?? '',
+      dev_hours:        (row.planned_dev_hours ?? '') as string | number,
+      help_hours:       (row.help_hours_needed ?? '') as string | number,
       project_id:       row.id,
     }
-    lines.push(COLUMNS.map(c => csvCell(cells[c])).join(','))
+    lines.push(COLUMNS.map(c => csvCell(cells[c] as string | number | null | undefined)).join(','))
   }
 
   activeRows.forEach((r, i) => push(r, i + 1))

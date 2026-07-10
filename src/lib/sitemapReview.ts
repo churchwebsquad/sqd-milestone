@@ -951,7 +951,8 @@ function normalizeCoworkNavPresentation(
   const headerItems   = Array.isArray(header.items)   ? header.items   as Array<Record<string, unknown>> : []
   const headerButtons = Array.isArray(header.buttons) ? header.buttons as Array<unknown>                 : []
 
-  const visible_top_level: NonNullable<SitemapReviewNavPresentation['visible_top_level']> = headerItems.map(it => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const visible_top_level: NonNullable<SitemapReviewNavPresentation['visible_top_level']> = (headerItems.map(it => {
     const label = typeof it.label === 'string' ? it.label : ''
     const type  = typeof it.type  === 'string' ? it.type  : 'link'
     const slug  = typeof it.slug  === 'string' ? it.slug  : undefined
@@ -959,7 +960,7 @@ function normalizeCoworkNavPresentation(
       return { kind: 'group', label, group_label: label, ...(slug ? { slug } : {}) }
     }
     return { kind: 'page', label, ...(slug ? { slug } : {}) }
-  }).filter(it => (it.label ?? '').trim().length > 0)
+  }) as any[]).filter((it: any) => (it.label ?? '').trim().length > 0)
 
   const header_ctas: NonNullable<SitemapReviewNavPresentation['header_ctas']> = headerButtons
     .map((b, i) => {
@@ -1012,7 +1013,7 @@ function normalizeCoworkNavPresentation(
             }
             return null
           })
-          .filter((l): l is { label: string; slug?: string; one_line_description?: string } => !!l && (l.label ?? '').trim().length > 0)
+          .filter((l: any) => !!l && (l.label ?? '').trim().length > 0) as { label?: string; slug?: string; one_line_description?: string }[]
         if (links.length > 0) columns.push({ heading: label, links })
       }
     }
@@ -1284,7 +1285,7 @@ export async function savePartnerSitemapReview(args: {
   sb?:   SupabaseClient
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const sb = args.sb ?? defaultSupabase
-  const { error } = await sb.rpc('save_sitemap_review_by_token', {
+  const { error } = await (sb as any).rpc('save_sitemap_review_by_token', {
     p_token: args.token,
     p_next:  args.next as unknown as Record<string, unknown>,
   })

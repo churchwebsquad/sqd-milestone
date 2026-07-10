@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import {
   Send, FileText, LayoutDashboard, User, LogOut, Menu, X,
-  Building2, Sparkles, Search, CalendarDays, Palette,
+  Building2, Sparkles, Search, Palette,
   ChevronDown, Target, Library, Globe, Film,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'

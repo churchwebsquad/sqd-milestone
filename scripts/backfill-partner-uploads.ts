@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * One-off backfill — process every existing partner-upload attachment
  * through the ingest-partner-upload edge function.
@@ -11,6 +12,7 @@
  * surface as parsed rows without needing a re-upload.
  */
 /* eslint-disable no-console */
+// @ts-ignore TS2882 — dotenv types not in this tsconfig
 import 'dotenv/config'
 import { createClient } from '@supabase/supabase-js'
 
@@ -96,7 +98,7 @@ async function main() {
         tally.skipped++
         continue
       }
-      const dest = body.destination as keyof typeof tally
+      const dest = body.destination as string
       if (dest === 'church_facts' || dest === 'content_atoms') {
         console.log(`parsed → ${dest} · ${body.inserted_count} rows`)
         tally.parsed++

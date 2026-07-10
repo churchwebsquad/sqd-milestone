@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Web Manager — Pages workspace (Phase B).
  *
@@ -175,7 +176,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
 
   const loadPages = async () => {
     setLoading(true)
-    const { data } = await supabase
+    const { data } = await (supabase as any)
       .from('web_pages')
       .select('*')
       .eq('web_project_id', project.id)
@@ -191,7 +192,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
     setPages((data ?? []) as WebPage[])
     // Load the hidden per-staff pages into a separate list so the
     // collapsible at the bottom of PageList can show them on demand.
-    const { data: staffData } = await supabase
+    const { data: staffData } = await (supabase as any)
       .from('web_pages')
       .select('*')
       .eq('web_project_id', project.id)
@@ -252,7 +253,7 @@ export function PagesWorkspace({ project, onChange }: Props) {
           ? [archiveConfirm.id]
           : []
       if (idsToArchive.length === 0) return
-      await supabase.from('web_pages').update({ archived: true }).in('id', idsToArchive)
+      await (supabase as any).from('web_pages').update({ archived: true }).in('id', idsToArchive)
       // If the active page got archived, drop it from the URL.
       if (activePage && idsToArchive.includes(activePage.id)) {
         clearActivePageSelection()
@@ -1095,14 +1096,14 @@ function PagesOverview({
   }
 
   const updateField = async (id: string, field: keyof WebPage, value: unknown) => {
-    const { error } = await supabase.from('web_pages').update({ [field]: value }).eq('id', id)
+    const { error } = await (supabase as any).from('web_pages').update({ [field]: value }).eq('id', id)
     if (error) { console.error('[PagesOverview] update failed', field, error); return }
     await onPagesChanged()
   }
   const updateSeoStatus = async (id: string, value: string) => {
     const page = pages.find(p => p.id === id)
     const nextSeo = { ...((page?.seo as Record<string, unknown>) ?? {}), status: value }
-    const { error } = await supabase.from('web_pages').update({ seo: nextSeo }).eq('id', id)
+    const { error } = await (supabase as any).from('web_pages').update({ seo: nextSeo }).eq('id', id)
     if (error) { console.error('[PagesOverview] seo update failed', error); return }
     await onPagesChanged()
   }
@@ -1495,7 +1496,7 @@ function PageEditor({
   // section. Calling notePaste in GroupEditor sets pasteOffer here.
   const handleArchiveAfterPaste = async (archive: boolean) => {
     if (archive && pasteOffer) {
-      await supabase.from('web_sections').delete().eq('id', pasteOffer.sourceSectionId)
+      await (supabase as any).from('web_sections').delete().eq('id', pasteOffer.sourceSectionId)
       await loadSections()
       void markEdited()
     }
@@ -1572,7 +1573,7 @@ function PageEditor({
     const cleanSlug = normalizeSlug(slugDraft)
     setSavingTitle(true)
     if (cleanSlug !== slugDraft) setSlugDraft(cleanSlug)
-    await supabase
+    await (supabase as any)
       .from('web_pages')
       .update({ name: titleDraft.trim(), slug: cleanSlug })
       .eq('id', page.id)
@@ -1581,26 +1582,26 @@ function PageEditor({
   }
 
   const setStatus = async (status: WebPage['content_status']) => {
-    await supabase.from('web_pages').update({ content_status: status }).eq('id', page.id)
+    await (supabase as any).from('web_pages').update({ content_status: status }).eq('id', page.id)
     await onPageChange()
   }
 
   const markEdited = async () => {
     if (!page.edited_since_ai && page.ai_drafted_at) {
-      await supabase.from('web_pages').update({ edited_since_ai: true }).eq('id', page.id)
+      await (supabase as any).from('web_pages').update({ edited_since_ai: true }).eq('id', page.id)
       await onPageChange()
     }
   }
 
   const archivePage = async () => {
     if (!confirm(`Archive "${page.name}"?`)) return
-    await supabase.from('web_pages').update({ archived: true }).eq('id', page.id)
+    await (supabase as any).from('web_pages').update({ archived: true }).eq('id', page.id)
     onArchived()
   }
 
   const addSection = async (templateId: string) => {
     const maxOrder = sections.reduce((m, s) => Math.max(m, s.sort_order), 0)
-    await supabase.from('web_sections').insert({
+    await (supabase as any).from('web_sections').insert({
       web_page_id: page.id,
       content_template_id: templateId,
       field_values: {},
@@ -1620,7 +1621,7 @@ function PageEditor({
    *  MUST NOT use this path — every AI-drafted section gets a template. */
   const addFreehandSection = async () => {
     const maxOrder = sections.reduce((m, s) => Math.max(m, s.sort_order), 0)
-    await supabase.from('web_sections').insert({
+    await (supabase as any).from('web_sections').insert({
       web_page_id: page.id,
       content_template_id: null,
       field_values: { body: '' },
@@ -1667,7 +1668,7 @@ function PageEditor({
     void ensureFirstEditSnapshot()
 
     setSections(prev => prev.map(s => s.id === sectionId ? { ...s, ...effectivePatch } : s))
-    await supabase.from('web_sections').update(effectivePatch).eq('id', sectionId)
+    await (supabase as any).from('web_sections').update(effectivePatch).eq('id', sectionId)
     void markEdited()
 
     // Staff link two-way sync — if this section's bound template has
@@ -1693,7 +1694,7 @@ function PageEditor({
 
   const archiveSection = async (sectionId: string) => {
     if (!confirm('Remove this section?')) return
-    await supabase.from('web_sections').delete().eq('id', sectionId)
+    await (supabase as any).from('web_sections').delete().eq('id', sectionId)
     await loadSections()
     void markEdited()
   }
@@ -1716,13 +1717,13 @@ function PageEditor({
       if (afterIds.length > 0) {
         await Promise.all(afterIds.map(id => {
           const s = sections.find(x => x.id === id)!
-          return supabase.from('web_sections').update({ sort_order: s.sort_order + 1 }).eq('id', id)
+          return (supabase as any).from('web_sections').update({ sort_order: s.sort_order + 1 }).eq('id', id)
         }))
       }
       nextOrder = insertAt
     } else {
       // Append to the end of the target page.
-      const { data: tail } = await supabase
+      const { data: tail } = await (supabase as any)
         .from('web_sections')
         .select('sort_order')
         .eq('web_page_id', targetPageId)
@@ -1751,7 +1752,7 @@ function PageEditor({
       ;(payload as Record<string, unknown>).field_provenance = (source as Record<string, unknown>).field_provenance
     }
     if (source.notes != null) (payload as Record<string, unknown>).notes = source.notes
-    await supabase.from('web_sections').insert(payload as never)
+    await (supabase as any).from('web_sections').insert(payload as never)
     if (sameTargetPage) {
       await loadSections()
     }
@@ -2101,8 +2102,8 @@ function PageEditor({
       return next.sort((x, y) => x.sort_order - y.sort_order)
     })
     await Promise.all([
-      supabase.from('web_sections').update({ sort_order: b.sort_order }).eq('id', a.id),
-      supabase.from('web_sections').update({ sort_order: a.sort_order }).eq('id', b.id),
+      (supabase as any).from('web_sections').update({ sort_order: b.sort_order }).eq('id', a.id),
+      (supabase as any).from('web_sections').update({ sort_order: a.sort_order }).eq('id', b.id),
     ])
     void markEdited()
   }
@@ -2681,7 +2682,7 @@ function DevNotesBlock({
   const save = async () => {
     if (!dirty) return
     setSavingNotes(true)
-    await supabase.from('web_pages').update({ dev_notes: draft.trim() ? draft : null }).eq('id', page.id)
+    await (supabase as any).from('web_pages').update({ dev_notes: draft.trim() ? draft : null }).eq('id', page.id)
     setSavingNotes(false); setDirty(false)
     await onChange()
   }
@@ -2732,7 +2733,7 @@ function DesignerNotesBlock({
   const save = async () => {
     if (!dirty) return
     setSavingNotes(true)
-    await supabase.from('web_pages').update({ designer_notes: draft.trim() ? draft : null } as never).eq('id', page.id)
+    await (supabase as any).from('web_pages').update({ designer_notes: draft.trim() ? draft : null } as never).eq('id', page.id)
     setSavingNotes(false); setDirty(false)
     await onChange()
   }
@@ -2812,7 +2813,7 @@ function SinglePairPrompt({
       .filter(p => p.phase === phase)
       .reduce((m, p) => Math.max(m, p.sort_order), 0)
 
-    const { data: insertedPage, error: pageErr } = await supabase
+    const { data: insertedPage, error: pageErr } = await (supabase as any)
       .from('web_pages')
       .insert({
         web_project_id: projectId,
@@ -2825,7 +2826,7 @@ function SinglePairPrompt({
       .single()
     if (pageErr || !insertedPage) { setBusy(null); setError(pageErr?.message ?? 'Page insert failed'); return }
 
-    const { error: secErr } = await supabase.from('web_sections').insert({
+    const { error: secErr } = await (supabase as any).from('web_sections').insert({
       web_page_id:         insertedPage.id,
       content_template_id: target.templateId,
       field_values:        {},

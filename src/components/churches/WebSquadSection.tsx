@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import { ChevronDown, ChevronRight, ExternalLink, PartyPopper, Link, Check, Globe, Wrench, Server, ArrowUpRight, KeyRound, Loader2, FileText } from 'lucide-react'
@@ -213,7 +214,7 @@ export default function WebSquadSection({ church, submissions, onSave, editing, 
           so AMs can send it to churches who want to migrate hosting
           WITHOUT completing the full Content Collection. */}
       <InitialSiteAccessChecklist church={church} onSave={onSave} />
-      <MigrationIntakeShareLink portalToken={portalToken ?? memberId} />
+      <MigrationIntakeShareLink portalToken={portalToken ?? String(memberId)} />
 
       {/* Hosting & Domain Details (dev-facing) — pulls the partner's
           actual current_host / domain_registrar_url / credential method
