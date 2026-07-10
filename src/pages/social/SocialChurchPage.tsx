@@ -232,8 +232,10 @@ export default function SocialChurchPage() {
         .eq('cache_key', 'srp_tasks')
         .single()
         .then(({ data: row }: { data: { data: { allTasks?: CuTask[] } } | null }) => {
+          const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
           const all: CuTask[] = ((row?.data?.allTasks ?? []) as (CuTask & { member: number })[])
             .filter(t => t.member === member)
+            .filter(t => !t.date_created || new Date(t.date_created).getTime() >= cutoff)
             .sort((a, b) => new Date(b.date_created ?? 0).getTime() - new Date(a.date_created ?? 0).getTime())
           setSrpTasks(tab === 'srp' ? all : all.slice(0, 3))
         }),
