@@ -29,6 +29,7 @@ import {
   loadSitemapReview,
   saveSitemapReview,
   approveReview,
+  startNextRound,
   type SitemapReview,
   type SiteStrategyBlob,
   type PartnerEditRequest,
@@ -389,6 +390,17 @@ export default function SitemapFeedbackPage() {
     else setError(res.error)
   }, [review, projectId])
 
+  const startNextRoundHere = useCallback(async () => {
+    if (!review || !projectId) return
+    if (!confirm(`Start Round ${(review.round_number ?? 1) + 1}? The current round's partner feedback and drafted state get snapshotted into round history, then the review resets to draft so you can iterate. Nothing gets deleted.`)) return
+    const next = startNextRound(review, { siteStrategyGeneratedAt: siteStrategy?._meta?.generated_at })
+    setSaving(true)
+    const res = await saveSitemapReview(supabase, projectId, next)
+    setSaving(false)
+    if (res.ok) setReview(next)
+    else setError(res.error)
+  }, [review, projectId, siteStrategy])
+
   if (loading) {
     return (
       <div className="max-w-6xl mx-auto p-8 flex items-center gap-2 text-wm-text-muted text-sm">
@@ -558,16 +570,27 @@ export default function SitemapFeedbackPage() {
                 {copied ? 'Copied' : 'Copy prompt'}
               </button>
               {!isApproved && (
-                <button
-                  type="button"
-                  onClick={() => void markAllResolvedAndApprove()}
-                  disabled={saving}
-                  className="text-[12px] font-semibold px-3 py-1.5 rounded-md border border-wm-success/50 text-wm-success hover:bg-wm-success-bg disabled:opacity-50"
-                  title="Mark every note resolved and lock the sitemap as canonical for downstream tools."
-                >
-                  {saving ? <Loader2 size={11} className="animate-spin inline mr-1" /> : null}
-                  Mark all resolved &amp; approve
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => void startNextRoundHere()}
+                    disabled={saving || review.status !== 'partner_reviewed'}
+                    className="text-[12px] font-semibold px-3 py-1.5 rounded-md bg-wm-accent-strong text-white hover:bg-wm-accent disabled:opacity-50"
+                    title="Snapshot this round's feedback and open Round N+1 as a new draft in the composer."
+                  >
+                    {saving ? <Loader2 size={11} className="animate-spin inline mr-1" /> : null}
+                    Start next round →
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void markAllResolvedAndApprove()}
+                    disabled={saving}
+                    className="text-[12px] font-semibold px-3 py-1.5 rounded-md border border-wm-success/50 text-wm-success hover:bg-wm-success-bg disabled:opacity-50"
+                    title="Mark every note resolved and lock the sitemap as canonical for downstream tools."
+                  >
+                    Mark all resolved &amp; approve
+                  </button>
+                </div>
               )}
             </div>
           </div>

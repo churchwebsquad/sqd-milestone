@@ -330,9 +330,25 @@ export function SitemapReviewEditor({
           </div>
         </div>
 
+        {/* Action bar — always visible below the header so the strategist
+            never has to scroll to find Publish / Approve / Start next round
+            / Retract. Same buttons the footer used to carry, moved up and
+            made outside the scrollable body so they stay in view on long
+            reviews. */}
+        <ReviewActionBar
+          review={review}
+          saving={saving}
+          error={error}
+          shareUrl={shareUrl}
+          siteStrategy={siteStrategy}
+          publishWithResync={publishWithResync}
+          persist={persist}
+        />
+
         {/* Body */}
         {viewMode === 'edit' ? (
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+            <PartnerOverallNoteView review={review} />
             {(review.round_number ?? 1) > 1 && (
               <RoundChangeSummaryEditor review={review} onChange={persist} disabled={isApproved} />
             )}
@@ -476,101 +492,15 @@ export function SitemapReviewEditor({
           </div>
         )}
 
-        {/* Footer */}
-        <div className="border-t border-wm-border px-5 py-3 flex items-center gap-2 flex-wrap">
-          {status === 'draft' && (
-            <button
-              type="button"
-              onClick={() => void publishWithResync()}
-              disabled={saving}
-              className="inline-flex items-center gap-1 text-[12px] font-semibold bg-wm-accent-strong text-white rounded-full px-4 py-1.5 hover:bg-wm-accent disabled:opacity-50"
-            >
-              Publish for partner review →
-            </button>
-          )}
-          {(status === 'published' || status === 'partner_reviewed') && (
-            <>
-              <button
-                type="button"
-                onClick={() => void persist(approveReview(review, 'staff'))}
-                disabled={saving}
-                className="inline-flex items-center gap-1 text-[12px] font-semibold bg-wm-accent-strong text-white rounded-full px-4 py-1.5 hover:bg-wm-accent disabled:opacity-50"
-              >
-                Approve as canonical →
-              </button>
-              {shareUrl && (
-                <button
-                  type="button"
-                  onClick={() => { void navigator.clipboard.writeText(shareUrl) }}
-                  className="text-[11.5px] font-semibold text-wm-accent-strong hover:underline"
-                >
-                  Copy partner link
-                </button>
-              )}
-              {/* Start next round. Snapshots the current round (partner
-                  feedback + published/reviewed timestamps + change-summary)
-                  into round_history and bumps round_number, then resets
-                  status to draft so the strategist can iterate + republish.
-                  Only makes sense once partner feedback exists — otherwise
-                  "Retract to draft" is the right button (no snapshot). */}
-              {status === 'partner_reviewed' && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!confirm(`Start Round ${(review.round_number ?? 1) + 1}? The current round's partner feedback and drafted state get snapshotted into round history, then the review resets to draft so you can iterate. Nothing gets deleted.`)) return
-                    void persist((current: SitemapReview) => startNextRound(current, {
-                      siteStrategyGeneratedAt: siteStrategy?._meta?.generated_at,
-                    }))
-                  }}
-                  disabled={saving}
-                  className="text-[12px] font-semibold px-3 py-1.5 rounded-full border border-wm-accent text-wm-accent-strong hover:bg-wm-accent-strong hover:text-white"
-                  title="Snapshot this round's feedback and open Round N+1 as a new draft."
-                >
-                  Start next round →
-                </button>
-              )}
-              {/* Retract-to-draft. Reverts published / partner_reviewed
-                  back to draft so the strategist can iterate before
-                  re-sharing. Partner-facing token stays valid so
-                  bookmarks don't 404; the partner view just hides the
-                  review while status is draft. No snapshot — same round.
-                  Confirm dialog because this pulls a live link out
-                  from under any partner who might be reading. */}
-              <button
-                type="button"
-                onClick={() => {
-                  const suffix = status === 'partner_reviewed'
-                    ? ' Partner feedback stays attached to the review — nothing gets deleted, and the round number does not change. (Use "Start next round" instead to bump to Round N+1.)'
-                    : ''
-                  if (!confirm(`Retract this review to draft? The partner-facing link stops working until you publish again.${suffix}`)) return
-                  void persist((current: SitemapReview) => ({
-                    ...current,
-                    status:              'draft',
-                    published_at:        null,
-                    partner_reviewed_at: status === 'partner_reviewed' ? current.partner_reviewed_at : null,
-                    partner_reviewed_by: status === 'partner_reviewed' ? current.partner_reviewed_by : null,
-                  }))
-                }}
-                disabled={saving}
-                className="text-[11px] font-semibold text-wm-text-muted hover:text-wm-text ml-auto"
-              >
-                Retract to draft
-              </button>
-            </>
-          )}
+        {/* Footer — kept for saving/error status only. All action
+            buttons moved to the ReviewActionBar directly under the
+            header so the strategist doesn't have to scroll to find
+            them on long reviews. */}
+        <div className="border-t border-wm-border px-5 py-2 flex items-center gap-2 flex-wrap text-[11px] text-wm-text-muted">
+          {saving && <span className="text-wm-text-subtle">Saving…</span>}
           {isApproved && (
             <>
-              <span className="text-[11.5px] text-wm-text-muted">
-                This review is the canonical sitemap. Downstream tools read from here.
-              </span>
-              <button
-                type="button"
-                onClick={() => void persist((current: SitemapReview) => ({ ...current, status: 'partner_reviewed', approved_at: null, approved_by: null }))}
-                disabled={saving}
-                className="text-[11px] font-semibold text-wm-text-muted hover:text-wm-text ml-auto"
-              >
-                Unlock for edits
-              </button>
+              <span>This review is the canonical sitemap. Downstream tools read from here.</span>
             </>
           )}
           {error && <span className="text-[11px] text-red-600">err: {error}</span>}
@@ -3059,6 +2989,147 @@ function SiteStrategyJsonEditor({
 // Round N-1" that the partner reads at the top of the Round 2+
 // review. Only rendered when round_number > 1.
 // ─────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────
+// ReviewActionBar. Persistent status-aware action row that sits
+// directly below the composer header, outside the scrollable body,
+// so Publish / Approve / Start next round / Retract are always in
+// view no matter how far the strategist has scrolled. Same actions
+// the footer used to carry — moved up so partner-reviewed reviews
+// don't require hunting for the button.
+// ─────────────────────────────────────────────────────────────────
+
+function ReviewActionBar({
+  review, saving, error, shareUrl, siteStrategy,
+  publishWithResync, persist,
+}: {
+  review:             SitemapReview
+  saving:             boolean
+  error:              string | null
+  shareUrl:           string | null
+  siteStrategy:       SiteStrategyBlob | null
+  publishWithResync:  () => Promise<void>
+  persist:            (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
+}) {
+  const status = review.status
+  return (
+    <div className="border-b border-wm-border bg-wm-bg-elevated px-5 py-2.5 flex items-center gap-2 flex-wrap">
+      {status === 'draft' && (
+        <button
+          type="button"
+          onClick={() => void publishWithResync()}
+          disabled={saving}
+          className="inline-flex items-center gap-1 text-[12px] font-semibold bg-wm-accent-strong text-white rounded-full px-4 py-1.5 hover:bg-wm-accent disabled:opacity-50"
+        >
+          Publish for partner review →
+        </button>
+      )}
+      {(status === 'published' || status === 'partner_reviewed') && (
+        <>
+          {status === 'partner_reviewed' ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirm(`Start Round ${(review.round_number ?? 1) + 1}? The current round's partner feedback and drafted state get snapshotted into round history, then the review resets to draft so you can iterate. Nothing gets deleted.`)) return
+                void persist((current: SitemapReview) => startNextRound(current, {
+                  siteStrategyGeneratedAt: siteStrategy?._meta?.generated_at,
+                }))
+              }}
+              disabled={saving}
+              className="inline-flex items-center gap-1 text-[12px] font-semibold bg-wm-accent-strong text-white rounded-full px-4 py-1.5 hover:bg-wm-accent disabled:opacity-50"
+              title="Snapshot this round's feedback and open Round N+1 as a new draft."
+            >
+              Start next round →
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void persist(approveReview(review, 'staff'))}
+            disabled={saving}
+            className="text-[12px] font-semibold px-3 py-1.5 rounded-full border border-wm-accent text-wm-accent-strong hover:bg-wm-accent-strong hover:text-white disabled:opacity-50"
+          >
+            Approve as canonical
+          </button>
+          {shareUrl && (
+            <button
+              type="button"
+              onClick={() => { void navigator.clipboard.writeText(shareUrl) }}
+              className="text-[11.5px] font-semibold text-wm-accent-strong hover:underline"
+            >
+              Copy partner link
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              const suffix = status === 'partner_reviewed'
+                ? ' Partner feedback stays attached to the review — nothing gets deleted, and the round number does not change. (Use "Start next round" instead to bump to Round N+1.)'
+                : ''
+              if (!confirm(`Retract this review to draft? The partner-facing link stops working until you publish again.${suffix}`)) return
+              void persist((current: SitemapReview) => ({
+                ...current,
+                status:              'draft',
+                published_at:        null,
+                partner_reviewed_at: status === 'partner_reviewed' ? current.partner_reviewed_at : null,
+                partner_reviewed_by: status === 'partner_reviewed' ? current.partner_reviewed_by : null,
+              }))
+            }}
+            disabled={saving}
+            className="text-[11px] font-semibold text-wm-text-muted hover:text-wm-text ml-auto"
+          >
+            Retract to draft
+          </button>
+        </>
+      )}
+      {status === 'approved' && (
+        <>
+          <span className="text-[11.5px] text-wm-text-muted">Locked as canonical.</span>
+          <button
+            type="button"
+            onClick={() => void persist((current: SitemapReview) => ({ ...current, status: 'partner_reviewed', approved_at: null, approved_by: null }))}
+            disabled={saving}
+            className="text-[11px] font-semibold text-wm-text-muted hover:text-wm-text ml-auto"
+          >
+            Unlock for edits
+          </button>
+        </>
+      )}
+      {saving && <span className="text-[11px] text-wm-text-subtle ml-2">Saving…</span>}
+      {error && <span className="text-[11px] text-red-600 ml-2">err: {error}</span>}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// PartnerOverallNoteView. Renders the partner's overall note
+// (`review.partner_notes`) in the composer's edit mode so the
+// strategist doesn't have to switch to Preview to see what the
+// partner wrote broadly. Read-only — the partner owns this field.
+// Hides when the note is empty so drafts stay clean.
+// ─────────────────────────────────────────────────────────────────
+
+function PartnerOverallNoteView({ review }: { review: SitemapReview }) {
+  const raw = (review.partner_notes ?? '').trim()
+  if (!raw) return null
+  const author = review.partner_reviewed_by?.trim()
+  const at = review.partner_reviewed_at
+  const when = at ? new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : null
+  return (
+    <section
+      className="rounded-lg border border-wm-accent/40 bg-wm-accent/5 px-4 py-3"
+      title="What the partner wrote in the overall-note field on the portal."
+    >
+      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1">
+        Overall note from the partner
+        {author && <span className="text-wm-text-muted ml-2 normal-case tracking-normal">· {author}</span>}
+        {when && <span className="text-wm-text-subtle ml-2 normal-case tracking-normal">· {when}</span>}
+      </p>
+      <p className="text-[13px] text-wm-text whitespace-pre-wrap leading-snug">
+        {raw}
+      </p>
+    </section>
+  )
+}
 
 function RoundChangeSummaryEditor({
   review, onChange, disabled,
