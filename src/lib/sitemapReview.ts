@@ -1109,12 +1109,22 @@ export function composeSitemapReview(args: {
           const prior = existingPagesBySlug.get(slug)
           const wp = webPageBySlug.get(slug)
           const navPos = navPositionBySlug.get(slug) ?? (sp.nav_strategy ? capitalize(sp.nav_strategy) : undefined)
+          // Strategy is fresher (watermark bumped or structural drift).
+          // Its name + purpose reflect the latest cowork write and MUST
+          // beat the stale review copy — otherwise syncToSiteStrategy
+          // rewinds strategy on the next save (bug: cowork edits page
+          // names, review reloads with stale prior.name, prior.name
+          // wins on this line, save then pushes prior.name back into
+          // strategy.pages[].name, and cowork's edit is silently lost).
+          // Strategist edits made in the review editor don't bump the
+          // watermark, so useExistingAsSource wins on the next reload
+          // and their edit still survives.
           return {
             id:                prior?.id ?? cryptoRandomId(),
             web_page_id:       wp?.id ?? prior?.web_page_id,
             slug,
-            name:              prior?.name ?? sp.name ?? slug,
-            purpose:           prior?.purpose && prior.purpose.trim() ? prior.purpose : (sp.purpose ?? ''),
+            name:              sp.name ?? prior?.name ?? slug,
+            purpose:           sp.purpose && sp.purpose.trim() ? sp.purpose : (prior?.purpose ?? ''),
             nav_position:      prior?.nav_position ?? navPos,
             parent_slug:       prior?.parent_slug ?? sp.parent_slug ?? null,
             order:             i,
