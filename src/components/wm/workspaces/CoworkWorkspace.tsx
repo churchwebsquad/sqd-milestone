@@ -686,6 +686,12 @@ export function CoworkWorkspace({ project, onChange }: Props) {
         onRun={() => void runFoundationPipeline(false)}
       />
 
+      {/* Alternate entry path — partners who arrive with an already-
+       *  approved content strategy doc (AM-authored in Notion, etc.)
+       *  skip steps 1-6 and land straight at step 7. The banner surfaces
+       *  the ingest-external-content-strategy skill's starter prompt. */}
+      <IngestExternalStrategyBanner projectId={project.id} state={state} />
+
       <div className="flex flex-col gap-4">
         {steps.map(step => (
           <StepCard
@@ -823,6 +829,120 @@ function FoundationPipelineBanner({
           />
         ))}
       </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Alternate ingest — external content strategy doc
+// ────────────────────────────────────────────────────────────────────
+
+/** Partners who arrive with an AM-authored content strategy doc skip
+ *  the analyzer-driven steps 1-6. This banner surfaces the
+ *  ingest-external-content-strategy skill's starter prompt so the
+ *  strategist can drop it into Claude Code Desktop, attach the doc,
+ *  and have the four foundation artifacts + an approved sitemap
+ *  review materialize in one pass.
+ *
+ *  Hidden once foundation is in progress (any stage_1 / site_strategy
+ *  written) — at that point the standard workflow is running and
+ *  offering the shortcut would be confusing.
+ */
+function IngestExternalStrategyBanner({ projectId, state }: {
+  projectId: string
+  state:     CoworkPipelineState | null
+}) {
+  const [copied, setCopied] = useState(false)
+  const [open,   setOpen]   = useState(false)
+
+  // Only offer the shortcut when the pipeline is untouched. Once
+  // stage_1 or site_strategy exists, the standard flow is live —
+  // showing this banner would confuse the strategist.
+  const hasFoundationWork =
+    !!state?.stage_1?._meta?.generated_at ||
+    !!state?.ministry_model?._meta?.generated_at ||
+    !!state?.acf_plan?._meta?.generated_at ||
+    !!state?.site_strategy?._meta?.generated_at
+  if (hasFoundationWork) return null
+
+  const prompt =
+`Use the **ingest-external-content-strategy** skill for project_id \`${projectId}\`.
+
+## Inputs (attached, NOT MCP)
+
+I'm attaching:
+1. The ingest-external-content-strategy **SKILL.md** (contract + output shape).
+2. The partner's **content strategy doc** (Notion export / markdown). Read this as the AUTHORITY — the doc's page list, nav architecture, persona framing, AEO/GEO targets, and executive summary are already decided. You are not re-deriving strategy, you are structuring what's there.
+3. (Optional) The project's approved **strategic_goals** snapshot, if the strategist has attached one. Use it to fill fields the doc doesn't cover (audience, top_3_website_goals, voice_and_tone.one_key_message, vision).
+
+## What to produce
+
+Four foundation artifacts + an approved sitemap review, all written to \`roadmap_state\`:
+
+- \`stage_1\` (personas, voice, x_factor, sitemap_signals, topic_coverage_plan)
+- \`ministry_model\` (primary + optional secondary blend, evidence lifted from the doc)
+- \`acf_plan\` (cell_density derived from page purposes, gaps flagged for Phase 2)
+- \`site_strategy\` (full pages[] + nav + persona_journeys + page_elevations)
+- \`sitemap_review\` stamped \`status: 'approved'\`, \`approved_by: 'staff'\` — the doc IS the approved sitemap
+
+Every \`_meta.skill_name\` = \`'ingest-external-content-strategy'\`.
+
+## Read order
+
+1. Skim the whole doc first so you have the full picture before starting extraction.
+2. Executive Summary + Navigation Architecture → drives site_strategy.nav, page_elevations, and the executive_summary field on sitemap_review.
+3. Phase Summary table → your page_count + phase splits.
+4. Each Webpage Outline → one \`pages[]\` entry with slug / name / purpose / audience / funnel / covers_cells.
+5. AEO/GEO section → \`stage_1.seo_aeo_geo_targets\` (step 8 re-runs downstream; this is the seed).
+6. Open Items and Action Items → surface in the strategist handoff note.
+
+## Persist
+
+Use the column-free chunked write pattern from plan-cross-page-allocation §Persist. Chunk keys under \`_chunks\`: \`stage_1\`, \`ministry_model\`, \`acf_plan\`, \`site_strategy\`, \`sitemap_review\`. Wrap the final \`roadmap_state_set\` in \`IS NOT NULL\` so the ~300KB return doesn't blow the MCP output limit.
+
+Walk me through the extraction before persisting — pause on any page or nav decision where the doc is ambiguous.
+`
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(prompt)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2200)
+    } catch { /* clipboard unavailable */ }
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border border-wm-border bg-wm-bg-elevated px-4 py-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Shortcut · external content strategy</p>
+          <p className="text-[13px] font-semibold text-wm-text mt-0.5">Already have an approved content strategy doc from the AM?</p>
+          <p className="text-[11px] text-wm-text-muted mt-1 max-w-2xl leading-snug">
+            Skip steps 1-6. The <code>ingest-external-content-strategy</code> skill reads the AM's Notion doc and produces stage_1 / ministry_model / acf_plan / site_strategy plus an approved sitemap review in one pass. Use this when the partner has an external content collection and no crawl inventory.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setOpen(o => !o)}
+            className="text-[11px] font-semibold px-2.5 py-1 rounded-md border border-wm-border text-wm-text-muted hover:bg-wm-bg-hover"
+          >
+            {open ? 'Hide prompt' : 'Show prompt'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void copy()}
+            className="text-[11px] font-semibold px-3 py-1 rounded-md bg-wm-accent-strong text-white hover:bg-wm-accent"
+          >
+            {copied ? 'Copied — paste in Claude Code' : 'Copy starter prompt'}
+          </button>
+        </div>
+      </div>
+      {open && (
+        <pre className="mt-3 text-[11px] font-mono text-wm-text bg-wm-bg rounded-md border border-wm-border p-3 leading-snug whitespace-pre-wrap max-h-[400px] overflow-auto">
+          {prompt}
+        </pre>
+      )}
     </div>
   )
 }
