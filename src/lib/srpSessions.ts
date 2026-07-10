@@ -30,16 +30,19 @@ import { SRP_MAX_REELS } from '../types/database'
 export const srpPipeline = (supabase as any).schema('srp_pipeline') as ReturnType<typeof supabase.schema>
 
 export interface SrpSessionListRow {
-  id:            string
-  session_id:    string
-  church_name:   string | null
-  member:        number | null
-  user_email:    string | null
-  current_step:  SrpWorkflowStep | null
-  status:        string | null
-  sermon_title:  string | null
-  created_at:    string | null
-  updated_at:    string | null
+  id:                 string
+  session_id:         string
+  church_name:        string | null
+  member:             number | null
+  user_email:         string | null
+  current_step:       SrpWorkflowStep | null
+  status:             string | null
+  sermon_title:       string | null
+  clickup_task_id:    string | null
+  video_url:          string | null
+  transcript_job_id:  string | null
+  created_at:         string | null
+  updated_at:         string | null
 }
 
 /** session_id format: {member}_{ChurchNameNoSpaces}_{YYYYMMDDHHMMSS} */

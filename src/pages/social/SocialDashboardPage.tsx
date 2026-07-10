@@ -704,19 +704,18 @@ export default function SocialDashboardPage() {
                         const taskId = thisWeekTaskIdMap.get(c.member) || srp.taskId
                         const taskUrl = srp.url || (taskId ? `https://app.clickup.com/t/${taskId}` : null)
                         return (
-                          <button
-                            type="button"
+                          <a
+                            href={taskUrl ?? '#'}
+                            target="_blank"
+                            rel="noopener noreferrer"
                             title={srp.status ?? ''}
                             style={{ background: bg, color: text }}
                             className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium hover:opacity-80 transition-opacity"
-                            onClick={e => {
-                              e.stopPropagation()
-                              if (taskUrl) window.open(taskUrl, '_blank', 'noopener,noreferrer')
-                            }}
+                            onClick={e => e.stopPropagation()}
                           >
                             <Sparkles size={10} />
                             SRP{srpDate ? ` · ${srpDate}` : ''}
-                          </button>
+                          </a>
                         )
                       })() : (
                         <span className="inline-flex items-center gap-1 text-[11px] bg-gray-100 text-gray-300 px-2 py-0.5 rounded-full">

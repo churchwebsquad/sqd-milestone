@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Brain, Sparkles, CalendarDays, ArrowLeft, ExternalLink, Wand2, X, ChevronRight, User, Video, Link2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
@@ -163,6 +163,8 @@ export default function SocialChurchPage() {
   const [srpSessions, setSrpSessions] = useState<SrpSessionListRow[]>([])
   const [srpLoading, setSrpLoading] = useState(false)
   const [srpCreating, setSrpCreating] = useState(false)
+  const autoCreateFiredRef = useRef(false)
+  useEffect(() => { autoCreateFiredRef.current = false }, [member])
 
   // ── ClickUp tasks ────────────────────────────────────────────────────────
   const [srpTasks, setSrpTasks] = useState<CuTask[]>([])
@@ -234,6 +236,11 @@ export default function SocialChurchPage() {
         .then(({ data: row }: { data: { data: { allTasks?: CuTask[] } } | null }) => {
           const all: CuTask[] = ((row?.data?.allTasks ?? []) as (CuTask & { member: number })[])
             .filter(t => t.member === member)
+            .map(t => ({
+              ...t,
+              // Squad API sometimes omits the task ID — extract from URL as fallback
+              id: t.id || (t.url ? (t.url.match(/\/t\/([a-z0-9]+)/i)?.[1] ?? '') : ''),
+            }))
             .sort((a, b) => new Date(b.date_created ?? 0).getTime() - new Date(a.date_created ?? 0).getTime())
             .slice(0, 4)
           setSrpTasks(tab === 'srp' ? all : all.slice(0, 3))
@@ -276,7 +283,7 @@ export default function SocialChurchPage() {
     setSrpLoading(true)
     const { data } = await srpPipeline
       .from('sessions')
-      .select('id, session_id, church_name, member, user_email, current_step, status, sermon_title, clickup_task_id, created_at, updated_at')
+      .select('id, session_id, church_name, member, user_email, current_step, status, sermon_title, clickup_task_id, video_url, transcript_job_id, created_at, updated_at')
       .eq('member', member)
       .not('status', 'eq', 'archived')
       .order('updated_at', { ascending: false })
@@ -286,6 +293,77 @@ export default function SocialChurchPage() {
   }, [member])
 
   useEffect(() => { if (tab === 'srp') void loadSrp() }, [tab, loadSrp])
+
+  // Auto-create a session for the most recent SRP task when the tab first loads.
+  // Runs silently in the background so the coach arrives to find "In Progress"
+  // instead of "Start SRP". Fires once per tab open; re-arms when member changes.
+  useEffect(() => {
+    if (tab !== 'srp') return
+    if (srpLoading || cuLoading) return
+    if (autoCreateFiredRef.current) return
+    if (!srpTasks.length || !church || !user?.email) return
+
+    const mostRecent = srpTasks[0] as CuTask & { member: number }
+    if (!mostRecent.id) return // no task ID in cache — can't link session
+    if (mostRecent.status?.toLowerCase() === 'closed') return // don't auto-create for closed tasks
+
+    // Already has a session for this task — nothing to do
+    const alreadyHasSession = srpSessions.some(
+      s => (s as any).clickup_task_id === mostRecent.id
+    )
+    if (alreadyHasSession) return
+
+    autoCreateFiredRef.current = true
+
+    void (async () => {
+      try {
+        // Try to get brand voice from intel — non-blocking, proceed without if missing
+        let brandVoiceGuidelines: string | null = null
+        try {
+          const { data: intelData } = await (supabase as any)
+            .from('strategy_church_intel')
+            .select('intel_profile')
+            .eq('member', member)
+            .eq('status', 'live')
+            .maybeSingle()
+          if (intelData?.intel_profile?.brand_voice) {
+            const bv = intelData.intel_profile.brand_voice
+            const lines: string[] = []
+            if (bv.tone_summary) lines.push(`Tone: ${bv.tone_summary}`)
+            if (bv.casual_to_formal_spectrum) lines.push(`Voice spectrum: ${bv.casual_to_formal_spectrum}`)
+            brandVoiceGuidelines = lines.join('\n').trim() || null
+          }
+        } catch { /* non-fatal */ }
+
+        // Fetch video URL from ClickUp task
+        let videoUrl: string | null = null
+        try {
+          const tvRes = await fetch(`/api/clickup/task-video-url?taskId=${encodeURIComponent(mostRecent.id)}`)
+          if (tvRes.ok) {
+            const tvData = await tvRes.json()
+            if (tvData.videoUrl) videoUrl = tvData.videoUrl
+          }
+        } catch { /* non-fatal */ }
+
+        const sermonTitle = mostRecent.name.replace(/^\d+\s*-\s*/, '').trim()
+        const suggested = suggestDeliverablesFromText(mostRecent.name)
+
+        await createSession({
+          member: String(member),
+          churchName: church.church_name ?? `Member ${member}`,
+          userEmail: user.email ?? null,
+          clickupTaskId: mostRecent.id,
+          sermonTitle,
+          brandVoiceGuidelines,
+          suggestedDeliverables: suggested.length ? suggested : null,
+          videoUrl,
+        })
+
+        // Reload so the task row updates to "In Progress"
+        await loadSrp()
+      } catch { /* non-fatal — coach can always click Start SRP manually */ }
+    })()
+  }, [tab, srpLoading, cuLoading, srpTasks, srpSessions, church, user, member, loadSrp])
 
   // ── Social links edit ────────────────────────────────────────────────────
   const startEditLinks = () => {
@@ -905,14 +983,12 @@ export default function SocialChurchPage() {
         const handleTaskClick = async (task: CuTask & { member: number }) => {
           const existing = sessionByTaskId.get(task.id)
           if (existing) {
-            // If the existing session is stuck at 'account' (never advanced past setup),
-            // patch it to 'deliverables' before navigating so the coach lands in the right place.
-            if (existing.current_step === 'account') {
-              await srpPipeline
-                .from('sessions')
-                .update({ current_step: 'deliverables' })
-                .eq('session_id', existing.session_id)
-            }
+            // Always ensure the session starts at deliverables when launched from a task click —
+            // the user picked a specific task and shouldn't land on the Account setup screen.
+            await srpPipeline
+              .from('sessions')
+              .update({ current_step: 'deliverables' })
+              .eq('session_id', existing.session_id)
             navigate(`/social/srp/${encodeURIComponent(existing.session_id)}`)
             return
           }
