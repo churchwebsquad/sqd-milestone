@@ -234,6 +234,8 @@ export default function SocialChurchPage() {
         .then(({ data: row }: { data: { data: { allTasks?: CuTask[] } } | null }) => {
           const all: CuTask[] = ((row?.data?.allTasks ?? []) as (CuTask & { member: number })[])
             .filter(t => t.member === member)
+            // Hide closed tasks except for member 1802 (trial church for testing)
+            .filter(t => member === 1802 || t.status?.toLowerCase() !== 'closed')
           setSrpTasks(tab === 'srp' ? all : all.slice(0, 3))
         }),
       fetch(`/api/clickup/church-tasks?member=${member}`)
