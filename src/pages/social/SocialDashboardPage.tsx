@@ -397,19 +397,21 @@ export default function SocialDashboardPage() {
     return base.sort((a, b) => {
       const aSrp = srpMap.get(a.member)
       const bSrp = srpMap.get(b.member)
-      const aThisWeek = thisWeekMemberSet.has(a.member)
-      const bThisWeek = thisWeekMemberSet.has(b.member)
+      // Only count as "this week" if the church actually has SRP data — avoids
+      // orphan ClickUp tasks boosting churches that have no badge to show
+      const aThisWeek = thisWeekMemberSet.has(a.member) && !!aSrp
+      const bThisWeek = thisWeekMemberSet.has(b.member) && !!bSrp
       if (aThisWeek && !bThisWeek) return -1
       if (!aThisWeek && bThisWeek) return  1
-      // Both this week → order by when the task was submitted (oldest first = came in first)
+      // Both this week → order by due date (proxy for submission order when createdAt is unavailable)
       if (aThisWeek && bThisWeek) {
-        const aCreated = aSrp ? new Date(aSrp.createdAt).getTime() : Infinity
-        const bCreated = bSrp ? new Date(bSrp.createdAt).getTime() : Infinity
-        return aCreated - bCreated
+        const aMs = thisWeekDueDateMap.get(a.member) ?? new Date(aSrp!.createdAt).getTime()
+        const bMs = thisWeekDueDateMap.get(b.member) ?? new Date(bSrp!.createdAt).getTime()
+        return aMs - bMs
       }
-      // Neither this week → most recently active first
-      const aTime = aSrp ? new Date(aSrp.updatedAt).getTime() : 0
-      const bTime = bSrp ? new Date(bSrp.updatedAt).getTime() : 0
+      // Neither this week → most recently active first; no SRP = sorted last
+      const aTime = aSrp ? new Date(aSrp.updatedAt || aSrp.createdAt).getTime() : 0
+      const bTime = bSrp ? new Date(bSrp.updatedAt || bSrp.createdAt).getTime() : 0
       if (aTime !== bTime) return bTime - aTime
       return a.member - b.member
     })
