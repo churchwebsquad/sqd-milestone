@@ -13,7 +13,7 @@
  * writes back through a token-gated save path (see sitemapReview.ts).
  */
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { supabase } from '../../../lib/supabase'
 import {
   approveReview,
@@ -382,7 +382,9 @@ export function SitemapReviewEditor({
             <SectionBand num="02" label="Primary Navigation">
               <NavigationStrategyEditor review={review} onChange={persist} disabled={isApproved} />
               <NavEditor
+                review={review}
                 siteStrategy={siteStrategy}
+                onChange={persist}
                 onSaveSiteStrategy={persistSiteStrategy}
                 disabled={isApproved}
               />
@@ -717,7 +719,14 @@ function FooterInfoEditor({
         </ul>
       </div>
 
-      <div className="mt-3">
+      <details className="mt-3 border-t border-wm-border pt-3">
+        <summary className="cursor-pointer text-[11px] font-semibold text-wm-text-muted hover:text-wm-text">
+          Legacy footer link fields (edit above in Primary Navigation → Footer link groups)
+        </summary>
+        <div className="mt-3">
+          <p className="text-[11px] text-wm-text-muted mb-3 leading-snug">
+            These two blocks used to be the footer link editor before the 2026-07 refactor made <code>site_strategy.nav.footer</code> the source of truth. The partner view prefers that source when present. Keep these blocks around only for partners whose <code>site_strategy.nav.footer</code> is empty; otherwise use the Footer link groups editor in the Primary Navigation section.
+          </p>
         <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Footer page links</p>
         <p className="text-[10.5px] text-wm-text-subtle mb-1.5">Extra links the partner wants in the footer (Preschool, Careers, Memorial Garden, etc.).</p>
         <ul className="space-y-1">
@@ -878,6 +887,7 @@ function FooterInfoEditor({
           </button>
         )}
       </div>
+      </details>
     </Section>
   )
 }
@@ -1714,16 +1724,6 @@ function SectionBand({ num, label, children }: { num: string; label: string; chi
 
 type NavChild = { slug?: string; label?: string; children?: NavChild[] }
 
-function siteStrategyNavPrimary(strategy: SiteStrategyBlob | null): NavChild[] {
-  const raw = (strategy?.nav?.primary ?? []) as unknown[]
-  return raw.map(coerceNavItem).filter(i => (i.label ?? i.slug ?? '').length > 0)
-}
-
-function siteStrategyNavCtaOnly(strategy: SiteStrategyBlob | null): NavChild[] {
-  const raw = (strategy?.nav?.cta_only ?? []) as unknown[]
-  return raw.map(coerceNavItem).filter(i => (i.label ?? i.slug ?? '').length > 0)
-}
-
 function coerceNavItem(item: unknown): NavChild {
   if (typeof item === 'string') return { slug: item }
   if (!item || typeof item !== 'object') return {}
@@ -1732,15 +1732,64 @@ function coerceNavItem(item: unknown): NavChild {
   if (typeof it.slug === 'string')  out.slug = it.slug
   if (typeof it.label === 'string') out.label = it.label
   if (Array.isArray(it.children)) {
-    out.children = it.children.map(coerceNavItem).filter(c => (c.slug ?? c.label ?? '').length > 0)
+    // Keep child rows even if incomplete so the strategist can see
+    // them mid-authoring. Save-time filter drops fully-empty items.
+    out.children = it.children.map(coerceNavItem)
   }
   return out
 }
 
+function readSiteStrategyNav(strategy: SiteStrategyBlob | null): {
+  primary: NavChild[]
+  ctaOnly: NavChild[]
+  footerPrimaryLinks: NavChild[]
+  footerExplore:      NavChild[]
+  footerLegal:        NavChild[]
+} {
+  const nav = strategy?.nav ?? {}
+  const primary  = ((nav.primary  ?? []) as unknown[]).map(coerceNavItem)
+  const ctaOnly  = ((nav.cta_only ?? []) as unknown[]).map(coerceNavItem)
+  const footerRaw = (nav as { footer?: unknown }).footer
+  const grouped   = (footerRaw && typeof footerRaw === 'object' && !Array.isArray(footerRaw))
+    ? (footerRaw as Record<string, unknown>)
+    : {}
+  const readFooterGroup = (key: string): NavChild[] => {
+    const raw = grouped[key]
+    if (!Array.isArray(raw)) return []
+    return raw.map(coerceNavItem)
+  }
+  return {
+    primary,
+    ctaOnly,
+    footerPrimaryLinks: readFooterGroup('primary_links'),
+    footerExplore:      readFooterGroup('explore'),
+    footerLegal:        readFooterGroup('legal'),
+  }
+}
+
+// Filter empty nav items (no slug, no label, no non-empty children)
+// before persisting. UI keeps empties visible while the strategist
+// is authoring; save doesn't pollute the DB with junk rows.
+function pruneNavList(items: NavChild[]): NavChild[] {
+  return items
+    .map(i => ({
+      ...i,
+      children: i.children ? pruneNavList(i.children) : undefined,
+    }))
+    .filter(i =>
+      (i.slug ?? '').trim().length > 0
+      || (i.label ?? '').trim().length > 0
+      || (i.children ?? []).length > 0
+    )
+    .map(i => (i.children && i.children.length === 0 ? { ...i, children: undefined } : i))
+}
+
 function NavEditor({
-  siteStrategy, onSaveSiteStrategy, disabled,
+  review, siteStrategy, onChange, onSaveSiteStrategy, disabled,
 }: {
+  review:             SitemapReview
   siteStrategy:       SiteStrategyBlob | null
+  onChange:           (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   onSaveSiteStrategy: (updated: SiteStrategyBlob) => Promise<{ ok: true } | { ok: false; error: string }>
   disabled:           boolean
 }) {
@@ -1749,169 +1798,91 @@ function NavEditor({
     .map(p => ({ slug: p.slug as string, name: p.name ?? (p.slug as string) }))
   const nameBySlug = new Map(allPages.map(p => [p.slug, p.name]))
 
-  const primary = siteStrategyNavPrimary(siteStrategy)
-  const ctaOnly = siteStrategyNavCtaOnly(siteStrategy)
+  // Local state is the source of truth for the UI. Init from prop
+  // on mount; sync from prop only when the prop's serialized form
+  // meaningfully changes vs our last write (so our own save doesn't
+  // trigger a resync mid-edit). The ref tracks the JSON we last
+  // WROTE so echo updates from the parent skip the sync.
+  const initial = useMemo(() => readSiteStrategyNav(siteStrategy), [siteStrategy])
+  const [primary,            setPrimaryState]            = useState<NavChild[]>(initial.primary)
+  const [ctaOnly,            setCtaOnlyState]            = useState<NavChild[]>(initial.ctaOnly)
+  const [footerPrimaryLinks, setFooterPrimaryLinksState] = useState<NavChild[]>(initial.footerPrimaryLinks)
+  const [footerExplore,      setFooterExploreState]      = useState<NavChild[]>(initial.footerExplore)
+  const [footerLegal,        setFooterLegalState]        = useState<NavChild[]>(initial.footerLegal)
+  const lastSavedNavJsonRef = useRef<string>(JSON.stringify(siteStrategy?.nav ?? {}))
 
-  const setPrimary = async (next: NavChild[]) => {
-    const nav = { ...(siteStrategy?.nav ?? {}), primary: next }
-    await onSaveSiteStrategy({ ...(siteStrategy ?? {}), nav })
-  }
-  const setCtaOnly = async (next: NavChild[]) => {
-    const nav = { ...(siteStrategy?.nav ?? {}), cta_only: next }
-    await onSaveSiteStrategy({ ...(siteStrategy ?? {}), nav })
-  }
+  useEffect(() => {
+    const currentJson = JSON.stringify(siteStrategy?.nav ?? {})
+    if (currentJson === lastSavedNavJsonRef.current) return
+    // External change (someone else edited site_strategy.nav, or the
+    // composer just reloaded from DB). Re-sync local state.
+    const fresh = readSiteStrategyNav(siteStrategy)
+    setPrimaryState(fresh.primary)
+    setCtaOnlyState(fresh.ctaOnly)
+    setFooterPrimaryLinksState(fresh.footerPrimaryLinks)
+    setFooterExploreState(fresh.footerExplore)
+    setFooterLegalState(fresh.footerLegal)
+    lastSavedNavJsonRef.current = currentJson
+  }, [siteStrategy])
 
-  const renderChildRow = (
-    child: NavChild,
-    childIdx: number,
-    parentIdx: number,
-    parentItems: NavChild[],
-    setParentChildren: (next: NavChild[]) => void,
+  const saveNav = async (
+    nextPrimary: NavChild[],
+    nextCtaOnly: NavChild[],
+    nextFooterPrimaryLinks: NavChild[],
+    nextFooterExplore:      NavChild[],
+    nextFooterLegal:        NavChild[],
   ) => {
-    const kids = parentItems[parentIdx].children ?? []
-    const move = (dir: -1 | 1) => {
-      const target = childIdx + dir
-      if (target < 0 || target >= kids.length) return
-      const next = [...kids]
-      const swapped = next[childIdx]; next[childIdx] = next[target]; next[target] = swapped
-      setParentChildren(next)
+    const nav: Record<string, unknown> = { ...(siteStrategy?.nav ?? {}) }
+    nav.primary  = pruneNavList(nextPrimary)
+    nav.cta_only = pruneNavList(nextCtaOnly)
+    nav.footer = {
+      // Preserve any non-standard fields on the existing footer blob
+      // (contact_block, service_times, connect_card, etc.) so we don't
+      // strip cowork-authored extras.
+      ...((siteStrategy?.nav as { footer?: Record<string, unknown> } | undefined)?.footer ?? {}),
+      primary_links: pruneNavList(nextFooterPrimaryLinks),
+      explore:       pruneNavList(nextFooterExplore),
+      legal:         pruneNavList(nextFooterLegal),
     }
-    const patch = (p: Partial<NavChild>) => {
-      const next = kids.map((c, i) => i === childIdx ? { ...c, ...p } : c)
-      setParentChildren(next)
-    }
-    const remove = () => setParentChildren(kids.filter((_, i) => i !== childIdx))
-    return (
-      <div key={childIdx} className="flex items-center gap-1.5 ml-6 mb-1">
-        <div className="flex items-center gap-0.5">
-          <button type="button" onClick={() => move(-1)} disabled={disabled || childIdx === 0} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↑</button>
-          <button type="button" onClick={() => move(1)}  disabled={disabled || childIdx === kids.length - 1} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↓</button>
-        </div>
-        <select
-          value={child.slug ?? ''}
-          disabled={disabled}
-          onChange={e => patch({ slug: e.target.value || undefined })}
-          className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[180px]"
-        >
-          <option value="">(no page)</option>
-          {allPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
-        </select>
-        <input
-          type="text"
-          defaultValue={child.label ?? (child.slug ? nameBySlug.get(child.slug) ?? child.slug : '')}
-          placeholder="Label"
-          disabled={disabled}
-          onBlur={e => patch({ label: e.target.value.trim() || undefined })}
-          className="flex-1 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-        />
-        <button type="button" onClick={remove} disabled={disabled} className="text-wm-text-subtle hover:text-red-600 text-[14px] leading-none px-1">×</button>
-      </div>
-    )
+    const next: SiteStrategyBlob = { ...(siteStrategy ?? {}), nav }
+    lastSavedNavJsonRef.current = JSON.stringify(next.nav ?? {})
+    await onSaveSiteStrategy(next)
   }
 
-  const renderPrimaryRow = (item: NavChild, idx: number, list: NavChild[]) => {
-    const move = (dir: -1 | 1) => {
-      const target = idx + dir
-      if (target < 0 || target >= list.length) return
-      const next = [...list]
-      const swapped = next[idx]; next[idx] = next[target]; next[target] = swapped
-      void setPrimary(next)
-    }
-    const patch = (p: Partial<NavChild>) => {
-      const next = list.map((c, i) => i === idx ? { ...c, ...p } : c)
-      void setPrimary(next)
-    }
-    const remove = () => {
-      if (!confirm(`Remove "${item.label ?? item.slug ?? 'this item'}" from the primary nav? (Page stays in site_strategy.pages — this only removes it from the nav.)`)) return
-      void setPrimary(list.filter((_, i) => i !== idx))
-    }
-    const setChildren = (nextKids: NavChild[]) => {
-      const next = list.map((c, i) => i === idx ? { ...c, children: nextKids } : c)
-      void setPrimary(next)
-    }
-    const addChild = () => {
-      const next = list.map((c, i) => i === idx ? { ...c, children: [...(c.children ?? []), {}] } : c)
-      void setPrimary(next)
-    }
-    return (
-      <li key={idx} className="border border-wm-border rounded p-2 bg-wm-bg">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <div className="flex items-center gap-0.5">
-            <button type="button" onClick={() => move(-1)} disabled={disabled || idx === 0} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↑</button>
-            <button type="button" onClick={() => move(1)}  disabled={disabled || idx === list.length - 1} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↓</button>
-          </div>
-          <select
-            value={item.slug ?? ''}
-            disabled={disabled}
-            onChange={e => patch({ slug: e.target.value || undefined })}
-            className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[180px]"
-            title="Which page this item links to. Leave empty for a nav parent that only opens a dropdown."
-          >
-            <option value="">(dropdown label only)</option>
-            {allPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
-          </select>
-          <input
-            type="text"
-            defaultValue={item.label ?? (item.slug ? nameBySlug.get(item.slug) ?? item.slug : '')}
-            placeholder="Label"
-            disabled={disabled}
-            onBlur={e => patch({ label: e.target.value.trim() || undefined })}
-            className="flex-1 text-[12px] font-semibold text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50 min-w-[10rem]"
-          />
-          <button type="button" onClick={remove} disabled={disabled} className="text-[11px] font-semibold text-wm-text-muted hover:text-red-600 disabled:opacity-40">Remove</button>
-        </div>
-        {(item.children ?? []).length > 0 && (
-          <div className="mt-2">
-            <div className="text-[10px] uppercase tracking-wider font-bold text-wm-text-subtle mb-1 ml-6">Dropdown children</div>
-            {(item.children ?? []).map((child, ci) => renderChildRow(child, ci, idx, list, setChildren))}
-          </div>
-        )}
-        {!disabled && (
-          <button type="button" onClick={addChild} className="text-[11px] font-semibold text-wm-accent-strong hover:underline ml-6 mt-1">+ Add dropdown child</button>
-        )}
-      </li>
-    )
+  // Any one-list mutation triggers a save with ALL current lists so
+  // no field gets stale in an in-flight write.
+  const commitPrimary = (next: NavChild[]) => {
+    setPrimaryState(next)
+    void saveNav(next, ctaOnly, footerPrimaryLinks, footerExplore, footerLegal)
+  }
+  const commitCtaOnly = (next: NavChild[]) => {
+    setCtaOnlyState(next)
+    void saveNav(primary, next, footerPrimaryLinks, footerExplore, footerLegal)
+  }
+  const commitFooterGroup = (
+    key: 'primary_links' | 'explore' | 'legal', next: NavChild[],
+  ) => {
+    if (key === 'primary_links') { setFooterPrimaryLinksState(next); void saveNav(primary, ctaOnly, next, footerExplore, footerLegal) }
+    if (key === 'explore')       { setFooterExploreState(next);      void saveNav(primary, ctaOnly, footerPrimaryLinks, next, footerLegal) }
+    if (key === 'legal')         { setFooterLegalState(next);        void saveNav(primary, ctaOnly, footerPrimaryLinks, footerExplore, next) }
   }
 
-  const renderFlatRow = (item: NavChild, idx: number, list: NavChild[], set: (next: NavChild[]) => Promise<void>) => {
-    const move = (dir: -1 | 1) => {
-      const target = idx + dir
-      if (target < 0 || target >= list.length) return
-      const next = [...list]
-      const swapped = next[idx]; next[idx] = next[target]; next[target] = swapped
-      void set(next)
-    }
-    const patch = (p: Partial<NavChild>) => {
-      const next = list.map((c, i) => i === idx ? { ...c, ...p } : c)
-      void set(next)
-    }
-    return (
-      <div key={idx} className="flex items-center gap-1.5">
-        <div className="flex items-center gap-0.5">
-          <button type="button" onClick={() => move(-1)} disabled={disabled || idx === 0} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↑</button>
-          <button type="button" onClick={() => move(1)}  disabled={disabled || idx === list.length - 1} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↓</button>
-        </div>
-        <select
-          value={item.slug ?? ''}
-          disabled={disabled}
-          onChange={e => patch({ slug: e.target.value || undefined })}
-          className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[180px]"
-        >
-          <option value="">(no page)</option>
-          {allPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
-        </select>
-        <input
-          type="text"
-          defaultValue={item.label ?? (item.slug ? nameBySlug.get(item.slug) ?? item.slug : '')}
-          placeholder="Label"
-          disabled={disabled}
-          onBlur={e => patch({ label: e.target.value.trim() || undefined })}
-          className="flex-1 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-        />
-        <button type="button" onClick={() => void set(list.filter((_, i) => i !== idx))} disabled={disabled} className="text-wm-text-subtle hover:text-red-600 text-[14px] leading-none px-1">×</button>
-      </div>
-    )
+  // Nav shell — writes to review.nav_presentation.shell. Controls
+  // which layout the partner view renders (megamenu / standard
+  // dropdowns / offcanvas).
+  const currentShell = (review.nav_presentation?.shell ?? 'megamenu') as 'megamenu' | 'standard_dropdowns' | 'offcanvas'
+  const setShell = (next: 'megamenu' | 'standard_dropdowns' | 'offcanvas') => {
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      nav_presentation: { ...(current.nav_presentation ?? {}), shell: next },
+    }))
   }
+
+  const shellOptions: Array<{ key: typeof currentShell; label: string; hint: string }> = [
+    { key: 'megamenu',           label: 'Mega menu',           hint: 'Rich dropdowns with columns + featured tiles.' },
+    { key: 'standard_dropdowns', label: 'Standard dropdowns',  hint: 'Simple link lists per top-level item.' },
+    { key: 'offcanvas',          label: 'Off-canvas overlay',  hint: 'Full nav lives behind the hamburger with a short header.' },
+  ]
 
   return (
     <div className="space-y-4">
@@ -1920,158 +1891,336 @@ function NavEditor({
       </p>
 
       <div>
-        <div className="flex items-baseline justify-between gap-2 mb-1.5">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Primary nav</div>
-          <span className="text-[10.5px] text-wm-text-subtle">{primary.length} top-level {primary.length === 1 ? 'item' : 'items'}</span>
+        <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1.5">Nav shell</div>
+        <div className="flex flex-wrap gap-1.5">
+          {shellOptions.map(opt => (
+            <button
+              key={opt.key}
+              type="button"
+              disabled={disabled}
+              onClick={() => setShell(opt.key)}
+              className={
+                'text-[12px] font-medium px-3 py-1.5 rounded-full border ' +
+                (currentShell === opt.key
+                  ? 'bg-wm-accent-strong text-white border-wm-accent-strong'
+                  : 'bg-white text-wm-text-muted border-wm-border hover:border-wm-accent')
+              }
+              title={opt.hint}
+            >{opt.label}</button>
+          ))}
         </div>
-        <ul className="space-y-1.5">
-          {primary.map((it, i) => renderPrimaryRow(it, i, primary))}
-        </ul>
-        {!disabled && (
-          <button
-            type="button"
-            onClick={() => void setPrimary([...primary, {}])}
-            className="mt-2 text-[11px] font-semibold text-wm-accent-strong hover:underline"
-          >+ Add primary nav item</button>
-        )}
+        <p className="text-[11px] text-wm-text-muted mt-1">
+          {shellOptions.find(o => o.key === currentShell)?.hint}
+        </p>
       </div>
 
-      <div>
-        <div className="flex items-baseline justify-between gap-2 mb-1.5">
-          <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">CTA-only items (pill buttons, e.g. Visit, Give)</div>
-          <span className="text-[10.5px] text-wm-text-subtle">{ctaOnly.length}/3 · keep it tight</span>
-        </div>
-        <div className="space-y-1.5">
-          {ctaOnly.map((it, i) => renderFlatRow(it, i, ctaOnly, setCtaOnly))}
-        </div>
-        {!disabled && ctaOnly.length < 3 && (
-          <button
-            type="button"
-            onClick={() => void setCtaOnly([...ctaOnly, {}])}
-            className="mt-2 text-[11px] font-semibold text-wm-accent-strong hover:underline"
-          >+ Add CTA item</button>
-        )}
-      </div>
-
-      <NavFooterEditor
-        siteStrategy={siteStrategy}
-        onSaveSiteStrategy={onSaveSiteStrategy}
-        disabled={disabled}
+      <NavListEditor
+        title="Primary nav"
+        countLabel={`${primary.length} top-level ${primary.length === 1 ? 'item' : 'items'}`}
+        items={primary}
         allPages={allPages}
         nameBySlug={nameBySlug}
+        disabled={disabled}
+        onCommit={commitPrimary}
+        allowChildren
       />
+
+      <NavListEditor
+        title="CTA-only items (pill buttons, e.g. Visit, Give)"
+        countLabel={`${ctaOnly.length}/3 · keep it tight`}
+        items={ctaOnly}
+        allPages={allPages}
+        nameBySlug={nameBySlug}
+        disabled={disabled}
+        onCommit={commitCtaOnly}
+        maxItems={3}
+      />
+
+      <div>
+        <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-2">Footer link groups</div>
+        <div className="space-y-4">
+          <NavListEditor
+            title="Take a next step"
+            hint="prominent footer links (Give / Prayer / Contact)"
+            items={footerPrimaryLinks}
+            allPages={allPages}
+            nameBySlug={nameBySlug}
+            disabled={disabled}
+            onCommit={next => commitFooterGroup('primary_links', next)}
+            compact
+          />
+          <NavListEditor
+            title="Explore"
+            hint="secondary footer links (About / Ministries / etc.)"
+            items={footerExplore}
+            allPages={allPages}
+            nameBySlug={nameBySlug}
+            disabled={disabled}
+            onCommit={next => commitFooterGroup('explore', next)}
+            compact
+          />
+          <NavListEditor
+            title="Fine print"
+            hint="legal + gated (Privacy / Terms / Staff login)"
+            items={footerLegal}
+            allPages={allPages}
+            nameBySlug={nameBySlug}
+            disabled={disabled}
+            onCommit={next => commitFooterGroup('legal', next)}
+            compact
+          />
+        </div>
+      </div>
     </div>
   )
 }
 
-// Footer groups editor. Writes to site_strategy.nav.footer as a
-// CoworkGroupedFooter (primary_links, explore, legal). Each column
-// is an ordered list of {slug, label} items with add/remove/reorder.
-function NavFooterEditor({
-  siteStrategy, onSaveSiteStrategy, disabled, allPages, nameBySlug,
+// Shared list editor for a flat OR children-bearing NavChild[] list.
+// Controlled inputs, content-based keys (stable across reorder), and
+// Add via inline form so we never persist blank rows into the DB.
+function NavListEditor({
+  title, hint, countLabel, items, allPages, nameBySlug,
+  disabled, onCommit, allowChildren = false, maxItems, compact = false,
 }: {
-  siteStrategy:       SiteStrategyBlob | null
-  onSaveSiteStrategy: (updated: SiteStrategyBlob) => Promise<{ ok: true } | { ok: false; error: string }>
-  disabled:           boolean
-  allPages:           Array<{ slug: string; name: string }>
-  nameBySlug:         Map<string, string>
+  title:      string
+  hint?:      string
+  countLabel?: string
+  items:      NavChild[]
+  allPages:   Array<{ slug: string; name: string }>
+  nameBySlug: Map<string, string>
+  disabled:   boolean
+  onCommit:   (next: NavChild[]) => void
+  allowChildren?: boolean
+  maxItems?:   number
+  compact?:    boolean
 }) {
-  const rawFooter = (siteStrategy?.nav as { footer?: unknown } | undefined)?.footer
-  const grouped = (rawFooter && typeof rawFooter === 'object' && !Array.isArray(rawFooter))
-    ? (rawFooter as Record<string, unknown>)
-    : {}
-  const readGroup = (key: 'primary_links' | 'explore' | 'legal'): NavChild[] => {
-    const raw = grouped[key]
-    if (!Array.isArray(raw)) return []
-    return raw.map(coerceNavItem).filter(i => (i.slug ?? i.label ?? '').length > 0)
-  }
-  const primaryLinks = readGroup('primary_links')
-  const explore      = readGroup('explore')
-  const legal        = readGroup('legal')
+  const [addOpen,  setAddOpen]  = useState(false)
+  const [addSlug,  setAddSlug]  = useState('')
+  const [addLabel, setAddLabel] = useState('')
 
-  const writeGroup = async (key: 'primary_links' | 'explore' | 'legal', next: NavChild[]) => {
-    const newFooter = { ...grouped, [key]: next }
-    const nav = { ...(siteStrategy?.nav ?? {}), footer: newFooter }
-    await onSaveSiteStrategy({ ...(siteStrategy ?? {}), nav })
+  const move = (idx: number, dir: -1 | 1) => {
+    const target = idx + dir
+    if (target < 0 || target >= items.length) return
+    const next = [...items]
+    const swapped = next[idx]; next[idx] = next[target]; next[target] = swapped
+    onCommit(next)
+  }
+  const patch = (idx: number, p: Partial<NavChild>) => {
+    onCommit(items.map((c, i) => i === idx ? { ...c, ...p } : c))
+  }
+  const remove = (idx: number) => {
+    const it = items[idx]
+    const nice = it.label ?? it.slug ?? 'this item'
+    if (!confirm(`Remove "${nice}"?`)) return
+    onCommit(items.filter((_, i) => i !== idx))
+  }
+  const addNew = () => {
+    const slug = addSlug.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
+    const label = addLabel.trim()
+    if (!slug && !label) return
+    const next: NavChild = {}
+    if (slug)  next.slug = slug
+    if (label) next.label = label
+    onCommit([...items, next])
+    setAddSlug(''); setAddLabel(''); setAddOpen(false)
   }
 
-  const renderRow = (
-    item: NavChild, idx: number, list: NavChild[], set: (next: NavChild[]) => Promise<void>,
-  ) => {
-    const move = (dir: -1 | 1) => {
-      const target = idx + dir
-      if (target < 0 || target >= list.length) return
-      const next = [...list]
-      const swapped = next[idx]; next[idx] = next[target]; next[target] = swapped
-      void set(next)
-    }
-    const patch = (p: Partial<NavChild>) => {
-      const next = list.map((c, i) => i === idx ? { ...c, ...p } : c)
-      void set(next)
-    }
+  const patchChild = (parentIdx: number, childIdx: number, p: Partial<NavChild>) => {
+    const kids = (items[parentIdx].children ?? []).map((c, i) => i === childIdx ? { ...c, ...p } : c)
+    onCommit(items.map((c, i) => i === parentIdx ? { ...c, children: kids } : c))
+  }
+  const moveChild = (parentIdx: number, childIdx: number, dir: -1 | 1) => {
+    const kids = [...(items[parentIdx].children ?? [])]
+    const target = childIdx + dir
+    if (target < 0 || target >= kids.length) return
+    const swapped = kids[childIdx]; kids[childIdx] = kids[target]; kids[target] = swapped
+    onCommit(items.map((c, i) => i === parentIdx ? { ...c, children: kids } : c))
+  }
+  const removeChild = (parentIdx: number, childIdx: number) => {
+    const kids = (items[parentIdx].children ?? []).filter((_, i) => i !== childIdx)
+    onCommit(items.map((c, i) => i === parentIdx ? { ...c, children: kids } : c))
+  }
+  const addChild = (parentIdx: number, slug: string, label: string) => {
+    const clean = slug.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
+    if (!clean && !label.trim()) return
+    const child: NavChild = {}
+    if (clean) child.slug = clean
+    if (label.trim()) child.label = label.trim()
+    const kids = [...(items[parentIdx].children ?? []), child]
+    onCommit(items.map((c, i) => i === parentIdx ? { ...c, children: kids } : c))
+  }
+
+  const canAdd = !disabled && (typeof maxItems !== 'number' || items.length < maxItems)
+
+  const renderRow = (item: NavChild, idx: number) => {
+    // Content-based key survives reorder without stale-defaultValue
+    // bugs (using idx alone made React reuse the DOM element with old
+    // text after a swap).
+    const key = `${item.slug ?? ''}||${item.label ?? ''}||${idx}`
     return (
-      <div key={idx} className="flex items-center gap-1.5">
-        <div className="flex items-center gap-0.5">
-          <button type="button" onClick={() => move(-1)} disabled={disabled || idx === 0} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↑</button>
-          <button type="button" onClick={() => move(1)}  disabled={disabled || idx === list.length - 1} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↓</button>
+      <li key={key} className={compact ? 'border border-wm-border rounded px-2 py-1.5 bg-wm-bg' : 'border border-wm-border rounded p-2 bg-wm-bg'}>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center gap-0.5">
+            <button type="button" onClick={() => move(idx, -1)} disabled={disabled || idx === 0} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↑</button>
+            <button type="button" onClick={() => move(idx, 1)}  disabled={disabled || idx === items.length - 1} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↓</button>
+          </div>
+          <select
+            value={item.slug ?? ''}
+            disabled={disabled}
+            onChange={e => patch(idx, { slug: e.target.value || undefined })}
+            className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[180px]"
+            title={allowChildren ? 'Leave empty for a nav parent that only opens a dropdown.' : 'Pick a page.'}
+          >
+            <option value="">{allowChildren ? '(dropdown label only)' : '(no page)'}</option>
+            {allPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+          </select>
+          <input
+            type="text"
+            value={item.label ?? (item.slug ? nameBySlug.get(item.slug) ?? item.slug : '')}
+            placeholder="Label"
+            disabled={disabled}
+            onChange={e => patch(idx, { label: e.target.value })}
+            className={`flex-1 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50 ${compact ? '' : 'font-semibold'} min-w-[10rem]`}
+          />
+          <button type="button" onClick={() => remove(idx)} disabled={disabled} className="text-[11px] font-semibold text-wm-text-muted hover:text-red-600 disabled:opacity-40">Remove</button>
         </div>
-        <select
-          value={item.slug ?? ''}
-          disabled={disabled}
-          onChange={e => patch({ slug: e.target.value || undefined })}
-          className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[180px]"
-        >
-          <option value="">(no page)</option>
-          {allPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
-        </select>
-        <input
-          type="text"
-          defaultValue={item.label ?? (item.slug ? nameBySlug.get(item.slug) ?? item.slug : '')}
-          placeholder="Label"
-          disabled={disabled}
-          onBlur={e => patch({ label: e.target.value.trim() || undefined })}
-          className="flex-1 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-        />
-        <button type="button" onClick={() => void set(list.filter((_, i) => i !== idx))} disabled={disabled} className="text-wm-text-subtle hover:text-red-600 text-[14px] leading-none px-1">×</button>
-      </div>
+        {allowChildren && (
+          <div className="mt-2 ml-6">
+            {(item.children ?? []).map((child, ci) => (
+              <div key={`${child.slug ?? ''}||${child.label ?? ''}||${ci}`} className="flex items-center gap-1.5 mb-1">
+                <div className="flex items-center gap-0.5">
+                  <button type="button" onClick={() => moveChild(idx, ci, -1)} disabled={disabled || ci === 0} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↑</button>
+                  <button type="button" onClick={() => moveChild(idx, ci, 1)}  disabled={disabled || ci === (item.children ?? []).length - 1} className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1">↓</button>
+                </div>
+                <select
+                  value={child.slug ?? ''}
+                  disabled={disabled}
+                  onChange={e => patchChild(idx, ci, { slug: e.target.value || undefined })}
+                  className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[180px]"
+                >
+                  <option value="">(no page)</option>
+                  {allPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+                </select>
+                <input
+                  type="text"
+                  value={child.label ?? (child.slug ? nameBySlug.get(child.slug) ?? child.slug : '')}
+                  placeholder="Label"
+                  disabled={disabled}
+                  onChange={e => patchChild(idx, ci, { label: e.target.value })}
+                  className="flex-1 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+                />
+                <button type="button" onClick={() => removeChild(idx, ci)} disabled={disabled} className="text-wm-text-subtle hover:text-red-600 text-[14px] leading-none px-1">×</button>
+              </div>
+            ))}
+            {!disabled && (
+              <AddChildInline
+                onAdd={(slug, label) => addChild(idx, slug, label)}
+                allPages={allPages}
+              />
+            )}
+          </div>
+        )}
+      </li>
     )
   }
 
-  const renderColumn = (
-    key: 'primary_links' | 'explore' | 'legal',
-    heading: string,
-    hint: string,
-    items: NavChild[],
-  ) => (
+  return (
     <div>
-      <div className="flex items-baseline gap-2 mb-1">
-        <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">{heading}</div>
-        <span className="text-[10.5px] text-wm-text-subtle">{hint}</span>
+      <div className="flex items-baseline justify-between gap-2 mb-1.5">
+        <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+          {title}
+          {hint && <span className="ml-2 text-wm-text-muted normal-case tracking-normal font-normal">{hint}</span>}
+        </div>
+        {countLabel && <span className="text-[10.5px] text-wm-text-subtle">{countLabel}</span>}
       </div>
-      <div className="space-y-1.5">
-        {items.map((it, i) => renderRow(it, i, items, next => writeGroup(key, next)))}
-      </div>
-      {!disabled && (
-        <button
-          type="button"
-          onClick={() => void writeGroup(key, [...items, {}])}
-          className="mt-1.5 text-[11px] font-semibold text-wm-accent-strong hover:underline"
-        >+ Add link to {heading.toLowerCase()}</button>
+      <ul className="space-y-1.5">
+        {items.map((it, i) => renderRow(it, i))}
+      </ul>
+      {canAdd && (
+        !addOpen ? (
+          <button
+            type="button"
+            onClick={() => setAddOpen(true)}
+            className="mt-2 text-[11px] font-semibold text-wm-accent-strong hover:underline"
+          >+ Add item</button>
+        ) : (
+          <div className="mt-2 border border-wm-border rounded p-2 bg-wm-bg-elevated flex items-center gap-2 flex-wrap">
+            <select
+              value={addSlug}
+              onChange={e => setAddSlug(e.target.value)}
+              disabled={disabled}
+              className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 disabled:opacity-50 max-w-[180px]"
+            >
+              <option value="">(pick a page)</option>
+              {allPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+            </select>
+            <input
+              type="text"
+              value={addLabel}
+              onChange={e => setAddLabel(e.target.value)}
+              placeholder="Label"
+              disabled={disabled}
+              className="flex-1 text-[12px] text-wm-text bg-white border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50 min-w-[8rem]"
+            />
+            <button type="button" onClick={addNew} disabled={disabled} className="text-[12px] font-semibold px-3 py-1 rounded-full bg-wm-accent-strong text-white hover:bg-wm-accent disabled:opacity-50">Add</button>
+            <button type="button" onClick={() => { setAddOpen(false); setAddSlug(''); setAddLabel('') }} className="text-[11px] text-wm-text-muted hover:underline">Cancel</button>
+          </div>
+        )
       )}
     </div>
   )
+}
 
+function AddChildInline({
+  onAdd, allPages,
+}: {
+  onAdd: (slug: string, label: string) => void
+  allPages: Array<{ slug: string; name: string }>
+}) {
+  const [open,  setOpen]  = useState(false)
+  const [slug,  setSlug]  = useState('')
+  const [label, setLabel] = useState('')
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-[11px] font-semibold text-wm-accent-strong hover:underline mt-1"
+      >+ Add dropdown child</button>
+    )
+  }
+  const commit = () => {
+    onAdd(slug, label)
+    setSlug(''); setLabel(''); setOpen(false)
+  }
   return (
-    <div>
-      <div className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-2">Footer link groups</div>
-      <div className="space-y-4">
-        {renderColumn('primary_links', 'Take a next step', 'prominent footer links (Give / Prayer / Contact)', primaryLinks)}
-        {renderColumn('explore',       'Explore',           'secondary footer links (About / Ministries / etc.)', explore)}
-        {renderColumn('legal',         'Fine print',        'legal + gated (Privacy / Terms / Staff login)',      legal)}
-      </div>
+    <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+      <select
+        value={slug}
+        onChange={e => setSlug(e.target.value)}
+        className="text-[11px] text-wm-text bg-white border border-wm-border rounded px-1 py-0.5 max-w-[180px]"
+      >
+        <option value="">(pick a page)</option>
+        {allPages.map(pg => <option key={pg.slug} value={pg.slug}>/{pg.slug}</option>)}
+      </select>
+      <input
+        type="text"
+        value={label}
+        onChange={e => setLabel(e.target.value)}
+        placeholder="Label"
+        className="flex-1 text-[11px] text-wm-text bg-white border border-wm-border rounded px-2 py-0.5 focus:outline-none focus:border-wm-accent min-w-[6rem]"
+      />
+      <button type="button" onClick={commit} className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-wm-accent-strong text-white hover:bg-wm-accent">Add</button>
+      <button type="button" onClick={() => { setOpen(false); setSlug(''); setLabel('') }} className="text-[10.5px] text-wm-text-muted hover:underline">Cancel</button>
     </div>
   )
 }
+
+// Old NavFooterEditor removed — its logic now lives inside NavEditor
+// via three NavListEditor instances (Take a next step / Explore /
+// Fine print). Consolidated so there's ONE controlled-input site
+// writing to site_strategy.nav.footer with the same add/remove/reorder
+// affordances as primary + CTAs.
 
 
 // ─────────────────────────────────────────────────────────────────
