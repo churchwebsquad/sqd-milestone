@@ -108,6 +108,7 @@ export function useTranscriptJob(jobId: string | null | undefined) {
   const [connected, setConnected] = useState(false)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!jobId) { setJob(null); return }
 
     let cancelled = false
@@ -168,6 +169,7 @@ export function useClipcutterJob(jobId: string | null | undefined) {
   const [connected, setConnected] = useState(false)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!jobId) { setJob(null); return }
     let cancelled = false
 

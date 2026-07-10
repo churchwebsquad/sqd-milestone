@@ -212,7 +212,7 @@ serve(async (req) => {
     })();
 
     try {
-      // @ts-ignore — EdgeRuntime is available in Supabase Edge Functions runtime
+      // @ts-expect-error — EdgeRuntime is available in Supabase Edge Functions runtime
       EdgeRuntime.waitUntil(fireWebhook);
     } catch {
       // Local dev fallback

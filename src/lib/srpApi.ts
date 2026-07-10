@@ -25,7 +25,7 @@ export async function callSrpApi<T = unknown>(
 ): Promise<T> {
   const slug = path.replace(/^\/+/, '').replace(/^api\/srp\//, '')
   let url: string
-  let headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
 
   if (EDGE_FUNCTION_PATHS.has(slug)) {
     url = `${SUPABASE_URL}/functions/v1/srp-${slug}`

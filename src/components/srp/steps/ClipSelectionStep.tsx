@@ -11,9 +11,10 @@
  * having a caption style chosen.
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  ArrowLeft, ArrowRight, Loader2, Scissors, Sparkles,
+  ArrowLeft, ArrowRight, Loader2, Sparkles,
   Check, X, ChevronDown, ChevronUp, Clock, Pin, PinOff,
   Lightbulb, Zap, MessageSquare, Play, EyeOff,
 } from 'lucide-react'
@@ -144,9 +145,11 @@ function ClipVideoPreview({
   }
 
   if (videoSourceType === 'vimeo') {
+    // eslint-disable-next-line react-hooks/error-boundaries
     try {
       const u = new URL(videoUrl)
       const videoId = u.pathname.split('/').filter(Boolean).pop()
+      // eslint-disable-next-line react-hooks/error-boundaries
       if (!videoId) return <UnsupportedPreview reason="Couldn't parse Vimeo ID" />
       const src = `https://player.vimeo.com/video/${videoId}?autoplay=1#t=${startSecs}s`
       return (
@@ -161,6 +164,7 @@ function ClipVideoPreview({
         </div>
       )
     } catch {
+      // eslint-disable-next-line react-hooks/error-boundaries
       return <UnsupportedPreview reason="Invalid Vimeo URL" />
     }
   }

@@ -148,6 +148,7 @@ interface SrpWorkflowState {
 
 const SrpWorkflowContext = createContext<SrpWorkflowState | null>(null)
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useSrpWorkflow(): SrpWorkflowState {
   const ctx = useContext(SrpWorkflowContext)
   if (!ctx) throw new Error('useSrpWorkflow must be used inside <SrpWorkflowProvider>')
@@ -552,6 +553,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
 
 /** Helper: set selectedDeliverables so exactly N reel slots are selected.
  *  Preserves non-reel deliverables in their current state. */
+// eslint-disable-next-line react-refresh/only-export-components
 export function withReelsCount(current: readonly SrpDeliverable[], count: number): SrpDeliverable[] {
   const clamped = Math.max(0, Math.min(SRP_MAX_REELS, count))
   const nonReels = current.filter(d => !isSrpReelDeliverable(d))

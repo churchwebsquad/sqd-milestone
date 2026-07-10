@@ -133,8 +133,6 @@ export function CarouselStep() {
   }, [editedSlides, brandVoice, account, sermonSubmission, captionGuidance, setCarouselCaption])
 
   const canContinue = (carouselSlides?.length ?? 0) > 0 && (carouselCaption?.trim().length ?? 0) > 0
-  const selectedOpt = selectedIdx != null ? options[selectedIdx] : null
-
   return (
     <div className="space-y-6">
       <header>

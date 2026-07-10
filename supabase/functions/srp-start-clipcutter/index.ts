@@ -299,7 +299,7 @@ serve(async (req) => {
     // Keep the runtime alive long enough for the fetch to actually go out
     // (Supabase Edge Functions support EdgeRuntime.waitUntil for this).
     try {
-      // @ts-ignore — EdgeRuntime is available in Supabase Edge Functions runtime
+      // @ts-expect-error — EdgeRuntime is available in Supabase Edge Functions runtime
       EdgeRuntime.waitUntil(fireWebhook);
     } catch {
       // Local dev fallback — if EdgeRuntime isn't available, at least the

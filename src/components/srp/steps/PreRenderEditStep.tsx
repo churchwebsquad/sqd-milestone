@@ -302,7 +302,6 @@ function CaptionCustomizer({ clip, onUpdate }: CaptionCustomizerProps) {
     if (!file) return
     setFontUploading(true)
     try {
-      const ext  = file.name.split('.').pop() ?? 'ttf'
       const path = `caption-fonts/${Date.now()}_${file.name}`
       const { error } = await supabase.storage
         .from('srp-assets')

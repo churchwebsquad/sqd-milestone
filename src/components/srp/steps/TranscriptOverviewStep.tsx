@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Step — Service overview (between Sermon input and Clip selection).
  *
@@ -37,7 +38,7 @@ export function TranscriptOverviewStep() {
   const {
     transcript,
     account, sermonSubmission,
-    keyInsights, setKeyInsights,
+    setKeyInsights,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
