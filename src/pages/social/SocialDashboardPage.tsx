@@ -35,6 +35,7 @@ interface SessionMeta {
   current_step: string | null
   status: string | null
   created_at: string | null
+  updated_at: string | null
 }
 
 type SortMode = 'srp' | 'member' | 'alpha'
@@ -697,7 +698,12 @@ export default function SocialDashboardPage() {
                       )}
 
                       {/* SRP Generator session step — click to open that session */}
-                      {session?.current_step && session.session_id && (() => {
+                      {session?.current_step && session.session_id && session.current_step !== 'account' && (() => {
+                        // Don't show rendering badge if session hasn't moved in 7+ days (stale render)
+                        if (session.current_step === 'clipProcessing' && session.updated_at) {
+                          const age = Date.now() - new Date(session.updated_at).getTime()
+                          if (age > 7 * 24 * 60 * 60 * 1000) return null
+                        }
                         const step = session.current_step
                         const label = SRP_STEP_LABEL[step] ?? step
                         const isShipped = step === 'approved'
