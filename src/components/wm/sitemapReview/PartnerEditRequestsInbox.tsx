@@ -14,7 +14,7 @@ import type { PartnerEditRequest, SitemapReview } from '../../../lib/sitemapRevi
 
 interface Props {
   review:    SitemapReview
-  onChange:  (next: SitemapReview) => Promise<void> | void
+  onChange:  (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled?: boolean
 }
 
@@ -30,22 +30,22 @@ export function PartnerEditRequestsInbox({ review, onChange, disabled }: Props) 
   if (all.length === 0) return null
 
   const setStatus = (id: string, status: 'open' | 'resolved') => {
-    const next: SitemapReview = {
-      ...review,
-      partner_edit_requests: (review.partner_edit_requests ?? []).map(r =>
+    // Race-safe: map over the latest partner_edit_requests at commit
+    // time so a parallel resolve/reopen doesn't get stomped.
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      partner_edit_requests: (current.partner_edit_requests ?? []).map(r =>
         r.id === id ? { ...r, status } : r,
       ),
-    }
-    void onChange(next)
+    }))
   }
 
   const remove = (id: string) => {
     if (!confirm('Delete this note permanently?')) return
-    const next: SitemapReview = {
-      ...review,
-      partner_edit_requests: (review.partner_edit_requests ?? []).filter(r => r.id !== id),
-    }
-    void onChange(next)
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      partner_edit_requests: (current.partner_edit_requests ?? []).filter(r => r.id !== id),
+    }))
   }
 
   return (

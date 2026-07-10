@@ -119,11 +119,28 @@ export function SitemapReviewEditor({
 
   useEffect(() => { void load() }, [load])
 
-  const persist = useCallback(async (next: SitemapReview) => {
-    setReview(next)
+  const persist = useCallback(async (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => {
+    // Race-safe write. Every child editor used to compute
+    // `{ ...review, X: Y }` from its closed-over `review` prop, then
+    // hand the full review to persist. That pattern squashed any
+    // write that landed between the child's render and its call —
+    // cowork writes, another tab, another editor firing onBlur in
+    // parallel. Now the resolved `next` is computed inside a
+    // functional setter so it reads the LATEST client state at
+    // commit time. Children that pass an updater (r => r') stay
+    // race-safe end-to-end.
     setSaving(true)
     setError(null)
-    const res = await saveSitemapReview(supabase, projectId, next)
+    let resolved: SitemapReview | null = null
+    setReview(current => {
+      if (!current) return current
+      resolved = typeof nextOrUpdater === 'function' ? nextOrUpdater(current) : nextOrUpdater
+      return resolved
+    })
+    // `resolved` is guaranteed set here because setReview ran the
+    // updater synchronously above. TS can't see that, so we assert.
+    if (!resolved) { setSaving(false); return }
+    const res = await saveSitemapReview(supabase, projectId, resolved as SitemapReview)
     setSaving(false)
     if (!res.ok) {
       setError(res.error)
@@ -489,13 +506,16 @@ export function SitemapReviewEditor({
                     ? ' Partner feedback stays attached to the review — nothing gets deleted.'
                     : ''
                   if (!confirm(`Retract this review to draft? The partner-facing link stops working until you publish again.${suffix}`)) return
-                  void persist({
-                    ...review,
+                  // Race-safe: derive new status fields from the latest
+                  // review at commit time so any in-flight field edit
+                  // isn't clobbered by this status transition.
+                  void persist((current: SitemapReview) => ({
+                    ...current,
                     status:              'draft',
                     published_at:        null,
-                    partner_reviewed_at: status === 'partner_reviewed' ? review.partner_reviewed_at : null,
-                    partner_reviewed_by: status === 'partner_reviewed' ? review.partner_reviewed_by : null,
-                  })
+                    partner_reviewed_at: status === 'partner_reviewed' ? current.partner_reviewed_at : null,
+                    partner_reviewed_by: status === 'partner_reviewed' ? current.partner_reviewed_by : null,
+                  }))
                 }}
                 disabled={saving}
                 className="text-[11px] font-semibold text-wm-text-muted hover:text-wm-text ml-auto"
@@ -511,7 +531,7 @@ export function SitemapReviewEditor({
               </span>
               <button
                 type="button"
-                onClick={() => void persist({ ...review, status: 'partner_reviewed', approved_at: null, approved_by: null })}
+                onClick={() => void persist((current: SitemapReview) => ({ ...current, status: 'partner_reviewed', approved_at: null, approved_by: null }))}
                 disabled={saving}
                 className="text-[11px] font-semibold text-wm-text-muted hover:text-wm-text ml-auto"
               >
@@ -564,7 +584,11 @@ function Section({
 
 function IntroEditor({
   review, onChange, disabled,
-}: { review: SitemapReview; onChange: (next: SitemapReview) => Promise<void> | void; disabled: boolean }) {
+}: {
+  review:   SitemapReview
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
+  disabled: boolean
+}) {
   const intro = review.intro ?? { headline: '', body: '' }
   return (
     <Section title="Intro" subtitle="What the partner sees at the top of their review">
@@ -577,7 +601,11 @@ function IntroEditor({
             disabled={disabled}
             onBlur={e => {
               if (e.target.value === intro.headline) return
-              void onChange({ ...review, intro: { ...intro, headline: e.target.value } })
+              const v = e.target.value
+              void onChange((current: SitemapReview) => ({
+                ...current,
+                intro: { ...(current.intro ?? { headline: '', body: '' }), headline: v },
+              }))
             }}
             className="mt-1 w-full text-[13px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
           />
@@ -590,7 +618,11 @@ function IntroEditor({
             rows={3}
             onBlur={e => {
               if (e.target.value === intro.body) return
-              void onChange({ ...review, intro: { ...intro, body: e.target.value } })
+              const v = e.target.value
+              void onChange((current: SitemapReview) => ({
+                ...current,
+                intro: { ...(current.intro ?? { headline: '', body: '' }), body: v },
+              }))
             }}
             className="mt-1 w-full text-[12.5px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
           />
@@ -602,7 +634,11 @@ function IntroEditor({
 
 function ExecutiveSummaryEditor({
   review, onChange, disabled,
-}: { review: SitemapReview; onChange: (next: SitemapReview) => Promise<void> | void; disabled: boolean }) {
+}: {
+  review:   SitemapReview
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
+  disabled: boolean
+}) {
   return (
     <Section
       title="Executive summary"
@@ -615,7 +651,8 @@ function ExecutiveSummaryEditor({
         rows={8}
         onBlur={e => {
           if (e.target.value === (review.executive_summary ?? '')) return
-          void onChange({ ...review, executive_summary: e.target.value })
+          const v = e.target.value
+          void onChange((current: SitemapReview) => ({ ...current, executive_summary: v }))
         }}
         className="w-full text-[12.5px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1.5 focus:outline-none focus:border-wm-accent disabled:opacity-50 leading-relaxed"
       />
@@ -625,7 +662,11 @@ function ExecutiveSummaryEditor({
 
 function NavigationStrategyEditor({
   review, onChange, disabled,
-}: { review: SitemapReview; onChange: (next: SitemapReview) => Promise<void> | void; disabled: boolean }) {
+}: {
+  review:   SitemapReview
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
+  disabled: boolean
+}) {
   return (
     <Section
       title="Navigation strategy"
@@ -638,7 +679,8 @@ function NavigationStrategyEditor({
         rows={6}
         onBlur={e => {
           if (e.target.value === (review.navigation_strategy ?? '')) return
-          void onChange({ ...review, navigation_strategy: e.target.value })
+          const v = e.target.value
+          void onChange((current: SitemapReview) => ({ ...current, navigation_strategy: v }))
         }}
         className="w-full text-[12.5px] text-wm-text bg-wm-bg border border-wm-border rounded px-2 py-1.5 focus:outline-none focus:border-wm-accent disabled:opacity-50 leading-relaxed"
       />
@@ -648,10 +690,20 @@ function NavigationStrategyEditor({
 
 function FooterInfoEditor({
   review, onChange, disabled,
-}: { review: SitemapReview; onChange: (next: SitemapReview) => Promise<void> | void; disabled: boolean }) {
+}: {
+  review:   SitemapReview
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
+  disabled: boolean
+}) {
   const footer = review.footer_info ?? {}
   const update = (patch: Partial<NonNullable<SitemapReview['footer_info']>>) => {
-    void onChange({ ...review, footer_info: { ...footer, ...patch } })
+    // Race-safe: derive footer from current state at commit time so
+    // sibling edits (a parallel social_link save, another editor's
+    // footer_link_groups write) don't get clobbered by this patch.
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      footer_info: { ...(current.footer_info ?? {}), ...patch },
+    }))
   }
   return (
     <Section
@@ -871,27 +923,41 @@ function FooterInfoEditor({
 
 function AnnouncementBannerEditor({
   review, onChange, disabled,
-}: { review: SitemapReview; onChange: (r: SitemapReview) => Promise<void>; disabled: boolean }) {
+}: {
+  review:   SitemapReview
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
+  disabled: boolean
+}) {
   const pres = review.presentation ?? {}
   const banner = pres.announcement_banner
   const hasBanner = !!banner && banner.text.trim().length > 0
+  // Race-safe writes. Reading `current.presentation` inside the
+  // functional updater guarantees this editor's sub-field change
+  // (announcement_banner only) doesn't clobber sibling sub-fields
+  // (why_cards, tiers, congregations, etc.) that another editor or
+  // a cowork write may have updated between renders.
   const updateBanner = (patch: Partial<NonNullable<typeof banner>> | null) => {
     if (patch === null) {
-      const nextPres = { ...pres }
-      delete nextPres.announcement_banner
-      void onChange({ ...review, presentation: nextPres })
+      void onChange((current: SitemapReview) => {
+        const nextPres = { ...(current.presentation ?? {}) }
+        delete nextPres.announcement_banner
+        return { ...current, presentation: nextPres }
+      })
       return
     }
-    void onChange({
-      ...review,
-      presentation: {
-        ...pres,
-        announcement_banner: {
-          text: '',
-          ...banner,
-          ...patch,
+    void onChange((current: SitemapReview) => {
+      const currentBanner = current.presentation?.announcement_banner
+      return {
+        ...current,
+        presentation: {
+          ...(current.presentation ?? {}),
+          announcement_banner: {
+            text: '',
+            ...currentBanner,
+            ...patch,
+          },
         },
-      },
+      }
     })
   }
   return (
@@ -991,22 +1057,28 @@ function PagesEditor({
 }: {
   review:        SitemapReview
   strategyPages: StrategyPageOption[]
-  onChange:      (next: SitemapReview) => Promise<void> | void
+  onChange:      (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled:      boolean
 }) {
   const annotations = review.page_annotations ?? {}
   const updateAnnotation = (slug: string, patch: Partial<ReviewPageAnnotation>) => {
-    const prior = annotations[slug] ?? {}
-    const next: ReviewPageAnnotation = { ...prior, ...patch }
-    // Drop empty-string fields so annotations stay lean.
-    if (next.what_changed && !next.what_changed.trim()) delete next.what_changed
-    if (next.why_change && !next.why_change.trim()) delete next.why_change
-    if (next.strategic_alignment && !next.strategic_alignment.trim()) delete next.strategic_alignment
-    if (next.is_nav_parent_only === false) delete next.is_nav_parent_only
-    if (next.sitemap_tag === undefined) delete next.sitemap_tag
-    const nextMap = { ...annotations, [slug]: next }
-    if (Object.keys(next).length === 0) delete nextMap[slug]
-    void onChange({ ...review, page_annotations: nextMap })
+    // Race-safe: recompute the target annotation from latest state
+    // inside the functional updater so a parallel edit to another
+    // slug's annotation doesn't get stomped by this write.
+    void onChange((current: SitemapReview) => {
+      const curAnns = current.page_annotations ?? {}
+      const prior = curAnns[slug] ?? {}
+      const next: ReviewPageAnnotation = { ...prior, ...patch }
+      // Drop empty-string fields so annotations stay lean.
+      if (next.what_changed && !next.what_changed.trim()) delete next.what_changed
+      if (next.why_change && !next.why_change.trim()) delete next.why_change
+      if (next.strategic_alignment && !next.strategic_alignment.trim()) delete next.strategic_alignment
+      if (next.is_nav_parent_only === false) delete next.is_nav_parent_only
+      if (next.sitemap_tag === undefined) delete next.sitemap_tag
+      const nextMap = { ...curAnns, [slug]: next }
+      if (Object.keys(next).length === 0) delete nextMap[slug]
+      return { ...current, page_annotations: nextMap }
+    })
   }
 
   // Include all site_strategy pages (including nav-parent-only ones)
@@ -1019,7 +1091,7 @@ function PagesEditor({
   for (const slug of Object.keys(annotations)) allSlugs.add(slug)
 
   return (
-    <Section title="Pages" subtitle={`${allSlugs.size} pages · names + purposes are read from site_strategy. Edit review-owned annotations (role tag, what changed, why change, strategic alignment) here.`}>
+    <Section title="Pages" subtitle={`${allSlugs.size} pages · names + purposes are read from site_strategy. Edit review-owned annotations (role tag, what changed) here.`}>
       <p className="text-[11.5px] text-wm-text-muted mb-2">
         Page names + purposes live on <code>site_strategy</code> and are shown read-only here. To rename or rewrite a purpose, edit the JSON block at the bottom of this editor (or run a cowork revise-site-strategy pass).
       </p>
@@ -1085,41 +1157,22 @@ function PagesEditor({
                 Purpose (from site_strategy): {purpose}
               </p>
             )}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-2">
-              <label className="block">
-                <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">What changed</span>
-                <textarea
-                  defaultValue={ann.what_changed ?? ''}
-                  placeholder="Optional. Partner-facing note about what changed for this page vs their current site."
-                  disabled={disabled}
-                  rows={2}
-                  onBlur={e => { if (e.target.value !== (ann.what_changed ?? '')) updateAnnotation(slug, { what_changed: e.target.value.trim() || undefined }) }}
-                  className="mt-1 w-full text-[11.5px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-                />
-              </label>
-              <label className="block">
-                <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Why change</span>
-                <textarea
-                  defaultValue={ann.why_change ?? ''}
-                  placeholder="Optional. Partner-facing rationale for the change."
-                  disabled={disabled}
-                  rows={2}
-                  onBlur={e => { if (e.target.value !== (ann.why_change ?? '')) updateAnnotation(slug, { why_change: e.target.value.trim() || undefined }) }}
-                  className="mt-1 w-full text-[11.5px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-                />
-              </label>
-              <label className="block">
-                <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">Strategic alignment</span>
-                <textarea
-                  defaultValue={ann.strategic_alignment ?? ''}
-                  placeholder="Optional. How this page ties to the partner's approved vision."
-                  disabled={disabled}
-                  rows={2}
-                  onBlur={e => { if (e.target.value !== (ann.strategic_alignment ?? '')) updateAnnotation(slug, { strategic_alignment: e.target.value.trim() || undefined }) }}
-                  className="mt-1 w-full text-[11.5px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-                />
-              </label>
-            </div>
+            {/* Only "what changed" ships to the partner view (falls in
+                as the page description when there's no tier override
+                and no purpose). why_change and strategic_alignment used
+                to sit here too but they never rendered anywhere on the
+                partner side — dropped from the editor 2026-07 pass. */}
+            <label className="block mt-2">
+              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">What changed</span>
+              <textarea
+                defaultValue={ann.what_changed ?? ''}
+                placeholder="Optional. Partner-facing note about what changed for this page vs their current site."
+                disabled={disabled}
+                rows={2}
+                onBlur={e => { if (e.target.value !== (ann.what_changed ?? '')) updateAnnotation(slug, { what_changed: e.target.value.trim() || undefined }) }}
+                className="mt-1 w-full text-[11.5px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+              />
+            </label>
           </li>
         )})}
       </ul>
@@ -1132,22 +1185,29 @@ function PersonaPosturesEditor({
 }: {
   review:        SitemapReview
   strategyPages: StrategyPageOption[]
-  onChange:      (next: SitemapReview) => Promise<void> | void
+  onChange:      (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled:      boolean
 }) {
   const updatePosture = (id: string, patch: Partial<PersonaPosture>) => {
-    void onChange({
-      ...review,
-      persona_postures: review.persona_postures.map(p => p.persona_id === id ? { ...p, ...patch } : p),
-    })
+    // Race-safe: map over the latest persona_postures at commit time.
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      persona_postures: current.persona_postures.map(p => p.persona_id === id ? { ...p, ...patch } : p),
+    }))
   }
   const toggleKeyPage = (id: string, slug: string) => {
-    const p = review.persona_postures.find(pp => pp.persona_id === id)
-    if (!p) return
-    const current = p.key_page_slugs ?? []
-    const has = current.includes(slug)
-    const next = has ? current.filter(s => s !== slug) : [...current, slug].slice(0, 3)
-    updatePosture(id, { key_page_slugs: next })
+    // Race-safe: read latest key_page_slugs at commit time so a
+    // sibling toggle for a different persona doesn't get stomped.
+    void onChange((currentReview: SitemapReview) => ({
+      ...currentReview,
+      persona_postures: currentReview.persona_postures.map(p => {
+        if (p.persona_id !== id) return p
+        const keys = p.key_page_slugs ?? []
+        const has = keys.includes(slug)
+        const nextKeys = has ? keys.filter(s => s !== slug) : [...keys, slug].slice(0, 3)
+        return { ...p, key_page_slugs: nextKeys }
+      }),
+    }))
   }
   if (review.persona_postures.length === 0) {
     return (
@@ -1267,22 +1327,38 @@ function PersonaPosturesEditor({
 
 function ContentMigrationsEditor({
   review, onChange, disabled,
-}: { review: SitemapReview; onChange: (next: SitemapReview) => Promise<void> | void; disabled: boolean }) {
+}: {
+  review:   SitemapReview
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
+  disabled: boolean
+}) {
   const migrations = review.content_migrations
-  const setMigrations = (next: ContentMigration[]) => { void onChange({ ...review, content_migrations: next }) }
   const updateMig = (id: string, patch: Partial<ContentMigration>) => {
-    setMigrations(migrations.map(m => m.id === id ? { ...m, ...patch } : m))
+    // Race-safe: map over the latest content_migrations at commit time.
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      content_migrations: current.content_migrations.map(m => m.id === id ? { ...m, ...patch } : m),
+    }))
   }
   const addMig = () => {
-    setMigrations([...migrations, {
+    const newMig: ContentMigration = {
       id:          crypto.randomUUID(),
       title:       '',
       merged_from: [],
       merged_to:   '',
       rationale:   '',
-    }])
+    }
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      content_migrations: [...current.content_migrations, newMig],
+    }))
   }
-  const removeMig = (id: string) => setMigrations(migrations.filter(m => m.id !== id))
+  const removeMig = (id: string) => {
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      content_migrations: current.content_migrations.filter(m => m.id !== id),
+    }))
+  }
 
   return (
     <Section title="Where content went" subtitle="Consolidation rationale. For example, Youth and Kids folding into a single Family page, and why that serves families better.">
@@ -1411,7 +1487,7 @@ function PresentationEditor({
   review, onChange, disabled,
 }: {
   review:   SitemapReview
-  onChange: (next: SitemapReview) => Promise<void> | void
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled: boolean
 }) {
   const initial = useMemo(
@@ -1431,7 +1507,10 @@ function PresentationEditor({
       if (typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new Error('Must be a JSON object.')
       }
-      void onChange({ ...review, presentation: parsed })
+      // Race-safe write: read LATEST review inside the parent's
+      // functional setter so per-field editors saving in parallel
+      // don't stomp this JSON payload with stale local state.
+      void onChange((current: SitemapReview) => ({ ...current, presentation: parsed }))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Invalid JSON.')
     }
@@ -1440,7 +1519,7 @@ function PresentationEditor({
   const clear = () => {
     if (!confirm('Clear the entire presentation layer? The partner view falls back to system defaults.')) return
     setText('{}')
-    void onChange({ ...review, presentation: undefined })
+    void onChange((current: SitemapReview) => ({ ...current, presentation: undefined }))
   }
 
   const dirty = text !== initial
@@ -1505,7 +1584,7 @@ function NavPresentationEditor({
 }: {
   review:        SitemapReview
   strategyPages: StrategyPageOption[]
-  onChange:      (next: SitemapReview) => Promise<void> | void
+  onChange:      (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled:      boolean
 }) {
   const np = review.nav_presentation
@@ -1520,8 +1599,11 @@ function NavPresentationEditor({
   useEffect(() => { setText(initial); setError(null) }, [initial])
 
   const setShell = (nextShell: typeof shell) => {
-    const nextNp = { ...(np ?? {}), shell: nextShell }
-    void onChange({ ...review, nav_presentation: nextNp })
+    // Race-safe: read latest review.nav_presentation at commit time.
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      nav_presentation: { ...(current.nav_presentation ?? {}), shell: nextShell },
+    }))
   }
 
   const saveJson = () => {
@@ -1529,7 +1611,10 @@ function NavPresentationEditor({
     try {
       const parsed = text.trim() ? JSON.parse(text) : {}
       if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Must be a JSON object.')
-      void onChange({ ...review, nav_presentation: parsed })
+      // Race-safe: wholesale-replace nav_presentation with the parsed
+      // JSON, computed against latest client state so a parallel
+      // per-field write can't clobber this payload.
+      void onChange((current: SitemapReview) => ({ ...current, nav_presentation: parsed }))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Invalid JSON.')
     }
@@ -1574,14 +1659,14 @@ function NavPresentationEditor({
         strategyPages={strategyPages}
         np={np}
         disabled={disabled}
-        onChange={next => void onChange({ ...review, nav_presentation: next })}
+        onChange={next => void onChange((current: SitemapReview) => ({ ...current, nav_presentation: next }))}
       />
 
       <HeaderCtasEditor
         strategyPages={strategyPages}
         np={np}
         disabled={disabled}
-        onChange={next => void onChange({ ...review, nav_presentation: next })}
+        onChange={next => void onChange((current: SitemapReview) => ({ ...current, nav_presentation: next }))}
       />
 
       {shell === 'offcanvas' && (
@@ -1830,18 +1915,32 @@ function WhyCardsEditor({
   review, onChange, disabled,
 }: {
   review:   SitemapReview
-  onChange: (next: SitemapReview) => Promise<void> | void
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled: boolean
 }) {
   const cards = review.presentation?.why_cards ?? []
-  const update = (next: NonNullable<SitemapReview['presentation']>['why_cards']) => {
-    void onChange({
-      ...review,
-      presentation: { ...(review.presentation ?? {}), why_cards: next },
-    })
+  // Race-safe write of the why_cards array. Any callback here either
+  // recomputes the array from the latest presentation.why_cards
+  // (patchCard, removeCard, addCard) or gets handed a fresh next
+  // array that it wraps into a functional updater. Either way, we
+  // never spread stale closure state into the payload.
+  const writeCards = (
+    compute: (currentCards: NonNullable<SitemapReview['presentation']>['why_cards']) => NonNullable<SitemapReview['presentation']>['why_cards'],
+  ) => {
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      presentation: {
+        ...(current.presentation ?? {}),
+        why_cards: compute(current.presentation?.why_cards ?? []),
+      },
+    }))
   }
-  const addCard = () => update([...(cards ?? []), { id: cryptoRandomIdLocal(), icon: '◆', title: '', body: '' }])
-  const removeCard = (id: string) => update((cards ?? []).filter(c => c.id !== id))
+  const patchCard = (id: string, patch: Partial<NonNullable<typeof cards>[number]>) =>
+    writeCards(cur => (cur ?? []).map(cc => cc.id === id ? { ...cc, ...patch } : cc))
+  const addCard = () =>
+    writeCards(cur => [...(cur ?? []), { id: cryptoRandomIdLocal(), icon: '◆', title: '', body: '' }])
+  const removeCard = (id: string) =>
+    writeCards(cur => (cur ?? []).filter(c => c.id !== id))
 
   return (
     <div className="space-y-2">
@@ -1855,7 +1954,7 @@ function WhyCardsEditor({
               type="text"
               defaultValue={c.icon ?? '◆'}
               disabled={disabled}
-              onBlur={e => update((cards ?? []).map(cc => cc.id === c.id ? { ...cc, icon: e.target.value } : cc))}
+              onBlur={e => patchCard(c.id, { icon: e.target.value })}
               className="text-[16px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded-md px-2 py-0.5 w-12 text-center focus:outline-none focus:border-wm-accent disabled:opacity-50"
               title="Icon character (◆ ◇ ✦ ↗ or any glyph)"
             />
@@ -1864,7 +1963,7 @@ function WhyCardsEditor({
               defaultValue={c.title}
               placeholder="Card title (e.g. Built on what makes you distinct)"
               disabled={disabled}
-              onBlur={e => update((cards ?? []).map(cc => cc.id === c.id ? { ...cc, title: e.target.value } : cc))}
+              onBlur={e => patchCard(c.id, { title: e.target.value })}
               className="flex-1 text-[13px] font-semibold text-wm-text bg-transparent border-b border-transparent focus:border-wm-accent focus:outline-none disabled:opacity-50"
             />
             <button
@@ -1879,7 +1978,7 @@ function WhyCardsEditor({
             placeholder="One or two warm sentences the partner reads."
             disabled={disabled}
             rows={2}
-            onBlur={e => update((cards ?? []).map(cc => cc.id === c.id ? { ...cc, body: e.target.value } : cc))}
+            onBlur={e => patchCard(c.id, { body: e.target.value })}
             className="w-full text-[12px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
           />
         </div>
@@ -1910,7 +2009,7 @@ function TierPageDescriptionsEditor({
 }: {
   review:        SitemapReview
   strategyPages: StrategyPageOption[]
-  onChange:      (next: SitemapReview) => Promise<void> | void
+  onChange:      (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled:      boolean
 }) {
   const tiers = review.presentation?.tiers ?? []
@@ -1922,11 +2021,19 @@ function TierPageDescriptionsEditor({
     )
   }
   const updateEntry = (tierId: string, slug: string, override: string) => {
-    const nextTiers = tiers.map(t => t.id !== tierId ? t : {
-      ...t,
-      page_entries: (t.page_entries ?? []).map(e => e.slug !== slug ? e : { ...e, description_override: override || undefined }),
+    // Race-safe: read tiers from current state so a parallel edit
+    // to a different tier's letter/title doesn't get clobbered.
+    void onChange((current: SitemapReview) => {
+      const curTiers = current.presentation?.tiers ?? []
+      const nextTiers = curTiers.map(t => t.id !== tierId ? t : {
+        ...t,
+        page_entries: (t.page_entries ?? []).map(e => e.slug !== slug ? e : { ...e, description_override: override || undefined }),
+      })
+      return {
+        ...current,
+        presentation: { ...(current.presentation ?? {}), tiers: nextTiers },
+      }
     })
-    void onChange({ ...review, presentation: { ...(review.presentation ?? {}), tiers: nextTiers } })
   }
   return (
     <div className="space-y-3">
@@ -1996,7 +2103,7 @@ function InspirationImageEditor({
 }: {
   review:    SitemapReview
   projectId: string
-  onChange:  (next: SitemapReview) => Promise<void> | void
+  onChange:  (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled:  boolean
 }) {
   const [uploading, setUploading]     = useState(false)
@@ -2007,10 +2114,12 @@ function InspirationImageEditor({
   const setImage = (
     next: NonNullable<SitemapReview['presentation']>['inspiration_image'] | undefined,
   ) => {
-    void onChange({
-      ...review,
-      presentation: { ...(review.presentation ?? {}), inspiration_image: next },
-    })
+    // Race-safe: merge into the latest presentation so sibling cowork
+    // writes to other presentation fields don't get clobbered.
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      presentation: { ...(current.presentation ?? {}), inspiration_image: next },
+    }))
   }
 
   const handleFile = async (file: File) => {
@@ -2134,15 +2243,16 @@ function SharedHubsIntroEditor({
   review, onChange, disabled,
 }: {
   review:   SitemapReview
-  onChange: (next: SitemapReview) => Promise<void> | void
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled: boolean
 }) {
   const pres = review.presentation ?? {}
   const setField = (k: 'shared_hubs_headline' | 'shared_hubs_body', v: string) => {
-    void onChange({
-      ...review,
-      presentation: { ...pres, [k]: v.trim() ? v : undefined },
-    })
+    // Race-safe: merge into the latest presentation.
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      presentation: { ...(current.presentation ?? {}), [k]: v.trim() ? v : undefined },
+    }))
   }
   return (
     <div className="space-y-2">
@@ -2178,25 +2288,36 @@ function CongregationsEditor({
   review, onChange, disabled,
 }: {
   review:   SitemapReview
-  onChange: (next: SitemapReview) => Promise<void> | void
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled: boolean
 }) {
   const congs = review.presentation?.congregations ?? []
-  const update = (next: NonNullable<SitemapReview['presentation']>['congregations']) => {
-    void onChange({
-      ...review,
-      presentation: { ...(review.presentation ?? {}), congregations: next },
-    })
+  // Race-safe write of the congregations array. Every mutation
+  // recomputes from the latest presentation.congregations at commit
+  // time so sibling edits to other presentation fields (why_cards,
+  // tiers, banner) aren't stomped.
+  const writeCongs = (
+    compute: (currentCongs: NonNullable<SitemapReview['presentation']>['congregations']) => NonNullable<SitemapReview['presentation']>['congregations'],
+  ) => {
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      presentation: {
+        ...(current.presentation ?? {}),
+        congregations: compute(current.presentation?.congregations ?? []),
+      },
+    }))
   }
   const patchCong = (id: string, patch: Partial<NonNullable<typeof congs>[number]>) => {
-    update((congs ?? []).map(c => c.id === id ? { ...c, ...patch } : c))
+    writeCongs(cur => (cur ?? []).map(c => c.id === id ? { ...c, ...patch } : c))
   }
-  const addCong = () => update([...(congs ?? []), { id: cryptoRandomIdLocal(), label: '', service_time: '', address: '' }])
+  const addCong = () =>
+    writeCongs(cur => [...(cur ?? []), { id: cryptoRandomIdLocal(), label: '', service_time: '', address: '' }])
   const removeCong = (id: string) => {
     if (!confirm('Remove this congregation? Its row disappears from Shared Hub Pages, Persistent Nav, and the Get Connected mega.')) return
-    update((congs ?? []).filter(c => c.id !== id))
+    writeCongs(cur => (cur ?? []).filter(c => c.id !== id))
   }
-  const setPrimary = (id: string) => update((congs ?? []).map(c => ({ ...c, is_primary: c.id === id })))
+  const setPrimary = (id: string) =>
+    writeCongs(cur => (cur ?? []).map(c => ({ ...c, is_primary: c.id === id })))
 
   return (
     <div className="space-y-2">
@@ -2391,19 +2512,29 @@ function FeaturedHighlightEditor({
   review, onChange, disabled,
 }: {
   review:   SitemapReview
-  onChange: (next: SitemapReview) => Promise<void> | void
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled: boolean
 }) {
   const fh = review.presentation?.featured_highlight
+  // Race-safe: replace featured_highlight on the LATEST presentation
+  // so a parallel per-field write elsewhere doesn't get stomped.
   const patch = (next: NonNullable<SitemapReview['presentation']>['featured_highlight'] | undefined) => {
-    void onChange({
-      ...review,
-      presentation: { ...(review.presentation ?? {}), featured_highlight: next },
-    })
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      presentation: { ...(current.presentation ?? {}), featured_highlight: next },
+    }))
   }
   const setField = (k: string, v: string) => {
-    const current = fh ?? { label: '', description: '' }
-    patch({ ...current, [k]: v || undefined } as typeof fh)
+    // Race-safe against a parallel edit to a different featured_
+    // highlight field: derive the merge target from current state.
+    void onChange((current: SitemapReview) => {
+      const cur = current.presentation?.featured_highlight ?? { label: '', description: '' }
+      const nextFh = { ...cur, [k]: v || undefined } as NonNullable<SitemapReview['presentation']>['featured_highlight']
+      return {
+        ...current,
+        presentation: { ...(current.presentation ?? {}), featured_highlight: nextFh },
+      }
+    })
   }
   const clear = () => {
     if (!confirm('Clear the featured highlight? The tile disappears from the About mega.')) return
@@ -2496,13 +2627,22 @@ function TiersEditor({
   review, onChange, disabled,
 }: {
   review:   SitemapReview
-  onChange: (next: SitemapReview) => Promise<void> | void
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled: boolean
 }) {
   const tiers = review.presentation?.tiers ?? []
   const patchTier = (id: string, patch: Partial<NonNullable<typeof tiers>[number]>) => {
-    const next = (tiers ?? []).map(t => t.id === id ? { ...t, ...patch } : t)
-    void onChange({ ...review, presentation: { ...(review.presentation ?? {}), tiers: next } })
+    // Race-safe: recompute the tiers array from current state so a
+    // parallel per-page description override edit (which writes to
+    // the same tiers array) doesn't get stomped.
+    void onChange((current: SitemapReview) => {
+      const curTiers = current.presentation?.tiers ?? []
+      const next = curTiers.map(t => t.id === id ? { ...t, ...patch } : t)
+      return {
+        ...current,
+        presentation: { ...(current.presentation ?? {}), tiers: next },
+      }
+    })
   }
   if (tiers.length === 0) {
     return <p className="text-[11.5px] text-wm-text-subtle italic">No tiers yet. Author them via the Presentation JSON below; the letter/title/meta editors show up once tiers exist.</p>
@@ -2560,7 +2700,7 @@ function HeroEmPhraseEditor({
   review, onChange, disabled,
 }: {
   review:   SitemapReview
-  onChange: (next: SitemapReview) => Promise<void> | void
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled: boolean
 }) {
   const value = review.presentation?.hero_em_phrase ?? ''
@@ -2574,10 +2714,12 @@ function HeroEmPhraseEditor({
         placeholder="three congregations"
         onBlur={e => {
           if (e.target.value !== value) {
-            void onChange({
-              ...review,
-              presentation: { ...(review.presentation ?? {}), hero_em_phrase: e.target.value || undefined },
-            })
+            const v = e.target.value
+            // Race-safe: merge into the latest presentation.
+            void onChange((current: SitemapReview) => ({
+              ...current,
+              presentation: { ...(current.presentation ?? {}), hero_em_phrase: v || undefined },
+            }))
           }
         }}
         className="mt-1 w-full text-[13px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
@@ -2597,21 +2739,31 @@ function WhatsChangingCardsEditor({
   review, onChange, disabled,
 }: {
   review:   SitemapReview
-  onChange: (next: SitemapReview) => Promise<void> | void
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
   disabled: boolean
 }) {
   const cards = review.presentation?.whats_changing_cards ?? []
-  const update = (next: NonNullable<SitemapReview['presentation']>['whats_changing_cards']) => {
-    void onChange({
-      ...review,
-      presentation: { ...(review.presentation ?? {}), whats_changing_cards: next },
-    })
+  // Race-safe write of whats_changing_cards. Every mutation reads
+  // the latest cards array from current state at commit time so
+  // sibling presentation edits don't get clobbered.
+  const writeCards = (
+    compute: (currentCards: NonNullable<SitemapReview['presentation']>['whats_changing_cards']) => NonNullable<SitemapReview['presentation']>['whats_changing_cards'],
+  ) => {
+    void onChange((current: SitemapReview) => ({
+      ...current,
+      presentation: {
+        ...(current.presentation ?? {}),
+        whats_changing_cards: compute(current.presentation?.whats_changing_cards ?? []),
+      },
+    }))
   }
   const patch = (id: string, p: Partial<NonNullable<typeof cards>[number]>) => {
-    update((cards ?? []).map(c => c.id === id ? { ...c, ...p } : c))
+    writeCards(cur => (cur ?? []).map(c => c.id === id ? { ...c, ...p } : c))
   }
-  const add = () => update([...(cards ?? []), { id: cryptoRandomIdLocal(), tag: 'kept', title: '', body: '' }])
-  const remove = (id: string) => update((cards ?? []).filter(c => c.id !== id))
+  const add = () =>
+    writeCards(cur => [...(cur ?? []), { id: cryptoRandomIdLocal(), tag: 'kept', title: '', body: '' }])
+  const remove = (id: string) =>
+    writeCards(cur => (cur ?? []).filter(c => c.id !== id))
 
   return (
     <div className="space-y-2">
