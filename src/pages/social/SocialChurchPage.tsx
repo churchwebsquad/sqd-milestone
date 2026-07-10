@@ -646,15 +646,6 @@ export default function SocialChurchPage() {
                       </div>
                     </div>
                   )}
-                  <a href="https://app.vistasocial.com" target="_blank" rel="noopener noreferrer"
-                    className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-[#341756] hover:border-[#513DE5] hover:text-[#513DE5] transition-colors">
-                    Open Vista Social <ExternalLink size={13} />
-                  </a>
-                  <a href={`https://app.clickup.com/1235435/v/l/s/900402023950?pr=90120417855&cf=90120417855&cf_val=${member}`}
-                    target="_blank" rel="noopener noreferrer"
-                    className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-[#341756] hover:border-[#513DE5] hover:text-[#513DE5] transition-colors">
-                    ClickUp: View All SRPs <ExternalLink size={13} />
-                  </a>
                   {church?.strategy_brief
                     ? <a href={church.strategy_brief.startsWith('http') ? church.strategy_brief : `https://${church.strategy_brief}`} target="_blank" rel="noopener noreferrer"
                         className="w-full flex items-center justify-between px-4 py-2.5 border border-gray-200 rounded-xl text-sm text-[#341756] hover:border-[#513DE5] hover:text-[#513DE5] transition-colors">
