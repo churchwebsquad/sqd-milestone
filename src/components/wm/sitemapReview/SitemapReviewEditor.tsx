@@ -22,6 +22,7 @@ import {
   publishReview,
   saveSiteStrategy,
   saveSitemapReview,
+  startNextRound,
   type ContentMigration,
   type PersonaPosture,
   type ReviewPageAnnotation,
@@ -257,7 +258,14 @@ export function SitemapReviewEditor({
         {/* Header */}
         <div className="border-b border-wm-border px-5 py-3 flex items-baseline justify-between gap-4 flex-wrap">
           <div>
-            <h2 className="text-[16px] font-bold text-wm-text">Content Strategy Review</h2>
+            <h2 className="text-[16px] font-bold text-wm-text">
+              Content Strategy Review
+              {(review.round_number ?? 1) > 1 && (
+                <span className="ml-2 text-[10.5px] uppercase tracking-widest font-bold text-wm-accent-strong bg-wm-accent/10 border border-wm-accent/30 rounded-full px-2 py-0.5 align-middle">
+                  Round {review.round_number}
+                </span>
+              )}
+            </h2>
             <p className="text-[11.5px] text-wm-text-muted">
               {churchName ?? 'This project'}
               {' · '}
@@ -325,6 +333,12 @@ export function SitemapReviewEditor({
         {/* Body */}
         {viewMode === 'edit' ? (
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+            {(review.round_number ?? 1) > 1 && (
+              <RoundChangeSummaryEditor review={review} onChange={persist} disabled={isApproved} />
+            )}
+            {(review.round_history?.length ?? 0) > 0 && (
+              <PreviousRoundsPanel review={review} />
+            )}
             <PartnerEditRequestsInbox review={review} onChange={persist} disabled={isApproved} />
 
             {/* Sections are ordered to mirror the partner-facing wrapper 1:1.
@@ -493,23 +507,42 @@ export function SitemapReviewEditor({
                   Copy partner link
                 </button>
               )}
+              {/* Start next round. Snapshots the current round (partner
+                  feedback + published/reviewed timestamps + change-summary)
+                  into round_history and bumps round_number, then resets
+                  status to draft so the strategist can iterate + republish.
+                  Only makes sense once partner feedback exists — otherwise
+                  "Retract to draft" is the right button (no snapshot). */}
+              {status === 'partner_reviewed' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!confirm(`Start Round ${(review.round_number ?? 1) + 1}? The current round's partner feedback and drafted state get snapshotted into round history, then the review resets to draft so you can iterate. Nothing gets deleted.`)) return
+                    void persist((current: SitemapReview) => startNextRound(current, {
+                      siteStrategyGeneratedAt: siteStrategy?._meta?.generated_at,
+                    }))
+                  }}
+                  disabled={saving}
+                  className="text-[12px] font-semibold px-3 py-1.5 rounded-full border border-wm-accent text-wm-accent-strong hover:bg-wm-accent-strong hover:text-white"
+                  title="Snapshot this round's feedback and open Round N+1 as a new draft."
+                >
+                  Start next round →
+                </button>
+              )}
               {/* Retract-to-draft. Reverts published / partner_reviewed
                   back to draft so the strategist can iterate before
                   re-sharing. Partner-facing token stays valid so
                   bookmarks don't 404; the partner view just hides the
-                  review while status is draft.
+                  review while status is draft. No snapshot — same round.
                   Confirm dialog because this pulls a live link out
                   from under any partner who might be reading. */}
               <button
                 type="button"
                 onClick={() => {
                   const suffix = status === 'partner_reviewed'
-                    ? ' Partner feedback stays attached to the review — nothing gets deleted.'
+                    ? ' Partner feedback stays attached to the review — nothing gets deleted, and the round number does not change. (Use "Start next round" instead to bump to Round N+1.)'
                     : ''
                   if (!confirm(`Retract this review to draft? The partner-facing link stops working until you publish again.${suffix}`)) return
-                  // Race-safe: derive new status fields from the latest
-                  // review at commit time so any in-flight field edit
-                  // isn't clobbered by this status transition.
                   void persist((current: SitemapReview) => ({
                     ...current,
                     status:              'draft',
@@ -3018,5 +3051,124 @@ function SiteStrategyJsonEditor({
         {dirty && <span className="text-[11px] text-wm-text-subtle">Unsaved changes</span>}
       </div>
     </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// RoundChangeSummaryEditor. Strategist-authored "what changed since
+// Round N-1" that the partner reads at the top of the Round 2+
+// review. Only rendered when round_number > 1.
+// ─────────────────────────────────────────────────────────────────
+
+function RoundChangeSummaryEditor({
+  review, onChange, disabled,
+}: {
+  review:   SitemapReview
+  onChange: (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
+  disabled: boolean
+}) {
+  const value = review.round_change_summary ?? ''
+  const priorRound = (review.round_number ?? 1) - 1
+  return (
+    <section className="rounded-lg border border-wm-accent/30 bg-wm-accent/5 px-4 py-3">
+      <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong mb-1">
+        What changed since Round {priorRound}
+      </p>
+      <p className="text-[11.5px] text-wm-text-muted mb-2 leading-snug">
+        Write a partner-facing note explaining what you revised for this round. Appears at the top of the Round {review.round_number} portal view. Leave blank if you'd rather stay silent about the changes.
+      </p>
+      <textarea
+        key={`round-change-summary-${review.round_number}`}
+        defaultValue={value}
+        disabled={disabled}
+        rows={3}
+        placeholder={`E.g. "We rebuilt the site around three congregations, added a Volunteer page, and simplified the top nav based on your notes."`}
+        onBlur={e => {
+          const next = e.target.value.trim() || undefined
+          if (next === (review.round_change_summary ?? undefined)) return
+          void onChange((current: SitemapReview) => ({
+            ...current,
+            round_change_summary: next,
+          }))
+        }}
+        className="w-full text-[12px] text-wm-text bg-white border border-wm-border rounded-md px-3 py-2 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+      />
+    </section>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// PreviousRoundsPanel. Read-only collapsible listing every prior
+// round: when it was published, when the partner submitted feedback,
+// their notes, and their per-section edit requests. So Round 2+ can
+// see everything Round 1 said without hunting.
+// ─────────────────────────────────────────────────────────────────
+
+function PreviousRoundsPanel({ review }: { review: SitemapReview }) {
+  const history = review.round_history ?? []
+  if (history.length === 0) return null
+  const fmt = (iso: string | null | undefined) =>
+    iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
+  return (
+    <section className="rounded-lg border border-wm-border bg-wm-bg-elevated">
+      <details>
+        <summary className="cursor-pointer px-4 py-2.5 flex items-baseline gap-2 flex-wrap">
+          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+            Previous rounds
+          </span>
+          <span className="text-[11.5px] text-wm-text-muted">
+            {history.length} {history.length === 1 ? 'round' : 'rounds'} archived · partner feedback preserved below
+          </span>
+        </summary>
+        <div className="px-4 pb-3 space-y-3">
+          {[...history].reverse().map(snap => (
+            <div key={snap.round_number} className="border border-wm-border rounded p-3 bg-white">
+              <div className="flex items-baseline gap-2 flex-wrap mb-1">
+                <span className="text-[13px] font-bold text-wm-text">Round {snap.round_number}</span>
+                <span className="text-[11px] text-wm-text-muted">
+                  Published {fmt(snap.published_at)}
+                  {snap.partner_reviewed_at && ` · Partner submitted ${fmt(snap.partner_reviewed_at)}${snap.partner_reviewed_by ? ` by ${snap.partner_reviewed_by}` : ''}`}
+                  {snap.closed_at && ` · Closed ${fmt(snap.closed_at)}`}
+                </span>
+              </div>
+              {snap.round_change_summary && (
+                <p className="text-[11.5px] text-wm-text italic mb-2">
+                  <span className="text-wm-text-muted not-italic">Change summary shown to partner: </span>
+                  {snap.round_change_summary}
+                </p>
+              )}
+              {snap.partner_notes && (
+                <div className="mb-2">
+                  <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-0.5">Partner-wide note</p>
+                  <p className="text-[12px] text-wm-text whitespace-pre-wrap">{snap.partner_notes}</p>
+                </div>
+              )}
+              {snap.partner_edit_requests.length > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">
+                    Section-level feedback ({snap.partner_edit_requests.length})
+                  </p>
+                  <ul className="space-y-1.5">
+                    {snap.partner_edit_requests.map(r => (
+                      <li key={r.id} className="text-[11.5px] text-wm-text">
+                        <span className="font-semibold">{r.section_label}</span>
+                        {r.author_name && <span className="text-wm-text-muted"> · {r.author_name}</span>}
+                        <div className="text-[11.5px] text-wm-text-muted whitespace-pre-wrap">{r.comment}</div>
+                        {r.suggested_change && (
+                          <div className="text-[11.5px] text-wm-text-muted italic">Suggested: {r.suggested_change}</div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {!snap.partner_notes && snap.partner_edit_requests.length === 0 && (
+                <p className="text-[11.5px] text-wm-text-subtle italic">No partner feedback recorded for this round.</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </details>
+    </section>
   )
 }

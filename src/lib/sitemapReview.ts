@@ -311,6 +311,27 @@ export interface SitemapReviewNavPresentation {
   }
 }
 
+/** Snapshot of a completed round, captured when the strategist
+ *  clicks "Start next round" on a partner_reviewed review. Holds
+ *  what the partner saw + what they submitted, so future rounds can
+ *  reference prior feedback without losing it. Kept lean — we
+ *  intentionally do not copy the full pages/nav (those live on
+ *  site_strategy at the round's frozen shape via _meta.generated_at). */
+export interface SitemapReviewRoundSnapshot {
+  round_number:         number
+  published_at:         string | null
+  closed_at:            string          // when the strategist started the next round
+  partner_reviewed_at:  string | null
+  partner_reviewed_by:  string | null
+  partner_notes?:       string
+  partner_edit_requests: PartnerEditRequest[]
+  round_change_summary?: string
+  /** Cowork-generation stamp on site_strategy at the moment this
+   *  round closed. Lets us show partners which strategy revision
+   *  they were reviewing when they gave feedback. */
+  site_strategy_generated_at?: string
+}
+
 export interface SitemapReview {
   /** 1 = legacy shape with pages[] + nav_layout duplicated from
    *  site_strategy. 2 = post-2026-07 refactor: pages/nav_layout
@@ -327,6 +348,17 @@ export interface SitemapReview {
   approved_by:  'staff' | 'partner' | null
   partner_reviewed_at?: string | null
   partner_reviewed_by?: string | null
+
+  /** 1-indexed. New reviews start at 1. "Start next round" bumps
+   *  the number and archives the prior state into round_history. */
+  round_number: number
+  /** Prior rounds, oldest first. Empty (or absent) on a first
+   *  round. Preserves partner feedback so nothing gets lost when
+   *  the strategist reopens for revision. */
+  round_history?: SitemapReviewRoundSnapshot[]
+  /** Strategist-authored note the partner reads at the top of a
+   *  Round 2+ review — "here's what we changed since last time." */
+  round_change_summary?: string
 
   /** @deprecated Legacy watermark from the pages-duplication era.
    *  Retained on the type so pre-migration rows still typecheck; the
@@ -864,6 +896,9 @@ export function composeSitemapReview(args: {
     approved_by:        existing?.approved_by ?? null,
     partner_reviewed_at: existing?.partner_reviewed_at ?? null,
     partner_reviewed_by: existing?.partner_reviewed_by ?? null,
+    round_number:       existing?.round_number ?? 1,
+    round_history:      existing?.round_history,
+    round_change_summary: existing?.round_change_summary,
     intro:              existing?.intro ?? {
       headline: `${project.church_name ?? 'Your church'} Website Content Strategy`,
       body:     `Here's the proposed structure for your new website: what each page is for, how they fit together, and how the whole site is shaped around the people you're inviting into your church family. Everything on this page is editable. Read through it, share it with your team, and tell us what to refine. This is a working draft we build together.`,
@@ -1144,6 +1179,47 @@ export function approveReview(review: SitemapReview, by: 'staff' | 'partner'): S
     status:      'approved',
     approved_at: new Date().toISOString(),
     approved_by: by,
+  }
+}
+
+/** Snapshot the current round into round_history and open a new
+ *  round. Used when the partner has given feedback and the strategist
+ *  wants to iterate + reshare, versus a bare retract that keeps the
+ *  same round. Preserves partner feedback (partner_notes +
+ *  partner_edit_requests) inside the snapshot so nothing gets lost,
+ *  and clears them off the top-level review so Round N+1 starts
+ *  clean. Status resets to `draft` — publish it again to share Round
+ *  N+1 with the partner. `siteStrategyGeneratedAt` is the current
+ *  site_strategy._meta.generated_at stamp so partners can see which
+ *  revision they were reviewing at close time. */
+export function startNextRound(
+  review: SitemapReview,
+  opts: { siteStrategyGeneratedAt?: string } = {},
+): SitemapReview {
+  const currentRound = review.round_number ?? 1
+  const snapshot: SitemapReviewRoundSnapshot = {
+    round_number:         currentRound,
+    published_at:         review.published_at,
+    closed_at:            new Date().toISOString(),
+    partner_reviewed_at:  review.partner_reviewed_at ?? null,
+    partner_reviewed_by:  review.partner_reviewed_by ?? null,
+    partner_notes:        review.partner_notes,
+    partner_edit_requests: review.partner_edit_requests ?? [],
+    round_change_summary: review.round_change_summary,
+    site_strategy_generated_at: opts.siteStrategyGeneratedAt,
+  }
+  const prior = review.round_history ?? []
+  return {
+    ...review,
+    status:                'draft',
+    round_number:          currentRound + 1,
+    round_history:         [...prior, snapshot],
+    round_change_summary:  undefined,
+    published_at:          null,
+    partner_reviewed_at:   null,
+    partner_reviewed_by:   null,
+    partner_notes:         undefined,
+    partner_edit_requests: [],
   }
 }
 

@@ -328,12 +328,40 @@ export default function SitemapPartnerViewV2({
         {hero && (
           <header className={clickable('intro')} {...clickBind('intro', 'Introduction')}>
             <div className="hero">
-              <div className="eyebrow">Your New Website · Content Strategy</div>
+              <div className="eyebrow">
+                Your New Website · Content Strategy
+                {(review.round_number ?? 1) > 1 && (
+                  <>
+                    {' · '}
+                    <span style={{ color: '#513DE5' }}>Round {review.round_number}</span>
+                  </>
+                )}
+              </div>
               <h1>{hero.headline}</h1>
               <p>{renderWithEmPhrase(hero.body, pres?.hero_em_phrase)}</p>
               <div className="rule" />
             </div>
           </header>
+        )}
+
+        {(review.round_number ?? 1) > 1 && review.round_change_summary && (
+          <section
+            className="sec"
+            style={{
+              background: 'linear-gradient(135deg, #EDE9FC 0%, #F9F5F1 100%)',
+              border: '1px solid #CFC9F8',
+              borderRadius: 16,
+              padding: '18px 22px',
+              marginTop: 18,
+            }}
+          >
+            <div style={{ textTransform: 'uppercase', letterSpacing: '.1em', fontSize: 11, fontWeight: 700, color: '#513DE5', marginBottom: 6 }}>
+              What's new in Round {review.round_number}
+            </div>
+            <p style={{ fontSize: 15, lineHeight: 1.55, color: '#341756', whiteSpace: 'pre-wrap', margin: 0 }}>
+              {review.round_change_summary}
+            </p>
+          </section>
         )}
 
         {review.executive_summary && (
@@ -870,7 +898,9 @@ export default function SitemapPartnerViewV2({
                   ✓
                 </span>
                 <div style={{ minWidth: 0 }}>
-                  <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Feedback shared. We're reviewing it now.</p>
+                  <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>
+                    Feedback shared{(review.round_number ?? 1) > 1 ? ` for Round ${review.round_number}` : ''}. We're reviewing it now.
+                  </p>
                   <p style={{ fontSize: 13, margin: '2px 0 0', color: '#2E5A44' }}>
                     Your Web Squad has your notes and will follow up with next steps. If something else comes to mind, keep sharing below and we'll fold it into the same review.
                   </p>
