@@ -614,8 +614,12 @@ export default function SocialDashboardPage() {
             {sorted.map(c => {
               const intel        = intelMap.get(c.member)
               const srp          = srpMap.get(c.member)
-              const srpSubmitMs  = srp ? new Date(srp.createdAt).getTime() : NaN
-              const srpDate      = srp && !isNaN(srpSubmitMs) ? new Date(srpSubmitMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null
+              // Prefer createdAt (submission date); fall back to dueDate if createdAt is missing/zero
+              const srpDateRaw   = srp?.createdAt || srp?.dueDate || null
+              const srpSubmitMs  = srpDateRaw ? new Date(srpDateRaw).getTime() : NaN
+              const srpDate      = !isNaN(srpSubmitMs) && srpSubmitMs > 0
+                ? new Date(srpSubmitMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                : null
               const session      = sessionMap.get(c.member)
               const thisWeek     = thisWeekMemberSet.has(c.member)
               const noName       = !c.church_name
