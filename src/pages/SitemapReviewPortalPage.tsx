@@ -128,7 +128,7 @@ export default function SitemapReviewPortalPage() {
 
   const handleApprove = useCallback(async () => {
     if (!review) return
-    if (!confirm('Approve this sitemap as your website structure? Downstream steps will read from it as canonical.')) return
+    if (!confirm('Approve this content strategy as your website plan? Downstream steps will read from it as canonical.')) return
     // Stamp who submitted so the Slack notif to #am-pm-web credits
     // them; matches the partner_reviewed path.
     const approved: SitemapReview = {
@@ -138,7 +138,7 @@ export default function SitemapReviewPortalPage() {
     }
     const ok = await persist(approved)
     if (ok) {
-      setFlash('Sitemap approved. Thank you!')
+      setFlash('Content strategy approved. Thank you!')
       if (token) {
         void supabase.functions.invoke('notify-sitemap-feedback-submitted', {
           body: { token },
@@ -290,7 +290,7 @@ function NameGate({ projectName, onSubmit }: { projectName: string; onSubmit: (n
         }}
       >
         <p style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.16em', textTransform: 'uppercase', color: '#513DE5', margin: 0 }}>{projectName}</p>
-        <h1 style={{ fontSize: 22, fontWeight: 650, color: '#341756', margin: '6px 0 8px' }}>Welcome to your sitemap review</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 650, color: '#341756', margin: '6px 0 8px' }}>Welcome to your content strategy review</h1>
         <p style={{ fontSize: 13.5, color: '#6B6180', lineHeight: 1.55, margin: '0 0 20px' }}>
           Let us know who's reviewing so your Web Squad can credit your feedback.
         </p>

@@ -276,7 +276,7 @@ export default function SitemapPartnerViewV2({
         {hero && (
           <header className={clickable('intro')} {...clickBind('intro', 'Introduction')}>
             <div className="hero">
-              <div className="eyebrow">Your New Website · Structure &amp; Navigation</div>
+              <div className="eyebrow">Your New Website · Content Strategy</div>
               <h1>{hero.headline}</h1>
               <p>{renderWithEmPhrase(hero.body, pres?.hero_em_phrase)}</p>
               <div className="rule" />
@@ -939,7 +939,7 @@ export default function SitemapPartnerViewV2({
                     type="button" className="btn pending"
                     disabled={saving}
                     onClick={() => void onSubmitFeedback()}
-                  >Share Sitemap Review Feedback →</button>
+                  >Share Content Strategy Feedback →</button>
                 ) : onApprove ? (
                   <button
                     type="button" className="btn approve"

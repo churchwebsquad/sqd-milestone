@@ -75,10 +75,10 @@ export function summarizeQueueActivity(
     // sub-step is next" — the sitemap is the gate between staff work
     // and partner buy-in.
     const smStatus = r.sitemap_review?.status
-    if (smStatus === 'published')        return 'Sitemap review · awaiting partner approval'
-    if (smStatus === 'partner_reviewed') return 'Sitemap review · partner feedback in, edits pending'
-    if (smStatus === 'approved')         return 'Sitemap approved · downstream drafting can begin'
-    if (smStatus === 'draft')            return 'Sitemap review · drafting for partner'
+    if (smStatus === 'published')        return 'Content strategy review · awaiting partner approval'
+    if (smStatus === 'partner_reviewed') return 'Content strategy review · partner feedback in, edits pending'
+    if (smStatus === 'approved')         return 'Content strategy approved · downstream drafting can begin'
+    if (smStatus === 'draft')            return 'Content strategy review · drafting for partner'
 
     // No sitemap review yet — walk the cowork pipeline in order and
     // return the deepest stage that's been touched. Each stage is

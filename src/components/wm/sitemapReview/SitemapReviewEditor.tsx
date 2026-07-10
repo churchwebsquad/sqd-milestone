@@ -231,7 +231,7 @@ export function SitemapReviewEditor({
         {/* Header */}
         <div className="border-b border-wm-border px-5 py-3 flex items-baseline justify-between gap-4 flex-wrap">
           <div>
-            <h2 className="text-[16px] font-bold text-wm-text">Sitemap &amp; Navigation Review</h2>
+            <h2 className="text-[16px] font-bold text-wm-text">Content Strategy Review</h2>
             <p className="text-[11.5px] text-wm-text-muted">
               {churchName ?? 'This project'}
               {' · '}

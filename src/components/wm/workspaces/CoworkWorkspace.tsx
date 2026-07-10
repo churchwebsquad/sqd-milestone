@@ -706,7 +706,7 @@ export function CoworkWorkspace({ project, onChange }: Props) {
             onForceRerun={() => void runStep(step, true)}
             onApproveAsIs={() => void approveAsIs(step)}
             onOpenPartnerReview={step.key === 'plan-site-strategy' ? () => setSitemapReviewOpen(true) : undefined}
-            partnerReviewLabel={step.key === 'plan-site-strategy' ? (existingSitemapReview ? 'View sitemap review' : 'Create sitemap review') : undefined}
+            partnerReviewLabel={step.key === 'plan-site-strategy' ? (existingSitemapReview ? 'View content strategy review' : 'Create content strategy review') : undefined}
             sitemapReviewStatus={step.key === 'plan-site-strategy' ? (existingSitemapReview?.status ?? null) : null}
             projectSlugForFeedback={step.key === 'plan-site-strategy' && existingSitemapReview?.status === 'partner_reviewed' ? project.id : null}
             onViewDetails={() => setDrawerStep(step)}
@@ -890,7 +890,7 @@ The skill is self-contained. Everything you need — the artifact shapes, the Su
           <p className="text-[10px] uppercase tracking-widest font-bold text-wm-accent-strong">Shortcut · external content strategy</p>
           <p className="text-[13px] font-semibold text-wm-text mt-0.5">Already have an approved content strategy doc from the AM?</p>
           <p className="text-[11px] text-wm-text-muted mt-1 max-w-2xl leading-snug">
-            Skip steps 1-6. The <code>ingest-external-content-strategy</code> skill reads the AM's Notion doc and produces stage_1 / ministry_model / acf_plan / site_strategy plus an approved sitemap review in one pass. Use this when the partner has an external content collection and no crawl inventory.
+            Skip steps 1-6. The <code>ingest-external-content-strategy</code> skill reads the AM's Notion doc and produces stage_1 / ministry_model / acf_plan / site_strategy plus an approved content strategy review in one pass. Use this when the partner has an external content collection and no crawl inventory.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -1299,11 +1299,11 @@ function StepCard({ step, state, running, anyRunning, isFirstReady, projectId, o
                 type="button"
                 onClick={onOpenPartnerReview}
                 className="text-[13px] font-semibold px-4 py-2 rounded-lg bg-wm-accent-strong text-white hover:bg-wm-accent shadow-sm"
-                title="Compose a partner-facing sitemap and navigation review with per-page purpose, migrations, and consolidation rationale. Publish to a shareable partner link."
+                title="Compose a partner-facing content strategy review with per-page purpose, migrations, and consolidation rationale. Publish to a shareable partner link."
               >
                 <span className="flex items-center gap-1.5">
                   <ArrowRight size={13} />
-                  {partnerReviewLabel ?? 'Sitemap review'}
+                  {partnerReviewLabel ?? 'Content strategy review'}
                 </span>
               </button>
             )}

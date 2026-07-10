@@ -1,0 +1,374 @@
+{
+  "stage": "local_validate",
+  "error": "validation_failed_after_repair",
+  "summary": "FAIL voice_atom_in_assignments (1)\n   - home[0].atom_assignments[2] references atom_id='8953be02-ac44-493d-86d8-8a7378f1c92d' with topic='voice_sample'. Voice-topic atoms (voice_rule, voice_sample, tone_descriptor) are imitation material — route them to section.voice_anchor (the exemplar pointer), never atom_assignments.\n1 FAILURES",
+  "byCheck": {
+    "voice_atom_in_assignments": [
+      "home[0].atom_assignments[2] references atom_id='8953be02-ac44-493d-86d8-8a7378f1c92d' with topic='voice_sample'. Voice-topic atoms (voice_rule, voice_sample, tone_descriptor) are imitation material — route them to section.voice_anchor (the exemplar pointer), never atom_assignments."
+    ]
+  },
+  "failures": [
+    {
+      "check": "voice_atom_in_assignments",
+      "detail": "home[0].atom_assignments[2] references atom_id='8953be02-ac44-493d-86d8-8a7378f1c92d' with topic='voice_sample'. Voice-topic atoms (voice_rule, voice_sample, tone_descriptor) are imitation material — route them to section.voice_anchor (the exemplar pointer), never atom_assignments."
+    }
+  ],
+  "first_pass_failures": {
+    "count": 4,
+    "by_check": {
+      "voice_atom_in_assignments": 1,
+      "required_slot_uncovered": 3
+    }
+  },
+  "outline_for_inspection": {
+    "page_slug": "home",
+    "ministry_model_alignment": "discipleship",
+    "sections": [
+      {
+        "section_ix": 0,
+        "archetype": "hero_homepage",
+        "section_job": "Hero disarms Lena/Jordan in five seconds: affirming, intellectually honest, non-denominational Redlands church that won't ask them to perform belief.",
+        "flow_role": "hook",
+        "voice_anchor": "Top voice attribute: Conversational. Supporting: Disarming, Honest, Passionate.",
+        "anti_pattern_to_avoid": "Generic 'welcome home' hero copy; performed enthusiasm; burying the affirming + non-denominational signals under brand language.",
+        "atom_assignments": [
+          {
+            "atom_id": "4f113570-37f3-4436-aa05-c481d9d24777",
+            "treatment": "use_as_is",
+            "slot_hint": "primary_heading"
+          },
+          {
+            "atom_id": "570d09e1-9b3a-496b-9e2e-95ad3d8866dd",
+            "treatment": "use_as_is",
+            "slot_hint": "tagline"
+          },
+          {
+            "atom_id": "8953be02-ac44-493d-86d8-8a7378f1c92d",
+            "treatment": "use_as_is",
+            "slot_hint": "body"
+          }
+        ],
+        "fact_assignments": [
+          {
+            "fact_id": "f04e61e0-5ef2-4066-92db-ec97b08f4361",
+            "treatment": "weave_into_paragraph",
+            "slot_hint": "buttons[0].label"
+          }
+        ],
+        "crawl_topic_assignments": [
+          {
+            "topic_key": "about",
+            "treatment": "summarize",
+            "slot_hint": "body"
+          }
+        ]
+      },
+      {
+        "section_ix": 1,
+        "archetype": "content_featured_b",
+        "section_job": "Tell the visitor what they're being invited to: an hour thinking about something that matters, Saturdays 10:00 AM at 51 W Olive.",
+        "flow_role": "orient",
+        "voice_anchor": "Make invitations specific, not vague. 'Come join us' says nothing. 'Come spend an hour thinking about something that actually matters' says something. The invitation at Paradox is to a conversation, not a service.",
+        "anti_pattern_to_avoid": "Vague 'join us this weekend' invites without time/place; bulletin-formal logistics block.",
+        "atom_assignments": [],
+        "fact_assignments": [
+          {
+            "fact_id": "9449b99d-0e80-4949-8dd2-3fcfd7d8a1b8",
+            "treatment": "weave_into_paragraph",
+            "slot_hint": "body"
+          },
+          {
+            "fact_id": "63b81986-1d15-453e-931f-4715169c049e",
+            "treatment": "weave_into_paragraph",
+            "slot_hint": "items[0].item_body"
+          },
+          {
+            "fact_id": "54058c9e-69ef-424d-b32c-45485211794c",
+            "treatment": "weave_into_paragraph",
+            "slot_hint": "items[0].item_heading"
+          }
+        ],
+        "crawl_topic_assignments": [
+          {
+            "topic_key": "location_contact",
+            "treatment": "summarize",
+            "slot_hint": "tagline"
+          }
+        ]
+      },
+      {
+        "section_ix": 2,
+        "archetype": "content_image_text_a",
+        "section_job": "Name the deconstructor, the LGBTQ+ family, the mixed household, and the questioner as the reason Paradox is built this way — architecture, not asterisk.",
+        "flow_role": "reassure",
+        "voice_anchor": "At Paradox, we fully affirm and celebrate the image of God in all queer persons. We officiate queer weddings, ordain queer clergy, baptize queer folks, and welcome people to serve in every level of leadership at our church with full appreciation of their gender identity and/or sexual orientation.",
+        "anti_pattern_to_avoid": "Affirmation framed as caveat or footnote; abstract 'all are welcome' language without naming who.",
+        "atom_assignments": [
+          {
+            "atom_id": "9cdda142-528a-4a64-947d-b665a3a22f51",
+            "treatment": "use_as_is",
+            "slot_hint": "primary_heading"
+          },
+          {
+            "atom_id": "96869154-f04a-4d11-b5a7-a05e2494eb42",
+            "treatment": "use_as_is",
+            "slot_hint": "body"
+          },
+          {
+            "atom_id": "b9cdfd0e-67a1-412d-9787-237d512efada",
+            "treatment": "compress",
+            "slot_hint": "items[0].item_heading"
+          },
+          {
+            "atom_id": "89979366-4f54-40dc-be18-28d381024a44",
+            "treatment": "compress",
+            "slot_hint": "items[0].item_body"
+          },
+          {
+            "atom_id": "7356fed4-9354-4fee-a6f9-d5bc9d2d581f",
+            "treatment": "compress",
+            "slot_hint": "items[1].item_body"
+          },
+          {
+            "atom_id": "be687548-126a-4057-a183-128f1375c310",
+            "treatment": "compress",
+            "slot_hint": "items[2].item_body"
+          },
+          {
+            "atom_id": "521fcdf9-931b-4065-a4c2-f0bb19147b87",
+            "treatment": "compress",
+            "slot_hint": "items[1].item_heading"
+          }
+        ],
+        "fact_assignments": [
+          {
+            "fact_id": "421d9d0c-cf41-4cd1-9d14-6490677bde40",
+            "treatment": "weave_into_paragraph",
+            "slot_hint": "items[2].item_heading"
+          },
+          {
+            "fact_id": "33ab5cac-b767-46ae-851e-a08596b6eedc",
+            "treatment": "weave_into_paragraph",
+            "slot_hint": "items[2].item_body"
+          }
+        ],
+        "crawl_topic_assignments": []
+      },
+      {
+        "section_ix": 3,
+        "archetype": "content_video",
+        "section_job": "Let Marcus sample the teaching now: sermons start discussions, current Matthew series is live, weekly blog continues it.",
+        "flow_role": "inform",
+        "voice_anchor": "Sermons at Paradox Start Discussions Rather than End Them. You don't have to agree with the Pastor to be part of Paradox. Instead, we hope these teachings spark conversations about how we can all become more loving people.",
+        "anti_pattern_to_avoid": "'Watch our latest message' framing (voice ban on 'watch'); hype language about the series.",
+        "atom_assignments": [
+          {
+            "atom_id": "ae548f15-382a-4d6a-8b89-be3fe9d2065b",
+            "treatment": "use_as_is",
+            "slot_hint": "primary_heading"
+          },
+          {
+            "atom_id": "12366154-df87-4ed2-a1dc-a17ab9906e45",
+            "treatment": "use_as_is",
+            "slot_hint": "body"
+          }
+        ],
+        "fact_assignments": [
+          {
+            "fact_id": "f8f4e805-4b2a-4329-a5a6-e705f98e6179",
+            "treatment": "weave_into_paragraph",
+            "slot_hint": "accent_body"
+          }
+        ],
+        "crawl_topic_assignments": [
+          {
+            "topic_key": "sermons",
+            "treatment": "summarize",
+            "slot_hint": "body"
+          },
+          {
+            "topic_key": "blog_news",
+            "treatment": "summarize",
+            "slot_hint": "accent_body"
+          }
+        ]
+      },
+      {
+        "section_ix": 4,
+        "archetype": "content_featured_a",
+        "section_job": "Show each persona a legible next move: visit, join a discussion group, check the kids' pages, grab coffee with the pastor — a pathway, never a funnel.",
+        "flow_role": "inform",
+        "voice_anchor": "Sermons at Paradox are designed to start conversations, not end them. Our discussion groups give you space to process, ask questions, and grow in community.",
+        "anti_pattern_to_avoid": "Funnel-stage language ('next step in your journey with us'); generic ministries grid.",
+        "atom_assignments": [],
+        "fact_assignments": [
+          {
+            "fact_id": "21097c1d-c909-457b-9fb3-b89351eb33c6",
+            "treatment": "card_per_row",
+            "slot_hint": "items[0].item_heading"
+          },
+          {
+            "fact_id": "b6dc9d7d-82ec-4dfd-8485-3ec4a258b58c",
+            "treatment": "card_per_row",
+            "slot_hint": "items[1].item_heading"
+          },
+          {
+            "fact_id": "d9cc0d1b-16d3-4342-8a94-74538e4bb7bc",
+            "treatment": "card_per_row",
+            "slot_hint": "items[2].item_heading"
+          },
+          {
+            "fact_id": "81f756d9-9720-4f65-af66-8250981ed43b",
+            "treatment": "card_per_row",
+            "slot_hint": "items[2].item_body"
+          }
+        ],
+        "crawl_topic_assignments": [
+          {
+            "topic_key": "next_steps",
+            "treatment": "summarize",
+            "slot_hint": "primary_heading"
+          },
+          {
+            "topic_key": "connect_groups",
+            "treatment": "summarize",
+            "slot_hint": "body"
+          },
+          {
+            "topic_key": "kids",
+            "treatment": "summarize",
+            "slot_hint": "items[0].item_body"
+          }
+        ]
+      },
+      {
+        "section_ix": 5,
+        "archetype": "content_image_text_b",
+        "section_job": "Paradox exists for a Redlands where more people are becoming more loving — Hunger Walk, Food Drive, Shoe Drive as proof, not aspiration.",
+        "flow_role": "deepen",
+        "voice_anchor": "Actions Speak Louder Than Words — make a tangible difference in the here and now.",
+        "anti_pattern_to_avoid": "Mission-statement abstraction without named programs; confident declarations about what God is doing in the city.",
+        "atom_assignments": [
+          {
+            "atom_id": "ca9878c1-989f-4417-a3ee-a8256fffbb77",
+            "treatment": "use_as_is",
+            "slot_hint": "body"
+          }
+        ],
+        "fact_assignments": [
+          {
+            "fact_id": "154bd14e-9789-4a9b-9062-149b4ff5cd79",
+            "treatment": "weave_into_paragraph",
+            "slot_hint": "items[0].item_heading"
+          },
+          {
+            "fact_id": "dca5d6bb-c90a-4b30-8a58-0c04deb16a0c",
+            "treatment": "weave_into_paragraph",
+            "slot_hint": "items[1].item_heading"
+          },
+          {
+            "fact_id": "1e3f5283-6e53-4c0d-955c-a6786cd0d822",
+            "treatment": "weave_into_paragraph",
+            "slot_hint": "items[0].item_body"
+          }
+        ],
+        "crawl_topic_assignments": [
+          {
+            "topic_key": "missions",
+            "treatment": "summarize",
+            "slot_hint": "primary_heading"
+          }
+        ]
+      },
+      {
+        "section_ix": 6,
+        "archetype": "cta_simple",
+        "section_job": "Lena leaves with one specific, low-friction action: plan a visit for a Saturday — and she can tell us she's coming.",
+        "flow_role": "invite",
+        "voice_anchor": "We are so glad you found us! The common tie between everyone here is that we all have a desire to become more loving people. If you share that same desire, we would love for you to join us!",
+        "anti_pattern_to_avoid": "Generic 'plan your visit' button with no specificity; emotional pressure to commit.",
+        "atom_assignments": [],
+        "fact_assignments": [
+          {
+            "fact_id": "544e73ea-605c-44c5-a992-87346c7fb4f5",
+            "treatment": "embed_field",
+            "slot_hint": "buttons[0].url"
+          }
+        ],
+        "crawl_topic_assignments": [
+          {
+            "topic_key": "plan_visit",
+            "treatment": "summarize",
+            "slot_hint": "body"
+          }
+        ]
+      },
+      {
+        "section_ix": 7,
+        "archetype": "cta_callout",
+        "section_job": "Close from alongside: 2016 origin note, 'we're still figuring this out, and we'd love to figure it out with you.'",
+        "flow_role": "close",
+        "voice_anchor": "We sound like we're in it with you. Warm, curious, and honest — offering real depth in plain language. Thoughtful without being academic — so people don't just learn something; they feel less alone.",
+        "anti_pattern_to_avoid": "Triumphant closing pitch; 'join the movement' language; resolving the tension instead of letting it breathe.",
+        "atom_assignments": [
+          {
+            "atom_id": "a832e5c8-351a-48a1-8871-7a3fbdc2d4a4",
+            "treatment": "compress",
+            "slot_hint": "primary_heading"
+          },
+          {
+            "atom_id": "9f2abd91-7c95-41e8-a45a-032707805ab0",
+            "treatment": "use_as_is",
+            "slot_hint": "body"
+          }
+        ],
+        "fact_assignments": [
+          {
+            "fact_id": "2700b1ca-25c6-439a-89a6-743c6410ca81",
+            "treatment": "weave_into_paragraph",
+            "slot_hint": "buttons[0].label"
+          }
+        ],
+        "crawl_topic_assignments": []
+      }
+    ],
+    "unresolved_inputs": [
+      {
+        "what": "No non-voice atom or fact body fits 'primary_heading' for the orient/logistics section — allocation routed only service-time + location facts (best used in body/items) and voice atoms. Need a short headline-shaped phrase like 'Saturdays in Redlands' that draft-page can synthesize from the location_contact crawl tagline + service-time fact, or partner can provide.",
+        "where": "sections[1] (orient, content_featured_b) — slot 'primary_heading'"
+      },
+      {
+        "what": "No non-voice atom or fact provides a headline-length phrase for the pathway/next-moves section's 'primary_heading'. The next_steps crawl topic has only descriptive passages, no short title — drafter should distill (e.g. 'Find your next move') or partner can supply.",
+        "where": "sections[4] (inform/pathway, content_featured_a) — slot 'primary_heading'"
+      },
+      {
+        "what": "No non-voice atom or fact provides a headline phrase for the plan-a-visit CTA's 'primary_heading'. Allocation gave only the contact-form fact (URL) + plan_visit crawl. Drafter should synthesize from voice exemplar 'come spend an hour thinking about something that actually matters' — or partner can supply.",
+        "where": "sections[6] (invite, cta_simple) — slot 'primary_heading'"
+      }
+    ],
+    "_meta": {
+      "bundle_version": "1.0.0",
+      "skill_name": "outline-page",
+      "skill_version": "1.0.0",
+      "generated_at": "2026-06-13T01:27:43.675Z",
+      "model": "anthropic/claude-opus-4.7",
+      "prompt_hash": "36136cf34300afb8",
+      "usage": {
+        "input_tokens": 137608,
+        "output_tokens": 9995
+      },
+      "atom_count_used": 15,
+      "fact_count_used": 16,
+      "crawl_topic_count_used": 9,
+      "sections_count": 8,
+      "repaired": true,
+      "first_pass_failures": {
+        "count": 4,
+        "by_check": {
+          "voice_atom_in_assignments": 1,
+          "required_slot_uncovered": 3
+        }
+      }
+    }
+  }
+}

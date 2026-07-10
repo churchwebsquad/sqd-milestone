@@ -159,7 +159,7 @@ export async function fetchPartnerReviewLinks(
   if (sm?.token && smState) {
     links.push({
       id:           `sitemap_review:${sm.token}`,
-      label:        'Sitemap & Navigation Review',
+      label:        'Content Strategy Review',
       description:  'The pages we\'re planning for your new site, how the navigation groups them, and who each one is for. Tell us what to rename, move, or add.',
       url:          `${origin}/portal/sitemap/${sm.token}`,
       source:       'sitemap_review',

@@ -241,9 +241,9 @@ export default function SitemapFeedbackPage() {
   if (!review) {
     return (
       <div className="max-w-3xl mx-auto p-8 space-y-3">
-        <h1 className="text-lg font-semibold text-wm-text">No sitemap review yet</h1>
+        <h1 className="text-lg font-semibold text-wm-text">No content strategy review yet</h1>
         <p className="text-wm-text-muted text-[13px]">
-          There isn't a sitemap review for this project yet, so there's nothing to review. Head back to the Content Engine, run Step 6, and use <strong>Create sitemap review</strong> to draft one.
+          There isn't a content strategy review for this project yet, so there's nothing to review. Head back to the Content Engine, run Step 6, and use <strong>Create content strategy review</strong> to draft one.
         </p>
         <Link to={`/web/${projectId ?? ''}?tab=cowork`} className="inline-flex items-center gap-1 text-wm-accent text-[13px] font-semibold hover:underline">
           <ArrowLeft size={13} /> Back to Content Engine
@@ -265,7 +265,7 @@ export default function SitemapFeedbackPage() {
           <ArrowLeft size={12} /> Back to Content Engine
         </Link>
         <h1 className="text-2xl font-semibold text-wm-text mt-2">
-          {project?.church_name ?? 'Partner'} sitemap feedback
+          {project?.church_name ?? 'Partner'} content strategy feedback
         </h1>
         <p className="text-wm-text-muted text-[13px] mt-1">
           {review.partner_reviewed_by

@@ -1317,7 +1317,7 @@ export function CopyEngineWorkspace({ project, onChange }: Props) {
               className="inline-flex items-center gap-1.5 rounded-full bg-wm-accent-strong px-4 py-1.5 text-[12px] font-semibold text-white hover:bg-wm-accent disabled:opacity-50"
               title="Compose a partner-facing sitemap + navigation review with per-page purpose, persona posture, and consolidation rationale."
             >
-              Partner sitemap review →
+              Partner content strategy review →
             </button>
           )}
           {hasStage2 && (
