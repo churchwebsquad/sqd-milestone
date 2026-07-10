@@ -902,8 +902,14 @@ export default function SocialChurchPage() {
         const since30 = Date.now() - 30 * 24 * 60 * 60 * 1000
         const recentSrpTasks = (srpTasks as (CuTask & { member: number })[])
           .concat(([] as (CuTask & { member: number })[]))
-          // srpTasks is already filtered to this member — just apply 30-day window
-          .filter(t => Number(t.date_created ?? 0) >= since30 || new Date(t.updatedAt).getTime() >= since30)
+          // Squad API often omits timestamps — if both are missing, include the task
+          // rather than silently dropping it (the cache itself is the recency filter).
+          .filter(t => {
+            const created = Number(t.date_created) || 0
+            const updated = new Date(t.updatedAt || 0).getTime() || 0
+            if (!created && !updated) return true
+            return created >= since30 || updated >= since30
+          })
 
         // Build a map of clickup_task_id → session for quick lookup
         const sessionByTaskId = new Map<string, SrpSessionListRow>()
