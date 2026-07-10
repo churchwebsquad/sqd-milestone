@@ -359,19 +359,34 @@ export default function SocialDashboardPage() {
     void load()
   }, [])
 
-  // Build a set + due-date map from the ClickUp-direct this-week cache
-  const thisWeekMemberSet = useMemo(
-    () => new Set(thisWeekTasks.map(t => t.member)),
-    [thisWeekTasks]
-  )
+  // Derive this-week membership from srpMap directly (dueDate or createdAt falls in current week).
+  // This is more reliable than the srp_tasks_this_week cache which can be stale.
+  const weekStart = useMemo(() => getWeekStart(new Date()), [])
+  const thisWeekMemberSet = useMemo(() => {
+    const fromCache = new Set(thisWeekTasks.map(t => t.member))
+    // Also include any srpMap entry whose dueDate or createdAt is this week
+    for (const [member, srp] of srpMap) {
+      if (srp.dueDate && isThisWeek(srp.dueDate, weekStart)) fromCache.add(member)
+      else if (srp.createdAt && isThisWeek(srp.createdAt, weekStart)) fromCache.add(member)
+    }
+    return fromCache
+  }, [thisWeekTasks, srpMap, weekStart])
+
   const thisWeekDueDateMap = useMemo(() => {
     const m = new Map<number, number>()
     for (const t of thisWeekTasks) {
       const ms = t.dueDate ? new Date(t.dueDate).getTime() : Infinity
       if (!m.has(t.member) || ms < m.get(t.member)!) m.set(t.member, ms)
     }
+    // Fill from srpMap for members not in the week cache
+    for (const [member, srp] of srpMap) {
+      if (!m.has(member) && thisWeekMemberSet.has(member)) {
+        const ms = srp.dueDate ? new Date(srp.dueDate).getTime() : srp.createdAt ? new Date(srp.createdAt).getTime() : Infinity
+        m.set(member, ms)
+      }
+    }
     return m
-  }, [thisWeekTasks])
+  }, [thisWeekTasks, srpMap, thisWeekMemberSet])
 
   // task ID map from ClickUp-direct data (Squad API doesn't return id field)
   const thisWeekTaskIdMap = useMemo(() => {
