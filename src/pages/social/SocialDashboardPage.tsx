@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Search, Brain, Sparkles, ArrowUpDown, Plus, X, Loader2, Save, Mic, Clock, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { Search, Brain, Sparkles, ArrowUpDown, Plus, X, Loader2, Save, AlertCircle, Zap } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import type { StrategySocialProProfile } from '../../types/database'
@@ -29,11 +29,11 @@ interface SrpMeta {
   url?: string
 }
 
-interface AutoJob {
+interface SessionMeta {
   member: number
-  video_status: 'pending' | 'found' | 'waiting_for_upload' | 'error'
-  transcript_status: 'pending' | 'in_progress' | 'ready' | 'error' | 'skipped'
-  video_error: string | null
+  current_step: string | null
+  status: string | null
+  created_at: string | null
 }
 
 type SortMode = 'srp' | 'member' | 'alpha'
@@ -218,7 +218,7 @@ export default function SocialDashboardPage() {
   const [intelMap, setIntelMap]   = useState<Map<number, IntelMeta>>(new Map())
   const [srpMap, setSrpMap]       = useState<Map<number, SrpMeta>>(new Map())
   const [smmMap, setSmmMap]       = useState<Map<number, string>>(new Map())
-  const [autoJobMap, setAutoJobMap] = useState<Map<number, AutoJob>>(new Map())
+  const [sessionMap, setSessionMap] = useState<Map<number, SessionMeta>>(new Map())
   const [activeOnlySet, setActiveOnlySet] = useState<Set<number>>(new Set())
   const [thisWeekTasks, setThisWeekTasks] = useState<SrpMeta[]>([])
   const [loading, setLoading]     = useState(true)
@@ -270,17 +270,19 @@ export default function SocialDashboardPage() {
       setIntelMap(im)
 
       // Enrichment — read from pre-fetched cache table first, fall back to live APIs
-      const [cacheRes, smmLiveRes, autoJobRes] = await Promise.allSettled([
+      const [cacheRes, smmLiveRes, sessionRes] = await Promise.allSettled([
         (supabase as any)
           .from('strategy_srp_hub_cache')
           .select('cache_key, data, refreshed_at')
           .in('cache_key', ['srp_tasks', 'smm_assignments', 'srp_tasks_this_week']),
         fetch('/api/notion/smm-assignments').then(r => r.ok ? r.json() : null),
         (supabase as any)
-          .schema('strategy')
-          .from('srp_auto_jobs')
-          .select('member, video_status, transcript_status, video_error')
-          .gte('week_start', getWeekStart(new Date()).toISOString().split('T')[0]),
+          .schema('srp_pipeline')
+          .from('sessions')
+          .select('member, current_step, status, created_at')
+          .not('status', 'eq', 'archived')
+          .order('created_at', { ascending: false })
+          .limit(500),
       ])
 
       let srpData: { tasks: SrpMeta[]; allTasks: SrpMeta[] } = { tasks: [], allTasks: [] }
@@ -340,11 +342,14 @@ export default function SocialDashboardPage() {
       for (const row of smmData.assignments) smm.set(row.member, row.smm)
       setSmmMap(smm)
 
-      const aj = new Map<number, AutoJob>()
-      if (autoJobRes.status === 'fulfilled' && autoJobRes.value.data) {
-        for (const row of autoJobRes.value.data as AutoJob[]) aj.set(row.member, row)
+      // Most-recent session per member (results are ordered newest-first)
+      const sm2 = new Map<number, SessionMeta>()
+      if (sessionRes.status === 'fulfilled' && sessionRes.value.data) {
+        for (const row of sessionRes.value.data as SessionMeta[]) {
+          if (row.member && !sm2.has(row.member)) sm2.set(row.member, row)
+        }
       }
-      setAutoJobMap(aj)
+      setSessionMap(sm2)
       setActiveOnlySet(activeOnlyMembers)
     }
     void load()
@@ -448,6 +453,34 @@ export default function SocialDashboardPage() {
 
   // Normalize status to lowercase for matching
   const normalizeStatus = (s: string) => s.toLowerCase().trim()
+
+  // ClickUp task status → badge colors
+  function srpStatusBadge(status: string): { bg: string; text: string } {
+    const s = normalizeStatus(status)
+    if (s === 'dependent')           return { bg: '#EDE9FC', text: '#513DE5' }
+    if (s === 'received')            return { bg: '#FEF9C3', text: '#854D0E' }
+    if (s === 'needs an update')     return { bg: '#FEF2F2', text: '#B91C1C' }
+    if (s === 'deliverables needed') return { bg: '#EFF6FF', text: '#1D4ED8' }
+    if (s === 'closed')              return { bg: '#F0FDF4', text: '#15803D' }
+    return { bg: '#FFF7ED', text: '#C2410C' } // default amber
+  }
+
+  const SRP_STEP_LABEL: Record<string, string> = {
+    account:           'Setup',
+    deliverables:      'Deliverables',
+    sermon:            'Transcript',
+    overview:          'Overview',
+    clips:             'Clip Selection',
+    creativeDirection: 'Creative',
+    preRenderEdit:     'Music & Edits',
+    reelCaptions:      'Captions',
+    carousel:          'Carousel',
+    facebook:          'Facebook',
+    sundayInvite:      'Sunday Invite',
+    photoRecap:        'Photo Recap',
+    clipProcessing:    'Rendering',
+    approved:          'Shipped',
+  }
 
   const statusCounts = Object.fromEntries(
     Object.keys(STATUS_LABELS).map(s => [s, 0])
@@ -578,8 +611,9 @@ export default function SocialDashboardPage() {
             {sorted.map(c => {
               const intel        = intelMap.get(c.member)
               const srp          = srpMap.get(c.member)
-              const srpDateMs    = srp ? new Date(srp.updatedAt || srp.createdAt).getTime() : NaN
-              const srpDate      = srp && !isNaN(srpDateMs) ? new Date(srpDateMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null
+              const srpSubmitMs  = srp ? new Date(srp.createdAt).getTime() : NaN
+              const srpDate      = srp && !isNaN(srpSubmitMs) ? new Date(srpSubmitMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null
+              const session      = sessionMap.get(c.member)
               const thisWeek     = thisWeekMemberSet.has(c.member)
               const noName       = !c.church_name
 
@@ -625,56 +659,62 @@ export default function SocialDashboardPage() {
                     </div>
 
                     <div className="flex flex-wrap gap-1.5 mt-auto">
+                      {/* Intel badge */}
                       {intel ? (
-                        <span className="inline-flex items-center gap-1 text-xs bg-[#EDE9FC] text-[#513DE5] px-2 py-0.5 rounded-full font-medium">
+                        <span className="inline-flex items-center gap-1 text-[11px] bg-[#EDE9FC] text-[#513DE5] px-2 py-0.5 rounded-full font-medium">
                           <Brain size={10} /> Intel
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full">
+                        <span className="inline-flex items-center gap-1 text-[11px] bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full">
                           <Brain size={10} /> No intel
                         </span>
                       )}
-                      {srp ? (
-                        <a
-                          href={srp.url || `https://app.clickup.com/t/${thisWeekTaskIdMap.get(c.member) || srp.taskId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={e => e.stopPropagation()}
-                          className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-medium hover:bg-amber-100 transition-colors"
-                        >
-                          <Sparkles size={10} /> {thisWeekTaskIdMap.get(c.member) || srp.taskId ? `#${thisWeekTaskIdMap.get(c.member) || srp.taskId}` : 'SRP'}{srpDate ? ` · ${srpDate}` : ''}
-                        </a>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-300 px-2 py-0.5 rounded-full">
+
+                      {/* SRP ClickUp task badge — color by status */}
+                      {srp ? (() => {
+                        const { bg, text } = srpStatusBadge(srp.status ?? '')
+                        const taskId = thisWeekTaskIdMap.get(c.member) || srp.taskId
+                        return (
+                          <a
+                            href={srp.url || (taskId ? `https://app.clickup.com/t/${taskId}` : '#')}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            title={srp.status ?? ''}
+                            style={{ background: bg, color: text }}
+                            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium hover:opacity-80 transition-opacity"
+                          >
+                            <Sparkles size={10} />
+                            SRP{srpDate ? ` · ${srpDate}` : ''}
+                          </a>
+                        )
+                      })() : (
+                        <span className="inline-flex items-center gap-1 text-[11px] bg-gray-100 text-gray-300 px-2 py-0.5 rounded-full">
                           <Sparkles size={10} /> No SRP yet
                         </span>
                       )}
-                      {(() => {
-                        const job = autoJobMap.get(c.member)
-                        if (!job) return null
-                        if (job.transcript_status === 'ready') return (
-                          <span className="inline-flex items-center gap-1 text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-medium">
-                            <CheckCircle2 size={10} /> Transcript ready
-                          </span>
-                        )
-                        if (job.transcript_status === 'in_progress' || job.video_status === 'found') return (
-                          <span className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">
-                            <Loader2 size={10} className="animate-spin" /> Transcribing…
-                          </span>
-                        )
-                        if (job.video_status === 'waiting_for_upload') return (
-                          <span className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full font-medium">
-                            <Clock size={10} /> Waiting for video
-                          </span>
-                        )
-                        if (job.video_status === 'error' || job.transcript_status === 'error') return (
-                          <span className="inline-flex items-center gap-1 text-xs bg-red-50 text-red-600 px-2 py-0.5 rounded-full font-medium" title={job.video_error ?? undefined}>
-                            <AlertCircle size={10} /> Video error
-                          </span>
-                        )
+
+                      {/* SRP Generator session step */}
+                      {session?.current_step && (() => {
+                        const step = session.current_step
+                        const label = SRP_STEP_LABEL[step] ?? step
+                        const isShipped = step === 'approved'
+                        const isTranscript = step === 'sermon'
+                        const isRendering = step === 'clipProcessing'
+                        let bg = '#F3F4F6', text = '#6B7280'
+                        if (isShipped)   { bg = '#F0FDF4'; text = '#15803D' }
+                        else if (isTranscript) { bg = '#EFF6FF'; text = '#1D4ED8' }
+                        else if (isRendering)  { bg = '#FDF4FF'; text = '#7E22CE' }
+                        else if (step !== 'account') { bg = '#FFF7ED'; text = '#C2410C' }
                         return (
-                          <span className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full">
-                            <Mic size={10} /> SRP queued
+                          <span
+                            style={{ background: bg, color: text }}
+                            className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium"
+                          >
+                            {isRendering
+                              ? <Loader2 size={10} className="animate-spin" />
+                              : <Zap size={10} />}
+                            {label}
                           </span>
                         )
                       })()}
