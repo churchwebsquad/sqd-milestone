@@ -30,6 +30,7 @@ import {
   type SitemapReviewNavPresentation,
   type SiteStrategyBlob,
 } from '../../../lib/sitemapReview'
+import { buildCoworkPrompt } from '../../../lib/sitemapReviewCoworkPrompt'
 import { buildPortalUrl } from '../../../lib/portalUrl'
 import { uploadAttachment } from '../../../lib/attachmentUpload'
 import { PartnerEditRequestsInbox } from './PartnerEditRequestsInbox'
@@ -356,6 +357,7 @@ export function SitemapReviewEditor({
               <PreviousRoundsPanel review={review} />
             )}
             <PartnerEditRequestsInbox review={review} onChange={persist} disabled={isApproved} />
+            <CoworkPromptPanel review={review} projectId={projectId} churchName={churchName ?? null} />
 
             {/* Sections are ordered to mirror the partner-facing wrapper 1:1.
                 Each header calls out the artifact section it feeds so the
@@ -3127,6 +3129,69 @@ function PartnerOverallNoteView({ review }: { review: SitemapReview }) {
       <p className="text-[13px] text-wm-text whitespace-pre-wrap leading-snug">
         {raw}
       </p>
+    </section>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────
+// CoworkPromptPanel. Ports the "Ready-to-paste cowork prompt"
+// affordance from the old standalone /sitemap-feedback page directly
+// into the composer, so once Phase B collapses the standalone page
+// there is no lost function. Collapsible by default; only renders
+// when the review is partner_reviewed and has at least one open
+// edit request (nothing to feed the cowork session otherwise).
+// ─────────────────────────────────────────────────────────────────
+
+function CoworkPromptPanel({
+  review, projectId, churchName,
+}: {
+  review:     SitemapReview
+  projectId:  string
+  churchName: string | null
+}) {
+  const openReqCount = (review.partner_edit_requests ?? []).filter(r => r.status === 'open').length
+  const [copied, setCopied] = useState(false)
+  if (review.status !== 'partner_reviewed') return null
+  if (openReqCount === 0) return null
+  const prompt = buildCoworkPrompt(review, projectId, churchName)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(prompt)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* ignore */ }
+  }
+  return (
+    <section className="rounded-lg border border-wm-border bg-wm-bg-elevated">
+      <details>
+        <summary className="cursor-pointer px-4 py-2.5 flex items-baseline gap-2 flex-wrap">
+          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+            Apply feedback via cowork
+          </span>
+          <span className="text-[11.5px] text-wm-text-muted">
+            {openReqCount} open {openReqCount === 1 ? 'note' : 'notes'} · copy the prompt below and paste into a fresh Claude Code session
+          </span>
+        </summary>
+        <div className="px-4 pb-3 space-y-2">
+          <p className="text-[11.5px] text-wm-text-muted leading-snug">
+            Self-contained prompt: names the Supabase project, inlines the <code>revise-site-strategy</code> skill, gives the exact SQL, and lists the note IDs to resolve. A fresh session with zero project context can run it end-to-end.
+          </p>
+          <textarea
+            readOnly
+            value={prompt}
+            className="w-full text-[11.5px] font-mono text-wm-text bg-white leading-snug px-3 py-2 border border-wm-border rounded outline-none resize-y min-h-[180px]"
+          />
+          <div>
+            <button
+              type="button"
+              onClick={() => void copy()}
+              className="text-[12px] font-semibold px-3 py-1.5 rounded-full bg-wm-accent-strong text-white hover:bg-wm-accent"
+            >
+              {copied ? 'Copied ✓' : 'Copy cowork prompt'}
+            </button>
+          </div>
+        </div>
+      </details>
     </section>
   )
 }
