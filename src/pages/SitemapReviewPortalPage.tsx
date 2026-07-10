@@ -109,7 +109,7 @@ export default function SitemapReviewPortalPage() {
       partner_edit_requests: [...(review.partner_edit_requests ?? []), entry],
     }
     const ok = await persist(next)
-    if (ok) setFlash('Note saved.')
+    if (ok) setFlash('Feedback shared.')
   }, [review, persist, partnerName])
 
   const removeEditRequest = useCallback(async (id: string) => {

@@ -126,7 +126,7 @@ const scopedCss = `
 .dox .clickable{position:relative;}
 .dox .clickable::after{content:"↗ leave a note"; position:absolute; top:8px; right:12px; font-size:10.5px; font-weight:650; letter-spacing:.05em; text-transform:uppercase; color:var(--accent); background:#fff; border:1px solid var(--accent); padding:3px 8px; border-radius:999px; opacity:0; transition:opacity .12s ease; pointer-events:none;}
 .dox .clickable:hover::after,.dox .clickable:focus-visible::after{opacity:1;}
-.dox .clickable.has-note::after{content:"● note pending"; background:#FFB84D; color:#341756; border-color:#FFB84D; opacity:1;}
+.dox .clickable.has-note::after{content:"● feedback pending"; background:#FFB84D; color:#341756; border-color:#FFB84D; opacity:1;}
 .dox .status-chip{display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-size:11px; font-weight:650; letter-spacing:.05em; text-transform:uppercase;}
 .dox .exec-body{background:#fff; border:1px solid var(--line); border-radius:14px; padding:24px 26px; color:var(--ink); font-size:15px; line-height:1.65; white-space:pre-wrap;}
 .dox .nav-strategy-body{background:var(--panel2); border-radius:12px; padding:18px 22px; color:var(--ink); font-size:14.5px; line-height:1.6; white-space:pre-wrap; margin-top:14px;}
@@ -187,7 +187,6 @@ export default function SitemapPartnerViewV2({
 }: SitemapPartnerViewV2Props) {
   const [drawer, setDrawer] = useState<{ id: string; label: string } | null>(null)
   const [comment, setComment] = useState('')
-  const [suggestion, setSuggestion] = useState('')
   const [notesDraft, setNotesDraft] = useState(review.partner_notes ?? '')
 
   const openReqs = useMemo(
@@ -212,22 +211,23 @@ export default function SitemapPartnerViewV2({
     if (readOnly) return
     setDrawer({ id, label })
     setComment('')
-    setSuggestion('')
   }
   const closeDrawer = () => setDrawer(null)
 
   const submitDrawer = async () => {
     if (!drawer || !comment.trim() || !onAddEditRequest) return
+    // suggested_change was dropped from the UI — "What's on your mind"
+    // and "Suggested change" read as duplicative to partners. Existing
+    // rows in review.partner_edit_requests may still carry it (pre-v2
+    // submissions), the schema tolerates it as optional.
     await onAddEditRequest({
-      section_id:       drawer.id,
-      section_label:    drawer.label,
-      comment:          comment.trim(),
-      suggested_change: suggestion.trim() || undefined,
-      author_name:      authorName?.trim() || undefined,
+      section_id:    drawer.id,
+      section_label: drawer.label,
+      comment:       comment.trim(),
+      author_name:   authorName?.trim() || undefined,
     })
     setComment('')
-    setSuggestion('')
-    // Keep drawer open in case they want to add another; empty inputs signal "ready for next".
+    // Keep drawer open in case they want to add another; empty input signals "ready for next".
   }
 
   // Wrap the click handler so read-only mode makes sections
@@ -270,70 +270,6 @@ export default function SitemapPartnerViewV2({
         {readOnly && (
           <div style={{ background: '#EDE9FC', color: '#341756', textAlign: 'center', padding: '10px 20px', fontSize: 12.5, fontWeight: 620, letterSpacing: '.04em', textTransform: 'uppercase', borderRadius: 999, margin: '0 auto 20px', maxWidth: 480 }}>
             Preview · this is what your partner sees
-          </div>
-        )}
-
-        {/* Persistent confirmation banner — shown once the partner has
-            clicked "Share Sitemap Review Feedback". Sits above the hero
-            so it's the first thing the partner (or anyone with the link)
-            sees on return visits. Read-only mode hides it because staff
-            preview shouldn't advertise a partner submission that hasn't
-            happened yet in the staff context. */}
-        {!readOnly && review.status === 'partner_reviewed' && (
-          <div
-            role="status"
-            style={{
-              background: '#E8F3EC',
-              border: '1px solid #B5D9C3',
-              color: '#22503A',
-              borderRadius: 14,
-              padding: '14px 18px',
-              margin: '0 0 22px',
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 12,
-              lineHeight: 1.5,
-            }}
-          >
-            <span
-              aria-hidden
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 26,
-                height: 26,
-                borderRadius: '999px',
-                background: '#3f7d55',
-                color: '#fff',
-                fontSize: 15,
-                lineHeight: 1,
-                flex: 'none',
-                marginTop: 1,
-              }}
-            >
-              ✓
-            </span>
-            <div style={{ minWidth: 0 }}>
-              <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Feedback submitted, thank you.</p>
-              <p style={{ fontSize: 13, margin: '2px 0 0', color: '#2E5A44' }}>
-                We are reviewing your feedback and will follow up with next steps.
-              </p>
-              {(review.partner_reviewed_at || review.partner_reviewed_by) && (
-                <p style={{ fontSize: 12, margin: '6px 0 0', color: '#2E5A44' }}>
-                  {review.partner_reviewed_by && <>Submitted by <strong>{review.partner_reviewed_by}</strong></>}
-                  {review.partner_reviewed_by && review.partner_reviewed_at && ' · '}
-                  {review.partner_reviewed_at && (
-                    <>
-                      {new Date(review.partner_reviewed_at).toLocaleString('en-US', {
-                        month: 'long', day: 'numeric', year: 'numeric',
-                        hour: 'numeric', minute: '2-digit',
-                      })}
-                    </>
-                  )}
-                </p>
-              )}
-            </div>
           </div>
         )}
 
@@ -690,7 +626,7 @@ export default function SitemapPartnerViewV2({
                                 {tagFor(p, review.content_migrations)!.label}
                               </span>
                             )}
-                            {hasNote && <span className="tag2" style={{ background:'#FFB84D', color:'#341756' }}>note pending</span>}
+                            {hasNote && <span className="tag2" style={{ background:'#FFB84D', color:'#341756' }}>feedback pending</span>}
                           </span>
                           <span className="desc">{desc}</span>
                         </li>
@@ -842,20 +778,126 @@ export default function SitemapPartnerViewV2({
 
         {!readOnly && (
           <section className="sec">
+            {/* Receipt banner — sits above the Your-turn card so the
+                partner sees on return visits that their feedback
+                landed and is with the Squad team. Cream/green treatment
+                keeps it warm against the dark purple card below. */}
+            {review.status === 'partner_reviewed' && (
+              <div
+                role="status"
+                style={{
+                  background: '#E8F3EC',
+                  border: '1px solid #B5D9C3',
+                  color: '#22503A',
+                  borderRadius: 14,
+                  padding: '14px 18px',
+                  margin: '0 0 18px',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 12,
+                  lineHeight: 1.5,
+                }}
+              >
+                <span
+                  aria-hidden
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 26,
+                    height: 26,
+                    borderRadius: '999px',
+                    background: '#3f7d55',
+                    color: '#fff',
+                    fontSize: 15,
+                    lineHeight: 1,
+                    flex: 'none',
+                    marginTop: 1,
+                  }}
+                >
+                  ✓
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Feedback shared. We're reviewing it now.</p>
+                  <p style={{ fontSize: 13, margin: '2px 0 0', color: '#2E5A44' }}>
+                    Your Church Media Squad team has your notes and will follow up with next steps. If something else comes to mind, keep sharing below and we'll fold it into the same review.
+                  </p>
+                  {(review.partner_reviewed_at || review.partner_reviewed_by) && (
+                    <p style={{ fontSize: 12, margin: '6px 0 0', color: '#2E5A44' }}>
+                      {review.partner_reviewed_by && <>Shared by <strong>{review.partner_reviewed_by}</strong></>}
+                      {review.partner_reviewed_by && review.partner_reviewed_at && ' · '}
+                      {review.partner_reviewed_at && (
+                        <>
+                          {new Date(review.partner_reviewed_at).toLocaleString('en-US', {
+                            month: 'long', day: 'numeric', year: 'numeric',
+                            hour: 'numeric', minute: '2-digit',
+                          })}
+                        </>
+                      )}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="turn">
               {review.status === 'partner_reviewed' ? (
                 <>
-                  <h2>Have <em className="brand-em">additional thoughts</em> you'd like to share?</h2>
-                  <p>Your feedback has already been submitted, we're reviewing it now. If something else comes to mind, add a section note above or a fresh overall thought below, and we'll fold it into the same review.</p>
+                  <h2>Would you like to <em className="brand-em">share anything additional</em>?</h2>
+                  <p>Here's the feedback you've already shared with us. Add more below any time — click a section above to leave section feedback, or drop overall thoughts here.</p>
                 </>
               ) : (
                 <>
                   <h2>Your turn, <em className="brand-em">tell us what you think</em></h2>
-                  <p>This is your site, and this is the moment to shape it. Click any section above to leave a note pinned to it, or drop overall thoughts here.</p>
+                  <p>This is your site, and this is the moment to shape it. Click any section above to leave feedback pinned to it, or drop overall thoughts here.</p>
                 </>
               )}
 
-              <label htmlFor="partner-notes" className="mega-label" style={{ color: '#D8CFF3', display: 'block', marginTop: 14, marginBottom: 8 }}>Overall notes</label>
+              {/* Once the partner has submitted, show them a receipt of
+                  everything they've already left so they can see their
+                  own feedback without opening every drawer. */}
+              {review.status === 'partner_reviewed' && (openReqs.length > 0 || (review.partner_notes ?? '').trim().length > 0) && (
+                <div style={{
+                  marginTop: 18,
+                  padding: '14px 16px',
+                  borderRadius: 12,
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                }}>
+                  <p style={{
+                    fontSize: 10.5, fontWeight: 700, letterSpacing: '.14em', textTransform: 'uppercase',
+                    margin: '0 0 10px', color: '#D8CFF3',
+                  }}>
+                    What you shared
+                  </p>
+                  {openReqs.length > 0 && (
+                    <ul style={{ margin: '0 0 12px', padding: 0, listStyle: 'none', display: 'grid', gap: 10 }}>
+                      {openReqs.map(r => (
+                        <li key={r.id} style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.06)' }}>
+                          <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: '#D8CFF3' }}>
+                            {r.section_label || 'Section feedback'}
+                          </div>
+                          <div style={{ fontSize: 13.5, color: '#fff', lineHeight: 1.5, marginTop: 4, whiteSpace: 'pre-wrap' }}>
+                            {r.comment}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {(review.partner_notes ?? '').trim().length > 0 && (
+                    <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.06)' }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: '#D8CFF3' }}>
+                        Overall thoughts
+                      </div>
+                      <div style={{ fontSize: 13.5, color: '#fff', lineHeight: 1.5, marginTop: 4, whiteSpace: 'pre-wrap' }}>
+                        {review.partner_notes}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <label htmlFor="partner-notes" className="mega-label" style={{ color: '#D8CFF3', display: 'block', marginTop: 22, marginBottom: 8 }}>Overall notes</label>
               <textarea
                 id="partner-notes"
                 value={notesDraft}
@@ -900,10 +942,10 @@ export default function SitemapPartnerViewV2({
                   >Approve anyway</button>
                 )}
                 <span className="note-count">
-                  {openReqs.length > 0 && `${openReqs.length} section note${openReqs.length === 1 ? '' : 's'} pending`}
+                  {openReqs.length > 0 && `${openReqs.length} section feedback pending`}
                   {openReqs.length > 0 && hasNotes && ' · '}
                   {hasNotes && 'overall notes unsent'}
-                  {!shareMode && 'No pending notes. Approve to lock as canonical.'}
+                  {!shareMode && 'No pending feedback. Approve to lock as canonical.'}
                 </span>
               </div>
             </div>
@@ -917,9 +959,9 @@ export default function SitemapPartnerViewV2({
           <aside className="dox-drawer" role="dialog" aria-modal="true">
             <div className="dh">
               <button className="cx" onClick={closeDrawer} aria-label="Close">×</button>
-              <div className="status-chip">Section note</div>
+              <div className="status-chip">Section feedback</div>
               <h3 style={{ marginTop: 10 }}>{drawer.label}</h3>
-              <p>Your note is pinned to this section and shared with the Church Media Squad team.</p>
+              <p>Your feedback is pinned to this section and shared with the Church Media Squad team.</p>
             </div>
             <div className="db">
               {authorName && (
@@ -930,12 +972,9 @@ export default function SitemapPartnerViewV2({
               <label htmlFor="pn-comment">What's on your mind?</label>
               <textarea id="pn-comment" value={comment} onChange={e => setComment(e.target.value)} placeholder="Describe what feels off, or what you'd like to see changed…" />
 
-              <label htmlFor="pn-suggestion">Suggested change (optional)</label>
-              <textarea id="pn-suggestion" value={suggestion} onChange={e => setSuggestion(e.target.value)} placeholder="e.g. Rename “Family Life” to “Families”; move Care under Next Steps." style={{ minHeight: 70 }} />
-
               {(openBySection.get(drawer.id)?.length ?? 0) > 0 && (
                 <div className="existing">
-                  <div className="en">Notes on this section</div>
+                  <div className="en">Feedback on this section</div>
                   {(openBySection.get(drawer.id) ?? []).map(r => (
                     <div key={r.id} className="item">
                       {onRemoveEditRequest && (
@@ -943,7 +982,6 @@ export default function SitemapPartnerViewV2({
                       )}
                       <div className="who">{r.author_name || 'Guest'} · {new Date(r.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric' })}</div>
                       <div className="txt">{r.comment}</div>
-                      {r.suggested_change && <div className="sugg">Suggested: {r.suggested_change}</div>}
                     </div>
                   ))}
                 </div>
@@ -951,7 +989,7 @@ export default function SitemapPartnerViewV2({
             </div>
             <div className="df">
               <button type="button" className="btn ghost" onClick={closeDrawer} style={{ flex: 1 }}>Close</button>
-              <button type="button" className="btn accent save" disabled={!comment.trim() || saving} onClick={() => void submitDrawer()} style={{ flex: 1 }}>Save note</button>
+              <button type="button" className="btn accent save" disabled={!comment.trim() || saving} onClick={() => void submitDrawer()} style={{ flex: 1 }}>Share feedback</button>
             </div>
           </aside>
         </>
