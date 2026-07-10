@@ -89,6 +89,7 @@ function Field({
   label: string; value?: string | null; editMode?: boolean; onChange?: (v: string) => void
 }) {
   const [local, setLocal] = useState(value ?? '')
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setLocal(value ?? '') }, [value])
   if (editMode) {
     return (
@@ -119,6 +120,7 @@ function InlineField({
   label: string; value?: string | null; editMode?: boolean; onChange?: (v: string) => void
 }) {
   const [local, setLocal] = useState(value ?? '')
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setLocal(value ?? '') }, [value])
   if (editMode) {
     return (
@@ -156,8 +158,10 @@ function EditableTagList({
 }: {
   label: string; items: string[]; editMode?: boolean; onChange?: (items: string[]) => void
 }) {
-  const [local, setLocal] = useState(items.join(', '))
-  useEffect(() => { setLocal(items.join(', ')) }, [items.join(', ')])
+  const itemsKey = items.join(', ')
+  const [local, setLocal] = useState(itemsKey)
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setLocal(itemsKey) }, [itemsKey])
   if (editMode) {
     return (
       <div className="mb-3">

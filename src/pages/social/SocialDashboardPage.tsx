@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { Search, Brain, Sparkles, ArrowUpDown, Plus, X, Loader2, Save, Mic, Clock, AlertCircle, CheckCircle2 } from 'lucide-react'
@@ -219,7 +220,6 @@ export default function SocialDashboardPage() {
   const [smmMap, setSmmMap]       = useState<Map<number, string>>(new Map())
   const [autoJobMap, setAutoJobMap] = useState<Map<number, AutoJob>>(new Map())
   const [activeOnlySet, setActiveOnlySet] = useState<Set<number>>(new Set())
-  const [allTasks, setAllTasks]         = useState<SrpMeta[]>([])
   const [thisWeekTasks, setThisWeekTasks] = useState<SrpMeta[]>([])
   const [loading, setLoading]     = useState(true)
   const [search, setSearch]       = useState('')
@@ -311,8 +311,6 @@ export default function SocialDashboardPage() {
       const sm = new Map<number, SrpMeta>()
       for (const row of srpData.tasks) sm.set(row.member, row)
       setSrpMap(sm)
-      const allTasksList = srpData.allTasks ?? []
-      setAllTasks(allTasksList)
       // Filter by due date (primary) or task name date (fallback).
       // Squad API doesn't return updatedAt timestamps reliably.
       const ws = getWeekStart(new Date())
@@ -351,8 +349,6 @@ export default function SocialDashboardPage() {
     }
     void load()
   }, [])
-
-  const weekStart = useMemo(() => getWeekStart(new Date()), [])
 
   // Build a set + due-date map from the ClickUp-direct this-week cache
   const thisWeekMemberSet = useMemo(
@@ -406,7 +402,7 @@ export default function SocialDashboardPage() {
       if (aTime !== bTime) return bTime - aTime
       return a.member - b.member
     })
-  }, [churches, search, sort, srpMap, weekStart, thisWeekMemberSet, thisWeekDueDateMap, thisWeekTaskIdMap])
+  }, [churches, search, sort, srpMap, thisWeekMemberSet, thisWeekDueDateMap])
 
   const handleProfileSaved = useCallback((profile: StrategySocialProProfile) => {
     setChurches(prev => prev.map(c =>
@@ -420,8 +416,9 @@ export default function SocialDashboardPage() {
   const [overdueOpen, setOverdueOpen] = useState(false)
 
   const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000
+  // eslint-disable-next-line react-hooks/purity
+  const nowMs = Date.now()
   const overdueChurches = useMemo(() => {
-    const now = Date.now()
     return churches.filter(c => {
       if (c.socialPro) return false // only All-In churches
       if (!activeOnlySet.has(c.member)) return false // exclude Trial + non-active
@@ -430,7 +427,7 @@ export default function SocialDashboardPage() {
       if (!srp) return true // never submitted
       const lastMs = new Date(srp.updatedAt || srp.createdAt).getTime()
       if (isNaN(lastMs)) return false // no timestamp — can't determine, don't flag
-      return (now - lastMs) >= TWO_WEEKS_MS
+      return (nowMs - lastMs) >= TWO_WEEKS_MS
     })
   }, [churches, srpMap, thisWeekMemberSet, activeOnlySet])
 

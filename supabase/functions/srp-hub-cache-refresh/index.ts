@@ -336,6 +336,7 @@ async function fetchSrpTasksThisWeek(clickupToken: string): Promise<{
 const ALL_IN_MEMBERS_DB = "1f2e83f7-31f6-80e7-a10f-e7b9ea728a44";
 
 async function fetchSmmAssignments(notionToken: string) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let allResults: any[] = [];
   let startCursor: string | undefined;
 

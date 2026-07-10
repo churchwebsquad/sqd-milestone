@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Brain, Sparkles, CalendarDays, ArrowLeft, ExternalLink, Plus, Wand2, X, ChevronRight, User, Video, Link2 } from 'lucide-react'
+import { Brain, Sparkles, CalendarDays, ArrowLeft, ExternalLink, Wand2, X, ChevronRight, User, Video, Link2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import SocialIntelProfileView from '../../components/intel/SocialIntelProfileView'
-import { createSession, srpPipeline, STEP_LABELS, suggestDeliverablesFromText, type SrpSessionListRow } from '../../lib/srpSessions'
+import { createSession, srpPipeline, suggestDeliverablesFromText, type SrpSessionListRow } from '../../lib/srpSessions'
 import { useAuth } from '../../contexts/AuthContext'
 import type React from 'react'
 
@@ -68,14 +69,6 @@ function ExternalLinkBtn({ href, label }: { href: string; label: string }) {
   )
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <h3 className="text-xs font-bold text-[#513DE5] uppercase tracking-widest mb-3">{title}</h3>
-      {children}
-    </div>
-  )
-}
 
 function Field({ label, value }: { label: string; value?: string | null }) {
   return (
@@ -458,19 +451,6 @@ export default function SocialChurchPage() {
     }
   }
 
-  // ── SRP actions ──────────────────────────────────────────────────────────
-  const handleNewSrp = async () => {
-    if (!church || !user?.email) return
-    setSrpCreating(true)
-    try {
-      const { session_id } = await createSession({ member: String(member), churchName: church.church_name ?? `Member ${member}`, userEmail: user.email })
-      navigate(`/social/srp/${encodeURIComponent(session_id)}`)
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to create SRP session')
-    } finally {
-      setSrpCreating(false)
-    }
-  }
 
   if (churchLoading) return (
     <div className="flex items-center justify-center py-32">
