@@ -26,10 +26,13 @@ interface FetchResponse {
 
 export function RecentSubmissionsWidget({
   pairedTaskId,
+  member,
   onPair,
 }: {
   /** Currently paired ClickUp task ID — used to highlight the row. */
   pairedTaskId?: string | null
+  /** Filter weekly submissions to this church member number. */
+  member?:       number | null
   onPair:       (s: SrpSermonSubmission) => void
 }) {
   const [submissions, setSubmissions] = useState<SrpSermonSubmission[]>([])
@@ -42,7 +45,7 @@ export function RecentSubmissionsWidget({
   const loadWeekly = useCallback(async () => {
     setLoading(true); setError(null); setSearchedTaskId(null)
     try {
-      const r = await callSrpApi<FetchResponse>('fetch-sermon-submissions', {})
+      const r = await callSrpApi<FetchResponse>('fetch-sermon-submissions', member ? { member } : {})
       setSubmissions(r.submissions ?? [])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'load failed')

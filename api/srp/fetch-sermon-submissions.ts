@@ -74,6 +74,7 @@ export default async function handler(req: any, res: any) {
 
   const searchTaskIdRaw = typeof req.body?.clickup_task_id === 'string' ? req.body.clickup_task_id.trim() : ''
   const searchTaskId    = searchTaskIdRaw.length > 0 ? searchTaskIdRaw : null
+  const memberFilter    = typeof req.body?.member === 'number' ? req.body.member : null
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
@@ -111,13 +112,15 @@ export default async function handler(req: any, res: any) {
   }
 
   // ── Weekly-fetch mode ──────────────────────────────────────────────
-  const { data: submissionData, error: subError } = await sb
+  let weeklyQuery = sb
     .from('strategy_sermon_data')
     .select(SERMON_COLUMNS)
     .order('created_at', { ascending: false })
     .not('srp_info_selection', 'is', null)
     .gte('created_at', weekStartIso)
     .limit(200)
+  if (memberFilter) weeklyQuery = weeklyQuery.eq('account', memberFilter)
+  const { data: submissionData, error: subError } = await weeklyQuery
   if (subError) return res.status(500).json({ error: `Weekly fetch failed: ${subError.message}` })
 
   const rows = (submissionData ?? []) as SermonRow[]
