@@ -1,0 +1,3 @@
+#!/bin/sh
+# Run lint ratchet before every commit — fails the commit if any file regresses.
+node scripts/lint-ratchet.mjs

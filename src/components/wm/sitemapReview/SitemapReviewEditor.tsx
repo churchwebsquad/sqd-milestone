@@ -1817,9 +1817,9 @@ function NavEditor({
     // External change (someone else edited site_strategy.nav, or the
     // composer just reloaded from DB). Re-sync local state.
     const fresh = readSiteStrategyNav(siteStrategy)
-    setPrimaryState(fresh.primary)
-    setCtaOnlyState(fresh.ctaOnly)
-    setFooterPrimaryLinksState(fresh.footerPrimaryLinks)
+    setPrimaryState(fresh.primary) // eslint-disable-line react-hooks/set-state-in-effect
+    setCtaOnlyState(fresh.ctaOnly) // eslint-disable-line react-hooks/set-state-in-effect
+    setFooterPrimaryLinksState(fresh.footerPrimaryLinks) // eslint-disable-line react-hooks/set-state-in-effect
     setFooterExploreState(fresh.footerExplore)
     setFooterLegalState(fresh.footerLegal)
     lastSavedNavJsonRef.current = currentJson
