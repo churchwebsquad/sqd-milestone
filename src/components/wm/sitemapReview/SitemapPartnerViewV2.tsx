@@ -26,7 +26,7 @@ import type {
   SitemapReviewNavPresentation,
   SiteStrategyBlob,
 } from '../../../lib/sitemapReview'
-import { siteStrategyNavToItems } from '../../../lib/sitemapReview'
+import { extractCoworkFooterGroups, siteStrategyNavToItems } from '../../../lib/sitemapReview'
 
 /** Per-page view row: page facts read live from site_strategy plus
  *  the review's per-slug annotations. This is the render-time shape
@@ -307,6 +307,32 @@ export default function SitemapPartnerViewV2({
     () => siteStrategyNavToItems(siteStrategy?.nav?.cta_only as Array<unknown> | undefined, nameBySlug, false),
     [siteStrategy, nameBySlug],
   )
+  // Live footer groups from site_strategy.nav.footer. Preferred over
+  // review.footer_info.footer_link_groups so a strategist edit to
+  // site_strategy shows up immediately without a compose roundtrip.
+  // Falls back to the stored footer_link_groups when site_strategy
+  // doesn't have a footer set yet.
+  const liveFooterGroups = useMemo(() => {
+    const raw = (siteStrategy?.nav as { footer?: unknown } | undefined)?.footer
+    if (!raw) return null
+    const { groups } = extractCoworkFooterGroups(
+      raw as Parameters<typeof extractCoworkFooterGroups>[0],
+      nameBySlug,
+    )
+    return groups.length > 0 ? groups : null
+  }, [siteStrategy, nameBySlug])
+  // Optional "connect card" surfaced from site_strategy.nav.footer.
+  // Cowork writes it when the church has a "get in touch" panel worth
+  // pinning to the footer (say hello / ask a question / ministry info /
+  // baptism / etc). Not on the type today — read defensively.
+  const footerConnectCard = useMemo(() => {
+    const nav = siteStrategy?.nav as { footer?: { connect_card?: { enabled?: boolean; heading?: string; items?: Array<{ label?: string; description?: string }> } } } | undefined
+    const cc = nav?.footer?.connect_card
+    if (!cc || cc.enabled === false) return null
+    const items = (cc.items ?? []).filter(i => (i?.label ?? '').trim().length > 0)
+    if (items.length === 0) return null
+    return { heading: cc.heading ?? 'Connect with us', items }
+  }, [siteStrategy])
   const grouped = useMemo(
     () => pres?.tiers && pres.tiers.length > 0
       ? groupPagesByTiers(realPages, pres.tiers)
@@ -625,12 +651,13 @@ export default function SitemapPartnerViewV2({
               )}
 
               {(() => {
-                // Footer link columns. Preferred authoring shape is
-                // `footer_link_groups` (headed columns). Falls back
-                // to the legacy `footer_page_links` flat list under a
-                // single "Explore" heading. Empty groups (no links)
-                // are skipped so partners never see a stub column.
-                const groups = (review.footer_info?.footer_link_groups ?? [])
+                // Footer link columns. Live-source order:
+                //   1. site_strategy.nav.footer (via extractCoworkFooterGroups)
+                //   2. review.footer_info.footer_link_groups (compose seed)
+                //   3. legacy footer_page_links flat list
+                // Empty groups (no links) are skipped so partners never see
+                // a stub column.
+                const groups = (liveFooterGroups ?? review.footer_info?.footer_link_groups ?? [])
                   .filter(g => (g.links ?? []).length > 0)
                 if (groups.length > 0) {
                   return groups.map(g => (
@@ -655,6 +682,22 @@ export default function SitemapPartnerViewV2({
                   </div>
                 )
               })()}
+
+              {footerConnectCard && (
+                <div>
+                  <div className="mega-label" style={{ color: '#B8B0D2', marginBottom: 12 }}>{footerConnectCard.heading}</div>
+                  <div style={{ fontSize: 12.5, color: '#EDE9FC', lineHeight: 1.6 }}>
+                    {footerConnectCard.items.map((it, i) => (
+                      <div key={i} style={{ marginBottom: 6 }}>
+                        <div style={{ fontWeight: 600 }}>{it.label}</div>
+                        {it.description && (
+                          <div style={{ fontSize: 11.5, color: '#B8B0D2', marginTop: 1 }}>{it.description}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {review.footer_info?.newsletter_signup_url && (
                 <div>
@@ -1457,29 +1500,26 @@ function hydrateNavPresentation(
   header: NavItem[],
   ctaOnly?: NavItem[],
 ): SitemapReviewNavPresentation | null {
+  // POST-REFACTOR (2026-07): site_strategy is the source of truth for
+  // nav STRUCTURE. Authored nav_presentation used to win when it had
+  // content, but that meant a strategist edit to site_strategy.nav
+  // (renaming Give → Donate, adding a Teachings dropdown, moving Events
+  // from Get Involved to Community) never landed on the partner view —
+  // the stale authored copy kept winning. Fix: always derive
+  // structure (top-level items, mega-menu panels, standard dropdowns,
+  // offcanvas sections) from the live header. Authored presentation
+  // layer (featured tiles, custom column descriptions, header CTAs,
+  // announcement banner, featured highlight) is layered ON TOP when
+  // it can be matched to a derived panel by parent label.
   const nonHomeHeader = (header ?? []).filter(h => !isHomeNavItem(h))
   const nonHomeCtaOnly = (ctaOnly ?? []).filter(h => !isHomeNavItem(h))
-  const hasAuthoredContent =
-    !!np && (
-      (np.visible_top_level?.length ?? 0) > 0 ||
-      (np.megamenu_panels?.length ?? 0) > 0 ||
-      ((np.standard_dropdowns?.groups?.length ?? 0) > 0) ||
-      !!np.offcanvas_overlay
-    )
-  if (!hasAuthoredContent && nonHomeHeader.length === 0 && nonHomeCtaOnly.length === 0) return null
+  if (nonHomeHeader.length === 0 && nonHomeCtaOnly.length === 0 && !np) return null
 
   const shellChoice = np?.shell ?? shell(np ?? {}) ?? 'megamenu'
 
-  // visible_top_level — filter home from authored; derive from header
-  // when empty. Buttons: strongest precedence is np.header_ctas (the
-  // first-class CTA field the strategist authors); next is any
-  // kind='button' entries in the authored visible_top_level; last
-  // fallback is nav_layout.cta_only from the sitemap step. Result
-  // is a merged visible_top_level with button items appended so
-  // the topnav's CTA row and the offcanvas panel bottom both get
-  // populated.
-  const authoredVtl = (np?.visible_top_level ?? []).filter(i => !isHomeNavItem(i))
-  const authoredHasButton = authoredVtl.some(i => i.kind === 'button')
+  // visible_top_level — always derived from live header. CTA buttons
+  // appended from header_ctas (strategist-authored) with a fallback
+  // to site_strategy.nav.cta_only.
   const derivedVtl: NonNullable<SitemapReviewNavPresentation['visible_top_level']> = nonHomeHeader.map(h => ({
     kind: h.children && h.children.length > 0 ? 'group' : 'page',
     label: h.label ?? h.slug ?? '',
@@ -1487,7 +1527,6 @@ function hydrateNavPresentation(
     ...(h.slug ? { slug: h.slug } : {}),
   }))
   const derivedCtaButtons: NonNullable<SitemapReviewNavPresentation['visible_top_level']> = (() => {
-    // Preferred: strategist-authored header_ctas (first-class field).
     const authoredCtas = (np?.header_ctas ?? []).filter(c => !isHomeNavItem({ label: c.label, slug: c.slug }))
     if (authoredCtas.length > 0) {
       return authoredCtas.map(c => ({
@@ -1496,54 +1535,75 @@ function hydrateNavPresentation(
         ...(c.slug ? { slug: c.slug } : {}),
       }))
     }
-    // Fallback: nav_layout.cta_only from the cowork sitemap step.
     return nonHomeCtaOnly.map(c => ({
       kind: 'button' as const,
       label: c.label ?? c.slug ?? '',
       ...(c.slug ? { slug: c.slug } : {}),
     }))
   })()
-  const baseVtl = authoredVtl.length > 0 ? authoredVtl : derivedVtl
-  // If the authored list already has button items, respect them
-  // fully. Otherwise append the derived CTA buttons (from
-  // header_ctas or cta_only) so the CTA row lights up.
-  const visible_top_level = authoredHasButton
-    ? baseVtl
-    : [...baseVtl, ...derivedCtaButtons]
+  const visible_top_level = [...derivedVtl, ...derivedCtaButtons]
 
-  // Per-shell content — derive from header when the strategist has
-  // not authored an explicit shape.
-  let megamenu_panels = np?.megamenu_panels
-  if (shellChoice === 'megamenu' && (!megamenu_panels || megamenu_panels.length === 0)) {
-    const parents = nonHomeHeader.filter(h => (h.children ?? []).length > 0)
-    megamenu_panels = parents.map(p => ({
-      triggered_by: p.label,
-      columns: [{
-        heading: p.label,
-        links: (p.children ?? []).filter(c => !isHomeNavItem(c)).map(c => ({ label: c.label ?? c.slug ?? '' })),
-      }],
-    }))
+  // Match authored panels to derived-by-parent-label so featured
+  // tiles / column descriptions layer cleanly on top of live
+  // structure without carrying stale slugs.
+  const normalize = (s: string | undefined) => (s ?? '').trim().toLowerCase()
+  const authoredMegaByLabel = new Map<string, NonNullable<SitemapReviewNavPresentation['megamenu_panels']>[number]>()
+  for (const p of (np?.megamenu_panels ?? [])) {
+    if (p.triggered_by) authoredMegaByLabel.set(normalize(p.triggered_by), p)
+  }
+  type StdDropdownGroup = NonNullable<NonNullable<SitemapReviewNavPresentation['standard_dropdowns']>['groups']>[number]
+  const authoredStdByLabel = new Map<string, StdDropdownGroup>()
+  for (const g of (np?.standard_dropdowns?.groups ?? [])) {
+    if (g.group_label) authoredStdByLabel.set(normalize(g.group_label), g)
   }
 
-  let standard_dropdowns = np?.standard_dropdowns
-  if (shellChoice === 'standard_dropdowns' && (!standard_dropdowns || (standard_dropdowns.groups ?? []).length === 0)) {
+  let megamenu_panels: NonNullable<SitemapReviewNavPresentation['megamenu_panels']> | undefined
+  if (shellChoice === 'megamenu') {
+    const parents = nonHomeHeader.filter(h => (h.children ?? []).length > 0)
+    megamenu_panels = parents.map(p => {
+      const derivedLinks = (p.children ?? [])
+        .filter(c => !isHomeNavItem(c))
+        .map(c => ({ label: c.label ?? c.slug ?? '' }))
+      const authored = authoredMegaByLabel.get(normalize(p.label))
+      const authoredFirstCol = authored?.columns?.[0]
+      const heading = authoredFirstCol?.heading ?? p.label
+      const featured = authored?.featured_tile
+      return {
+        triggered_by: p.label,
+        columns: [{
+          heading,
+          links: derivedLinks,
+          ...(authoredFirstCol?.description ? { description: authoredFirstCol.description } : {}),
+        }],
+        ...(featured ? { featured_tile: featured } : {}),
+      }
+    })
+  }
+
+  let standard_dropdowns: SitemapReviewNavPresentation['standard_dropdowns'] | undefined
+  if (shellChoice === 'standard_dropdowns') {
     const parents = nonHomeHeader.filter(h => (h.children ?? []).length > 0)
     standard_dropdowns = {
-      groups: parents.map(p => ({
-        group_label: p.label,
-        children: (p.children ?? []).filter(c => !isHomeNavItem(c)).map(c => ({ label: c.label ?? c.slug ?? '' })),
-      })),
+      groups: parents.map(p => {
+        const derivedChildren = (p.children ?? [])
+          .filter(c => !isHomeNavItem(c))
+          .map(c => ({ label: c.label ?? c.slug ?? '' }))
+        // Reference authored group (matched by parent label) so we
+        // could layer per-child descriptions in the future; today the
+        // group-level shape carries no presentation-only fields worth
+        // preserving from the authored copy, so we take the derived
+        // shape verbatim.
+        void authoredStdByLabel.get(normalize(p.label))
+        return {
+          group_label: p.label,
+          children: derivedChildren,
+        }
+      }),
     }
   }
 
   let offcanvas_overlay = np?.offcanvas_overlay
-  if (shellChoice === 'offcanvas' && !offcanvas_overlay) {
-    // Derive organizational structure — NOT a flat dump. Each header
-    // parent that has children becomes its own section (label = the
-    // parent's label; links = its children). Featured links are
-    // NOT derived here anymore — the offcanvas panel's large
-    // primary column mirrors visible_top_level directly at render
-    // time, so there's one source of truth for both surfaces.
+  if (shellChoice === 'offcanvas') {
     const parentsWithChildren = nonHomeHeader.filter(h => (h.children ?? []).length > 0)
     offcanvas_overlay = {
       sections: parentsWithChildren.map(p => ({
