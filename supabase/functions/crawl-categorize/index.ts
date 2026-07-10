@@ -574,7 +574,7 @@ Deno.serve(async (req) => {
 
 function preClassifyUrl(url, campusRegistry) {
   let path = url;
-  try { path = new URL(url).pathname; } catch {}
+  try { path = new URL(url).pathname; } catch { /* ignore */ }
   // v117 — strip the campus prefix before pattern-matching. Doxology
   // (and any multi-campus church with path-prefix campuses) puts every
   // topic page under /southwest/*, /alliance/*, etc. The taxonomy
@@ -760,7 +760,7 @@ function partitionBucketByCampus(b, campuses) {
 // key_phrase items demoted to the `other` bucket.
 function pathFromUrl(url, campusRegistry) {
   let p = String(url ?? "");
-  try { p = new URL(p).pathname; } catch {}
+  try { p = new URL(p).pathname; } catch { /* ignore */ }
   if (Array.isArray(campusRegistry) && campusRegistry.length > 0) {
     const lower = p.toLowerCase();
     for (const c of campusRegistry) {
@@ -924,7 +924,7 @@ function regroupOtherIntoPrograms(buckets, pages, dropped) {
 }
 
 function urlToHumanTitle(url) {
-  let path = ""; try { path = new URL(url).pathname; } catch {}
+  let path = ""; try { path = new URL(url).pathname; } catch { /* ignore */ }
   if (!path || path === "/") return "Homepage";
   const last = path.replace(/\/$/, "").split("/").filter(Boolean).pop() ?? "";
   if (!last) return "Untitled";
@@ -1024,7 +1024,7 @@ function normalizeProgramKey(name) {
     .toLowerCase()
     .trim()
     .replace(/^(the|a|an)\s+/, "")
-    .replace(/[.,;:!?—\-]+$/, "")
+    .replace(/[.,;:!?—-]+$/, "")
     .replace(/[-–—‑]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -1235,12 +1235,12 @@ function deriveStorage(t, b) {
   let listUrl = null;
   let shortest = Infinity;
   for (const u of b.source_urls) {
-    try { const p = new URL(u).pathname; if (p.length < shortest) { shortest = p.length; listUrl = u; } } catch {}
+    try { const p = new URL(u).pathname; if (p.length < shortest) { shortest = p.length; listUrl = u; } } catch { /* ignore */ }
   }
   const detailUrls = b.source_urls.filter(u => u !== listUrl);
   let itemUrlPattern = null;
   if (detailUrls.length > 0) {
-    try { itemUrlPattern = new URL(detailUrls[0]).pathname.replace(/[^/]+$/, "{slug}"); } catch {}
+    try { itemUrlPattern = new URL(detailUrls[0]).pathname.replace(/[^/]+$/, "{slug}"); } catch { /* ignore */ }
   }
   const fieldsPresent = new Set();
   for (const it of b.items) for (const k of Object.keys(it)) fieldsPresent.add(k);

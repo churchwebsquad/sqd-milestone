@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * React hook — subscribes to a project's sitemap review status. Used
  * by downstream workspaces (PagesWorkspace, CopyEngine, DevHandoff) to

@@ -92,11 +92,11 @@ export function extractSnippets(pages: CrawlPage[], originUrl: string): SnippetR
   }
   push('facebook_url',  'Facebook URL',  fu(/https?:\/\/(?:www\.)?facebook\.com\/[\w\-./]+/i),  'social')
   push('instagram_url', 'Instagram URL', fu(/https?:\/\/(?:www\.)?instagram\.com\/[\w\-./]+/i), 'social')
-  push('youtube_url',   'YouTube URL',   fu(/https?:\/\/(?:www\.)?youtube\.com\/(?:@[\w\-.]+|channel\/[\w\-]+|c\/[\w\-]+)/i), 'social')
+  push('youtube_url',   'YouTube URL',   fu(/https?:\/\/(?:www\.)?youtube\.com\/(?:@[\w-.]+|channel\/[\w-]+|c\/[\w-]+)/i), 'social')
   push('tiktok_url',    'TikTok URL',    fu(/https?:\/\/(?:www\.)?tiktok\.com\/@[\w\-.]+/i),    'social')
   push('give_url',      'Giving URL',    fu(/https?:\/\/[\w\-./]*(?:give|giving|donate)[\w\-./?=&%#]*/i), 'actions')
   push('directions_url', 'Directions URL', fu(/https?:\/\/(?:www\.)?(?:google\.[a-z.]+\/maps|goo\.gl\/maps|maps\.app\.goo\.gl)\/[\w\-./?=&%#@,+]+/i), 'location')
-  push('livestream_url', 'Livestream URL', fu(/https?:\/\/[\w\-./]*(?:livestream|watch\-live|live\-stream|\/live\b)[\w\-./?=&%#]*/i), 'actions')
+  push('livestream_url', 'Livestream URL', fu(/https?:\/\/[\w-./]*(?:livestream|watch-live|live-stream|\/live\b)[\w-./?=&%#]*/i), 'actions')
   push('site_url',      'Public site URL', originUrl, 'site')
   return out
 }
@@ -106,6 +106,7 @@ export function extractSnippets(pages: CrawlPage[], originUrl: string): SnippetR
  *  web_project_snippets entries (only when the token isn't already
  *  present). */
 export async function upsertSnippets(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: { from: (t: string) => any },  // deno-lint-ignore no-explicit-any
   projectId: string,
   snippets: SnippetRecord[],

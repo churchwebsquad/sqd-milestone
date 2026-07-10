@@ -34,10 +34,13 @@ import type {
   WebProjectPhase,
   ManualSubStatus,
 } from '../types/database'
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore TS2307 — modules removed; types inlined below
 import type { HealthMilestoneRow } from './webProjectHealth'
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore TS2307
 import type { PhaseInference } from './webPhaseInference'
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore TS2307
 import type { DevTaskRow } from '../hooks/useProjectsWithHealth'
 

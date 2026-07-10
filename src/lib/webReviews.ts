@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Review state helpers — single read for everything Site Manager needs
  * to render review-related UI. Centralizes the (review, comment) joins

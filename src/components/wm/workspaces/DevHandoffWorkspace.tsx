@@ -140,6 +140,7 @@ export function DevHandoffWorkspace({ project }: Props) {
     backup:    string | null
   } | null>(null)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (project.member == null) { setAccountPhotos(null); return }
     let cancelled = false
     void (async () => {
@@ -176,6 +177,7 @@ export function DevHandoffWorkspace({ project }: Props) {
     // Seed from the persisted plan immediately so the panel doesn't
     // flash blank while the fresh compute runs in the background.
     const existing = rs?.content_model_plan as ContentModelPlan | undefined
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (existing?.schema_version === 1) setCmPlan(existing)
 
     const persistedAnswers = rs?.content_model_plan_answers as Record<string, string> | undefined
@@ -207,7 +209,7 @@ export function DevHandoffWorkspace({ project }: Props) {
    *  roadmap_state.content_model_plan_answers as a flat
    *  question_id → text map. Survives recomputes because the
    *  analyzer never touches this key. */
-  // @ts-ignore TS6133 — retained for future re-wiring
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _saveCmAnswer = async (questionId: string, answer: string) => {
     const next = { ...cmAnswers, [questionId]: answer }
     setCmAnswers(next)
@@ -1139,8 +1141,8 @@ function CmDownloadRow({ plan, answers, projectSlug }: { plan: ContentModelPlan;
  *  tagged (Strategist vs McNeel). Each question has an editable
  *  answer textarea that persists to roadmap_state via onSaveAnswer.
  *  Answers flow into the markdown download too. */
-// @ts-ignore TS6133
-function _CmOpenQuestionsPanel({
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function CmOpenQuestionsPanel({
   plan, answers, onSaveAnswer,
 }: {
   plan: ContentModelPlan
@@ -1325,8 +1327,8 @@ function CmPartnerIntentPanel({ plan }: { plan: ContentModelPlan }) {
  *  change to a different canonical schema, or clear an existing
  *  override. Persists via setSchemaOverride and updates plan state
  *  optimistically. */
-// @ts-ignore TS6133
-function _SchemaOverrideControl({
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function SchemaOverrideControl({
   section,
   projectId,
   plan,
@@ -1477,10 +1479,11 @@ function timeAgo(iso: string): string {
   return `${Math.round(seconds / 86400)}d ago`
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function CmConceptsFoundPanel({
   plan,
-  projectId: _projectId,
-  onPlanChange: _onPlanChange,
+  projectId: _projectId, // eslint-disable-line @typescript-eslint/no-unused-vars
+  onPlanChange: _onPlanChange, // eslint-disable-line @typescript-eslint/no-unused-vars
 }: {
   plan: ContentModelPlan
   projectId?: string
@@ -1883,7 +1886,7 @@ function DeclaredContentModelsBlock({ plan }: { plan: ContentModelPlan }) {
           const firstSample = boundRows.find(s => s.sample_record && Object.keys(s.sample_record).length > 0)
           const sample = firstSample?.sample_record ?? null
           const sampleFields = sample
-            ? Object.entries(sample).filter(([_, v]) => v != null && String(v).trim() !== '')
+            ? Object.entries(sample).filter(([, v]) => v != null && String(v).trim() !== '')
             : []
           const ctaText = m.cta_target ? (ctaLabel[m.cta_target] ?? m.cta_target) : 'Strategist confirms later'
           return (

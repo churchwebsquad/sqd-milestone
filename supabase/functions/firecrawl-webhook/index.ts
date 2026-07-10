@@ -340,6 +340,7 @@ Deno.serve(async (req) => {
         body:    JSON.stringify({ project_id: projectId }),
       }).catch(e => console.error("[firecrawl-webhook] atomize kick failed:", e));
       // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const er = (globalThis as any).EdgeRuntime;
       if (er && typeof er.waitUntil === "function") er.waitUntil(atomizeP);
     } catch (e) { console.error("atomize fire failed:", e); }

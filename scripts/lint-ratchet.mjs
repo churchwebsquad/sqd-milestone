@@ -35,7 +35,7 @@ try {
   raw = execSync('npx eslint . --format json', {
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
-    maxBuffer: 32 * 1024 * 1024,
+    maxBuffer: 128 * 1024 * 1024,
   })
 } catch (e) {
   // eslint exits 1 when there are errors; the JSON still prints on stdout.

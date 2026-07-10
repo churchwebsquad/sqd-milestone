@@ -1168,10 +1168,11 @@ function isAllHidden(els: HTMLElement[]): boolean {
  *  (outside any group container, e.g. a hero photo or content-section
  *  Image 1 area) are NOT touched by this pass; hideUnfilledDecorative
  *  Slots already exempts them. */
-// @ts-ignore — kept for future use, not yet wired into the render pipeline
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function _hideUnsubstitutedItemClones(
   root: Element,
   fields: ReadonlyArray<WebFieldDef> | undefined | null,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _values: Record<string, unknown>,
 ): void {
   if (!fields) return
@@ -1316,7 +1317,7 @@ function hasSubstitutedAncestor(el: Element): boolean {
  *    are untouched.
  *  - An empty Frame stays IF any descendant is substituted, has real
  *    text, OR contains a real (non-placeholder) <img>/<video>. */
-// @ts-ignore — kept for future use, not yet wired into the render pipeline
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function _hideEmptyNumberedFrames(root: Element): void {
   const els = root.querySelectorAll('[data-layer]')
   for (const el of Array.from(els) as HTMLElement[]) {

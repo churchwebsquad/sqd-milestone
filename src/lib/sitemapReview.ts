@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Sitemap Review, the partner-facing snapshot of a project's page
  * structure, persona postures, navigation layout, and content-

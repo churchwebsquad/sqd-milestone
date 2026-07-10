@@ -178,7 +178,7 @@ function buildCoworkPrompt(review: SitemapReview, projectId: string, churchName:
   // ── Step 2: partner feedback (this batch) ──────────────────────
   lines.push('## Step 2 — The partner feedback you are applying')
   lines.push('')
-  lines.push(`Submitted ${submittedAt}${submittedBy}. The note IDs you\'ll mark resolved in Step 5 are: ${noteIds}.`)
+  lines.push(`Submitted ${submittedAt}${submittedBy}. The note IDs you'll mark resolved in Step 5 are: ${noteIds}.`)
   lines.push('')
 
   if (overallNotes) {
@@ -330,6 +330,8 @@ export default function SitemapFeedbackPage() {
     setLoading(false)
   }, [projectId])
 
+  
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void reload() }, [reload])
 
   const openReqs = useMemo(

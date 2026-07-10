@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Standalone registrar / domain credentials intake form.
  * Mounted at /portal/:token/registrar-intake

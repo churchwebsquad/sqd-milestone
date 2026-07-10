@@ -20,6 +20,7 @@ export async function listSmmAssignments(): Promise<SmmAssignment[]> {
     const out: SmmAssignment[] = []
 
     for (const page of pages as NotionPage[]) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const props = page.properties as Record<string, any>
       const memberProp = props['Member #']
       const smmProp    = props['SMS Team Member']

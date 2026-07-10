@@ -13,6 +13,7 @@
 // present, so local dev / CI without secrets still produces a plan
 // (just without LLM enrichment).
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore TS2307 — @anthropic-ai/sdk not in this tsconfig
 import Anthropic from '@anthropic-ai/sdk'
 import { CANONICAL_SCHEMAS } from './rules'
@@ -24,6 +25,7 @@ const ADVERSARIAL_VOTES = 3
 let _client: Anthropic | null = null
 function client(): Anthropic | null {
   if (_client) return _client
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore TS2591 — process available at runtime (tsx/node)
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) return null

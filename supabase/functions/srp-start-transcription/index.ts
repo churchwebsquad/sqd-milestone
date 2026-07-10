@@ -115,7 +115,7 @@ serve(async (req) => {
     const job_id = crypto.randomUUID();
 
     // Insert transcript_jobs row with status "pending"
-    const { data: jobData, error: insertError } = await supabase
+    const { error: insertError } = await supabase
       .schema("srp_pipeline")
       .from("transcript_jobs")
       .insert({

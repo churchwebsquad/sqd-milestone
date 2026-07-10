@@ -442,7 +442,7 @@ Return ONLY this JSON — no explanation, no markdown fences:
   };
   if (!instagram) instagram = extractLink(/https?:\/\/(?:www\.)?instagram\.com\/[\w\-.]+/i);
   if (!facebook)  facebook  = extractLink(/https?:\/\/(?:www\.)?facebook\.com\/[\w\-./]+/i);
-  youtube  = extractLink(/https?:\/\/(?:www\.)?youtube\.com\/(?:@[\w\-.]+|channel\/[\w\-]+|c\/[\w\-]+)/i);
+  youtube  = extractLink(/https?:\/\/(?:www\.)?youtube\.com\/(?:@[\w-.]+|channel\/[\w-]+|c\/[\w-]+)/i);
   tiktok   = extractLink(/https?:\/\/(?:www\.)?tiktok\.com\/@[\w\-.]+/i);
 
   const socialLinks = [
