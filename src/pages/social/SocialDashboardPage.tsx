@@ -279,9 +279,10 @@ export default function SocialDashboardPage() {
         (supabase as any)
           .schema('srp_pipeline')
           .from('sessions')
-          .select('member, current_step, status, created_at')
+          .select('member, current_step, status, created_at, updated_at')
           .not('status', 'eq', 'archived')
-          .order('created_at', { ascending: false })
+          .gte('updated_at', new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString())
+          .order('updated_at', { ascending: false })
           .limit(500),
       ])
 
