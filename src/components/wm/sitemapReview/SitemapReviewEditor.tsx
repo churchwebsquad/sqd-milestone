@@ -425,15 +425,6 @@ export function SitemapReviewEditor({
                   disabled={isApproved}
                 />
               </div>
-              <div className="mt-4">
-                <p className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle mb-1">Per-page descriptions</p>
-                <TierPageDescriptionsEditor
-                  review={review}
-                  strategyPages={strategyPageOptions}
-                  onChange={persist}
-                  disabled={isApproved}
-                />
-              </div>
             </SectionBand>
 
             <SectionBand num="04b" label="Inspiration image (optional)">
@@ -1029,20 +1020,17 @@ function PagesEditor({
 }) {
   const annotations = review.page_annotations ?? {}
 
-  // Full unfiltered list from site_strategy (including nav-parent-only rows).
-  // We use this both to render the row and to detect "not in site_strategy"
-  // correctly. The picker widgets in this file take the FILTERED list
-  // (strategyPageOptions) because those pickers should not offer nav-parent
-  // labels as destinations — but the full-page-list editor needs the
-  // complete set so that toggling is_nav_parent_only doesn't make the row
-  // vanish or get mis-flagged as missing.
-  const allStrategyPages = (siteStrategy?.pages ?? [])
+  // Ordered list from site_strategy.pages (source of truth). We keep
+  // the array order because reorder up/down mutates positional order
+  // in site_strategy.pages directly. Annotation-only orphans (a slug
+  // that used to exist and still has an annotation entry) get
+  // appended at the end so the strategist can see + clean them up.
+  const strategyPagesOrdered = (siteStrategy?.pages ?? [])
     .filter(p => typeof p.slug === 'string' && p.slug && p.slug !== '_meta')
-    .map(p => ({
-      slug:    p.slug as string,
-      name:    p.name ?? (p.slug as string),
-      purpose: p.purpose ?? '',
-    }))
+
+  const orphanSlugs = Object.keys(annotations).filter(
+    s => !strategyPagesOrdered.some(p => p.slug === s),
+  )
 
   const [addOpen,   setAddOpen]   = useState(false)
   const [addSlug,   setAddSlug]   = useState('')
@@ -1066,6 +1054,39 @@ function PagesEditor({
     })
   }
 
+  // Walks review.presentation.tiers[].page_entries[] to locate the
+  // entry with a matching slug and update its description_override.
+  // Merged in from the retired TierPageDescriptionsEditor — same
+  // logic, per-page-row placement.
+  const updateDescriptionOverride = (slug: string, override: string) => {
+    void onChange((current: SitemapReview) => {
+      const curTiers = current.presentation?.tiers ?? []
+      const nextTiers = curTiers.map(t => ({
+        ...t,
+        page_entries: (t.page_entries ?? []).map(e =>
+          e.slug !== slug ? e : { ...e, description_override: override.trim() || undefined },
+        ),
+      }))
+      return {
+        ...current,
+        presentation: { ...(current.presentation ?? {}), tiers: nextTiers },
+      }
+    })
+  }
+
+  // Look up the current description_override across all tiers for
+  // this slug. First non-undefined wins (a slug typically only lives
+  // in one tier row).
+  const findDescriptionOverride = (slug: string): string => {
+    const tiers = review.presentation?.tiers ?? []
+    for (const t of tiers) {
+      for (const e of t.page_entries ?? []) {
+        if (e.slug === slug && typeof e.description_override === 'string') return e.description_override
+      }
+    }
+    return ''
+  }
+
   const renamePage = async (slug: string, nextName: string) => {
     const trimmed = nextName.trim()
     if (!trimmed || !siteStrategy) return
@@ -1076,6 +1097,47 @@ function PagesEditor({
     const nextPages = [...currentPages]
     nextPages[idx] = { ...nextPages[idx], name: trimmed }
     await onSaveSiteStrategy({ ...siteStrategy, pages: nextPages })
+  }
+
+  const removePage = async (slug: string) => {
+    if (!siteStrategy) return
+    const pg = (siteStrategy.pages ?? []).find(p => p.slug === slug)
+    const label = pg?.name ?? slug
+    if (!confirm(`Remove "${label}" from the sitemap? This drops it from site_strategy.pages and clears any review annotation. Nav references to this page are NOT auto-purged — check nav after saving.`)) return
+    const nextPages = (siteStrategy.pages ?? []).filter(p => p.slug !== slug)
+    const res = await onSaveSiteStrategy({ ...siteStrategy, pages: nextPages })
+    if (!res.ok) return
+    // Clean up any annotation for the removed slug so the row doesn't
+    // reappear as an orphan.
+    if (annotations[slug]) {
+      void onChange((current: SitemapReview) => {
+        const curAnns = { ...(current.page_annotations ?? {}) }
+        delete curAnns[slug]
+        return { ...current, page_annotations: curAnns }
+      })
+    }
+  }
+
+  const removeOrphanAnnotation = (slug: string) => {
+    if (!confirm(`Clear the leftover annotation for "${slug}"? The page isn't in site_strategy.pages, so this row is purely dead data.`)) return
+    void onChange((current: SitemapReview) => {
+      const curAnns = { ...(current.page_annotations ?? {}) }
+      delete curAnns[slug]
+      return { ...current, page_annotations: curAnns }
+    })
+  }
+
+  const movePage = async (slug: string, direction: -1 | 1) => {
+    if (!siteStrategy) return
+    const currentPages = [...(siteStrategy.pages ?? [])]
+    const idx = currentPages.findIndex(p => p.slug === slug)
+    if (idx < 0) return
+    const target = idx + direction
+    if (target < 0 || target >= currentPages.length) return
+    const swapped = currentPages[idx]
+    currentPages[idx] = currentPages[target]
+    currentPages[target] = swapped
+    await onSaveSiteStrategy({ ...siteStrategy, pages: currentPages })
   }
 
   const addPage = async () => {
@@ -1099,115 +1161,153 @@ function PagesEditor({
     setAddSlug(''); setAddName(''); setAddOpen(false)
   }
 
-  const allSlugs = new Set<string>()
-  for (const p of allStrategyPages) allSlugs.add(p.slug)
-  for (const slug of Object.keys(annotations)) allSlugs.add(slug)
+  const totalCount = strategyPagesOrdered.length + orphanSlugs.length
+
+  const renderRow = (
+    slug: string,
+    strategyPg: { slug: string; name?: string; purpose?: string } | undefined,
+    idx: number | null,
+  ) => {
+    const ann = annotations[slug] ?? {}
+    const name = strategyPg?.name ?? slug
+    const purpose = strategyPg?.purpose ?? ''
+    const isOrphan = !strategyPg
+    const canMoveUp = idx !== null && idx > 0
+    const canMoveDown = idx !== null && idx < strategyPagesOrdered.length - 1
+    return (
+      <li key={slug} className="border border-wm-border rounded p-2.5 bg-wm-bg">
+        <div className="flex items-baseline gap-2 mb-1 flex-wrap">
+          {!isOrphan && (
+            <div className="flex items-center gap-0.5" role="group" aria-label="Reorder">
+              <button
+                type="button"
+                onClick={() => void movePage(slug, -1)}
+                disabled={disabled || !canMoveUp}
+                title="Move up"
+                className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1 py-0.5"
+              >↑</button>
+              <button
+                type="button"
+                onClick={() => void movePage(slug, 1)}
+                disabled={disabled || !canMoveDown}
+                title="Move down"
+                className="text-[13px] leading-none text-wm-text-muted hover:text-wm-text disabled:opacity-30 px-1 py-0.5"
+              >↓</button>
+            </div>
+          )}
+          {!isOrphan ? (
+            <input
+              type="text"
+              defaultValue={name}
+              disabled={disabled}
+              onBlur={e => { void renamePage(slug, e.target.value) }}
+              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+              className="text-[13px] font-semibold text-wm-text bg-transparent border-b border-transparent hover:border-wm-border focus:border-wm-accent focus:outline-none px-0.5 min-w-[10rem]"
+              title="Edit page label. Saves to site_strategy on blur."
+            />
+          ) : (
+            <span className="text-[13px] font-semibold text-wm-text">{name}</span>
+          )}
+          <code className="text-[11px] font-mono text-wm-text-muted">/{slug}</code>
+          {isOrphan && (
+            <span className="text-[10px] uppercase tracking-widest font-bold text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+              Not in site_strategy
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => isOrphan ? removeOrphanAnnotation(slug) : void removePage(slug)}
+            disabled={disabled}
+            className="ml-auto text-[11px] font-semibold text-wm-text-muted hover:text-red-600 disabled:opacity-40"
+            title={isOrphan ? 'Clear this stale annotation' : 'Remove this page from site_strategy'}
+          >Remove</button>
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+          <label className="flex items-center gap-1.5 text-[10px] text-wm-text-muted">
+            <span className="uppercase tracking-wider font-semibold">Role</span>
+            <select
+              value={
+                ann.sitemap_tag === 'hub' || ann.sitemap_tag === 'ministry'
+                  || ann.sitemap_tag === 'churchwide' || ann.sitemap_tag === 'foundation'
+                  ? ann.sitemap_tag
+                  : ''
+              }
+              disabled={disabled}
+              onChange={e => updateAnnotation(slug, {
+                sitemap_tag: e.target.value === ''
+                  ? undefined
+                  : (e.target.value as ReviewPageAnnotation['sitemap_tag']),
+              })}
+              className="text-[11px] rounded-full border border-wm-border bg-white px-2 py-0.5 font-semibold text-wm-text focus:outline-none focus:border-wm-accent disabled:opacity-50"
+            >
+              <option value="">unset</option>
+              <option value="hub">hub</option>
+              <option value="ministry">ministry</option>
+              <option value="churchwide">church-wide</option>
+              <option value="foundation">foundation</option>
+            </select>
+          </label>
+        </div>
+        <label
+          className="flex items-center gap-1.5 text-[11px] text-wm-text-muted mb-1"
+          title="Check when this row is only a dropdown label in the nav (e.g. 'Teaching' opens Messages / Blog / Podcast) and not a real destination page. Hidden from Full Page List; skipped by web_pages creation; no copy is written for it."
+        >
+          <input
+            type="checkbox"
+            checked={ann.is_nav_parent_only === true}
+            disabled={disabled}
+            onChange={e => updateAnnotation(slug, { is_nav_parent_only: e.target.checked || undefined })}
+          />
+          <span>
+            Nav dropdown label only <span className="text-wm-text-subtle">— not a real page</span>
+          </span>
+        </label>
+        {purpose && (
+          <p className="text-[11.5px] text-wm-text-muted italic mt-1 mb-2 leading-snug">
+            Purpose (from site_strategy): {purpose}
+          </p>
+        )}
+        <label className="block mt-2">
+          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">What changed</span>
+          <textarea
+            key={`what-changed-${slug}`}
+            defaultValue={ann.what_changed ?? ''}
+            placeholder="Optional. Partner-facing note about what changed for this page vs their current site."
+            disabled={disabled}
+            rows={2}
+            onBlur={e => { if (e.target.value !== (ann.what_changed ?? '')) updateAnnotation(slug, { what_changed: e.target.value.trim() || undefined }) }}
+            className="mt-1 w-full text-[11.5px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+          />
+        </label>
+        <label className="block mt-2">
+          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
+            Description override (partner-facing tier list)
+          </span>
+          <textarea
+            key={`desc-override-${slug}`}
+            defaultValue={findDescriptionOverride(slug)}
+            placeholder={purpose || 'Optional. Overrides the one-line description under this page in the partner-facing tier list. Blank falls back to the purpose above.'}
+            disabled={disabled}
+            rows={1}
+            onBlur={e => { if (e.target.value !== findDescriptionOverride(slug)) updateDescriptionOverride(slug, e.target.value) }}
+            className="mt-1 w-full text-[11.5px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
+          />
+        </label>
+      </li>
+    )
+  }
 
   return (
-    <Section title="Pages" subtitle={`${allSlugs.size} pages · edit labels inline, or add pages. Purposes live on site_strategy (edit via cowork or the JSON block).`}>
-      <p className="text-[11.5px] text-wm-text-muted mb-2">
-        Rename a page by editing its label below (saves on blur). Add a new page with the button at the bottom. Purposes still come from <code>site_strategy</code> — rewrite them via the JSON block or a cowork revise pass.
-      </p>
-      <ul className="space-y-2">
-        {[...allSlugs].map(slug => {
-          const strategyPg = allStrategyPages.find(sp => sp.slug === slug)
-          const ann = annotations[slug] ?? {}
-          const name = strategyPg?.name ?? slug
-          const purpose = strategyPg?.purpose ?? ''
-          return (
-          <li key={slug} className="border border-wm-border rounded p-2.5 bg-wm-bg">
-            <div className="flex items-baseline gap-2 mb-1 flex-wrap">
-              {strategyPg ? (
-                <input
-                  type="text"
-                  defaultValue={name}
-                  disabled={disabled}
-                  onBlur={e => { void renamePage(slug, e.target.value) }}
-                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                  className="text-[13px] font-semibold text-wm-text bg-transparent border-b border-transparent hover:border-wm-border focus:border-wm-accent focus:outline-none px-0.5 min-w-[10rem]"
-                  title="Edit page label. Saves to site_strategy on blur."
-                />
-              ) : (
-                <span className="text-[13px] font-semibold text-wm-text">{name}</span>
-              )}
-              <code className="text-[11px] font-mono text-wm-text-muted">/{slug}</code>
-              {!strategyPg && (
-                <span className="text-[10px] uppercase tracking-widest font-bold text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
-                  Not in site_strategy
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
-              <label className="ml-auto flex items-center gap-1.5 text-[10px] text-wm-text-muted">
-                <span className="uppercase tracking-wider font-semibold">Role</span>
-                <select
-                  value={
-                    ann.sitemap_tag === 'hub' || ann.sitemap_tag === 'ministry'
-                      || ann.sitemap_tag === 'churchwide' || ann.sitemap_tag === 'foundation'
-                      ? ann.sitemap_tag
-                      : ''
-                  }
-                  disabled={disabled}
-                  onChange={e => updateAnnotation(slug, {
-                    sitemap_tag: e.target.value === ''
-                      ? undefined
-                      : (e.target.value as ReviewPageAnnotation['sitemap_tag']),
-                  })}
-                  className="text-[11px] rounded-full border border-wm-border bg-white px-2 py-0.5 font-semibold text-wm-text focus:outline-none focus:border-wm-accent disabled:opacity-50"
-                >
-                  <option value="">unset</option>
-                  <option value="hub">hub</option>
-                  <option value="ministry">ministry</option>
-                  <option value="churchwide">church-wide</option>
-                  <option value="foundation">foundation</option>
-                </select>
-              </label>
-            </div>
-            <label
-              className="flex items-center gap-1.5 text-[11px] text-wm-text-muted mb-1"
-              title="Check when this row is only a dropdown label in the nav (e.g. 'Teaching' opens Messages / Blog / Podcast) and not a real destination page. Hidden from Full Page List; skipped by web_pages creation; no copy is written for it."
-            >
-              <input
-                type="checkbox"
-                checked={ann.is_nav_parent_only === true}
-                disabled={disabled}
-                onChange={e => updateAnnotation(slug, { is_nav_parent_only: e.target.checked || undefined })}
-              />
-              <span>
-                Nav dropdown label only <span className="text-wm-text-subtle">— not a real page</span>
-              </span>
-            </label>
-            {purpose && (
-              <p className="text-[11.5px] text-wm-text-muted italic mt-1 mb-2 leading-snug">
-                Purpose (from site_strategy): {purpose}
-              </p>
-            )}
-            {/* Only "what changed" ships to the partner view (falls in
-                as the page description when there's no tier override
-                and no purpose). why_change and strategic_alignment used
-                to sit here too but they never rendered anywhere on the
-                partner side — dropped from the editor 2026-07 pass. */}
-            <label className="block mt-2">
-              <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">What changed</span>
-              <textarea
-                defaultValue={ann.what_changed ?? ''}
-                placeholder="Optional. Partner-facing note about what changed for this page vs their current site."
-                disabled={disabled}
-                rows={2}
-                onBlur={e => { if (e.target.value !== (ann.what_changed ?? '')) updateAnnotation(slug, { what_changed: e.target.value.trim() || undefined }) }}
-                className="mt-1 w-full text-[11.5px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-              />
-            </label>
-          </li>
-        )})}
-      </ul>
-      <div className="mt-3">
+    <Section title="Pages" subtitle={`${totalCount} pages · rename inline, reorder with ↑↓, remove with the Remove button, add with the + button below.`}>
+      {/* Add-page control kept near the TOP of the list so the strategist
+          doesn't have to scroll to the end of a 20-page site to find it. */}
+      <div className="mb-3">
         {!addOpen ? (
           <button
             type="button"
             disabled={disabled}
             onClick={() => setAddOpen(true)}
-            className="text-[12px] font-semibold text-wm-accent hover:underline disabled:opacity-50"
+            className="text-[12px] font-semibold text-wm-accent-strong hover:underline disabled:opacity-50"
           >+ Add page</button>
         ) : (
           <div className="border border-wm-border rounded p-2.5 bg-wm-bg-elevated space-y-2">
@@ -1253,6 +1353,12 @@ function PagesEditor({
           </div>
         )}
       </div>
+      <ul className="space-y-2">
+        {strategyPagesOrdered.map((p, i) => renderRow(p.slug as string, {
+          slug: p.slug as string, name: p.name, purpose: p.purpose,
+        }, i))}
+        {orphanSlugs.map(slug => renderRow(slug, undefined, null))}
+      </ul>
     </Section>
   )
 }
@@ -2073,86 +2179,12 @@ function WhyCardsEditor({
   )
 }
 
-// ─────────────────────────────────────────────────────────────────
-// TierPageDescriptionsEditor. Lets the strategist override the
-// one-line description shown under each page in the Full Page List.
-// Reads from presentation.tiers[].page_entries[].description_override
-// and writes back to the same. Grouped by tier so the strategist
-// sees which tier each page belongs to.
-// ─────────────────────────────────────────────────────────────────
-
-function TierPageDescriptionsEditor({
-  review, strategyPages, onChange, disabled,
-}: {
-  review:        SitemapReview
-  strategyPages: StrategyPageOption[]
-  onChange:      (nextOrUpdater: SitemapReview | ((current: SitemapReview) => SitemapReview)) => Promise<void> | void
-  disabled:      boolean
-}) {
-  const tiers = review.presentation?.tiers ?? []
-  if (tiers.length === 0) {
-    return (
-      <p className="text-[11.5px] text-wm-text-subtle italic">
-        No tiers defined yet. Add them via the Presentation JSON below, then per-page overrides show up here.
-      </p>
-    )
-  }
-  const updateEntry = (tierId: string, slug: string, override: string) => {
-    // Race-safe: read tiers from current state so a parallel edit
-    // to a different tier's letter/title doesn't get clobbered.
-    void onChange((current: SitemapReview) => {
-      const curTiers = current.presentation?.tiers ?? []
-      const nextTiers = curTiers.map(t => t.id !== tierId ? t : {
-        ...t,
-        page_entries: (t.page_entries ?? []).map(e => e.slug !== slug ? e : { ...e, description_override: override || undefined }),
-      })
-      return {
-        ...current,
-        presentation: { ...(current.presentation ?? {}), tiers: nextTiers },
-      }
-    })
-  }
-  return (
-    <div className="space-y-3">
-      <p className="text-[11.5px] text-wm-text-muted">
-        Override the one-line description shown under each page. Blank falls back to the page's own <code className="bg-wm-bg px-1 rounded">purpose</code>.
-      </p>
-      {tiers.map(t => (
-        <div key={t.id} className="rounded border border-wm-border bg-white px-3 py-2.5">
-          <p className="text-[12px] font-semibold text-wm-text mb-1.5">
-            {t.letter ? `${t.letter}. ` : ''}{t.title}
-            {t.meta && <span className="text-[10.5px] text-wm-text-subtle font-normal ml-2">{t.meta}</span>}
-          </p>
-          {(t.page_entries ?? []).length === 0 && (
-            <p className="text-[11px] text-wm-text-subtle italic">No pages in this tier yet.</p>
-          )}
-          <div className="space-y-1.5">
-            {(t.page_entries ?? []).map(entry => {
-              const page = strategyPages.find(p => p.slug === entry.slug)
-              return (
-                <div key={entry.slug} className="flex items-start gap-2">
-                  <div className="w-40 shrink-0 pt-1">
-                    <span className={'text-[12px] ' + (entry.is_child ? 'ml-4 text-wm-text-muted' : 'font-semibold text-wm-text')}>
-                      {page?.name ?? entry.slug}
-                    </span>
-                  </div>
-                  <textarea
-                    defaultValue={entry.description_override ?? ''}
-                    placeholder={page?.purpose ?? 'One-line description shown under this page.'}
-                    disabled={disabled}
-                    rows={1}
-                    onBlur={e => { if (e.target.value !== (entry.description_override ?? '')) updateEntry(t.id, entry.slug, e.target.value) }}
-                    className="flex-1 text-[11.5px] text-wm-text bg-wm-bg-elevated border border-wm-border rounded px-2 py-1 focus:outline-none focus:border-wm-accent disabled:opacity-50"
-                  />
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
+// TierPageDescriptionsEditor was retired in the Phase C consolidation
+// (2026-07). Its per-page description_override input is now an inline
+// row inside PagesEditor — one row per page, everything about that
+// page in one place. Data path unchanged: still writes to
+// review.presentation.tiers[].page_entries[].description_override
+// (via PagesEditor.updateDescriptionOverride).
 
 function cryptoRandomIdLocal(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
