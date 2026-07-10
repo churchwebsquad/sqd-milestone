@@ -9,12 +9,14 @@
  * At least one deliverable must be selected to continue.
  */
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { ArrowLeft, ArrowRight, MessageSquare, LayoutGrid, Mail, Camera, Film, Minus, Plus } from 'lucide-react'
 import { useSrpWorkflow, withReelsCount } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import { STEP_LABELS, STEP_DESCRIPTIONS, DELIVERABLE_LABELS, DELIVERABLE_DESCRIPTIONS } from '../../../lib/srpSessions'
 import { SRP_MAX_REELS, isSrpReelDeliverable, type SrpDeliverable } from '../../../types/database'
+import { callSrpApi } from '../../../lib/srpApi'
+import { supabase } from '../../../lib/supabase'
 
 const NON_REEL_OPTIONS: { key: Exclude<SrpDeliverable, `reel${number}`>; icon: typeof MessageSquare }[] = [
   { key: 'facebook',     icon: MessageSquare },
@@ -23,12 +25,41 @@ const NON_REEL_OPTIONS: { key: Exclude<SrpDeliverable, `reel${number}`>; icon: t
   { key: 'photoRecap',   icon: Camera        },
 ]
 
+interface StartTranscriptionResponse { job_id: string }
+
 export function DeliverableSelectionStep() {
   const {
     selectedDeliverables, setSelectedDeliverables,
     visibleSteps,
     goToNextStep, goToPrevStep,
+    sessionId, videoUrl, transcriptJobId, setTranscriptJobId, transcript,
   } = useSrpWorkflow()
+
+  // Kick off transcription while the coach is confirming deliverables so it's
+  // already in-flight (or done) by the time they reach the transcript step.
+  const didFireRef = useRef(false)
+  useEffect(() => {
+    if (didFireRef.current) return
+    if (transcriptJobId || transcript.trim()) return // already running or done
+    if (!videoUrl.trim() || !sessionId) return
+
+    didFireRef.current = true
+    ;(async () => {
+      try {
+        const { data: { session: authSession } } = await supabase.auth.getSession()
+        const r = await callSrpApi<StartTranscriptionResponse>('start-transcription', {
+          session_id: sessionId,
+          source_url: videoUrl.trim(),
+          source_type: 'unknown',
+        }, { authToken: authSession?.access_token })
+        setTranscriptJobId(r.job_id)
+      } catch (e) {
+        // Non-fatal — SermonInputStep will let coach retry manually
+        console.warn('[DeliverableSelectionStep] early transcription failed:', e)
+      }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const stepNum = visibleSteps.indexOf('deliverables') + 1
 

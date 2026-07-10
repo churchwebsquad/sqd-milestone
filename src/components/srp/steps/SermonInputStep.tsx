@@ -15,7 +15,7 @@
  * Continue is gated on transcript present (≥200 chars).
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, FileText, Link as LinkIcon, AlertCircle, CheckCircle2, Search } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { useTranscriptJob } from '../../../lib/srpRealtime'
@@ -83,6 +83,19 @@ export function SermonInputStep() {
   // Only run once on mount
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clickupTaskId])
+
+  // Auto-start transcription if a video URL is available but no job is running yet.
+  // Covers the case where the coach arrives here directly (e.g. resuming a session)
+  // without having gone through DeliverableSelectionStep's early trigger.
+  const autoStartedRef = useRef(false)
+  useEffect(() => {
+    if (autoStartedRef.current) return
+    if (transcriptJobId || transcript.trim() || autoPulling) return
+    if (!videoUrl.trim()) return
+    autoStartedRef.current = true
+    void handleStartTranscription()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoUrl, autoPulling])
 
   // Sync paste draft if context transcript changes (e.g. after refresh).
   useEffect(() => {
