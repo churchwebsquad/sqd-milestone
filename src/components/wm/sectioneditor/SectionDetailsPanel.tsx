@@ -32,6 +32,7 @@ import { FeedbackCard } from '../feedback/FeedbackCard'
 import { SaveToLibraryButton } from './SaveToLibraryButton'
 import { ProjectPagesProvider } from './ProjectPagesContext'
 import { useProjectId } from './ProjectIdContext'
+import { SectionFlagsProvider } from './SectionFlagsContext'
 import { SectionStaffLinkToggle } from './SectionStaffLinkToggle'
 import { ContentModelPanel } from '../contentModel/ContentModelPanel'
 import { PageVersionDrawer } from '../PageVersionDrawer'
@@ -353,6 +354,11 @@ export function SectionDetailsPanel({
         {/* Field editors */}
         {template && !PREVIEW_LOCKED_TEMPLATE_IDS.has(template.id) && visibleFields.length > 0 && (
           <Section title="Fields" defaultOpen>
+            <SectionFlagsProvider
+              webProjectId={projectId}
+              webPageId={section.web_page_id}
+              webSectionId={section.id}
+            >
             <div key={`fields-${fieldsRemountKey}`} className="space-y-3">
               {visibleFields.map((field, idx) => {
                 if (field.kind === 'slot') {
@@ -364,6 +370,7 @@ export function SectionDetailsPanel({
                       onChange={(v) => setValue(field.key, v)}
                       snippets={snippets}
                       aiContext={aiContext}
+                      fieldPath={field.key}
                     />
                   )
                 }
@@ -390,10 +397,12 @@ export function SectionDetailsPanel({
                     snippets={snippets}
                     cardTemplates={cardTemplates}
                     aiContext={aiContext}
+                    fieldPath={field.key}
                   />
                 )
               })}
             </div>
+            </SectionFlagsProvider>
           </Section>
         )}
 

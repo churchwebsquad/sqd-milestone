@@ -18,6 +18,7 @@ import type { WMSnippetOption } from '../RichTextEditor'
 import { SnippetMenu } from './SnippetMenu'
 import { useSnippetFocus } from './SnippetFocusContext'
 import { useProjectPages } from './ProjectPagesContext'
+import { FlagButton } from './FlagButton'
 import {
   normalizeCtaValue, defaultTargetFor, validateCta, CTA_KIND_LABELS,
   isButtonShapedSlot,
@@ -45,9 +46,15 @@ interface Props {
   snippets: readonly WMSnippetOption[]
   depth?: number
   aiContext?: SlotAiContext
+  /** Dotted path from the section root to this slot's value in
+   *  web_sections.field_values. Defaults to slot.key for top-level
+   *  slots; GroupEditor passes a computed path (e.g. 'buttons.2.url')
+   *  for slots inside items. When present, enables the per-field
+   *  "Flag for partner" affordance (via SectionFlagsContext). */
+  fieldPath?: string
 }
 
-export function SlotEditor({ slot, value, onChange, snippets, depth = 0 }: Props) {
+export function SlotEditor({ slot, value, onChange, snippets, depth = 0, fieldPath }: Props) {
   // Image slots aren't editable in v4 — the count appears in the
   // panel's bottom "Contents" chip.
   if (slot.type === 'image') return null
@@ -79,6 +86,11 @@ export function SlotEditor({ slot, value, onChange, snippets, depth = 0 }: Props
           {wantsSnippetMenu && !isButton && snippets.length > 0 && (
             <SnippetMenu snippets={snippets} slotKey={slot.key} compact />
           )}
+          <FlagButton
+            fieldPath={fieldPath ?? slot.key}
+            label={slot.layer_name ?? slot.key}
+            fieldType={slot.type}
+          />
         </div>
       </div>
       <SlotInput slot={slot} value={value} onChange={onChange} snippets={snippets} depth={depth} isButton={isButton} />

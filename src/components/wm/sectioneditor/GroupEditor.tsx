@@ -30,9 +30,15 @@ interface Props {
   cardTemplates?: Record<string, WebContentTemplate>
   /** AI-suggest grounding — passed through to nested SlotEditors. */
   aiContext?: SlotAiContext
+  /** Dotted path from section root to this group's value. Defaults to
+   *  group.key when omitted (top-level). Each item's nested slots
+   *  receive `${fieldPath}.${idx}.${slot.key}` so partner flags key
+   *  correctly by item index (e.g. 'buttons.2.url'). */
+  fieldPath?: string
 }
 
-export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardTemplates, aiContext }: Props) {
+export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardTemplates, aiContext, fieldPath }: Props) {
+  const basePath = fieldPath ?? group.key
   // Palette-referenced groups (item_template_ref): the user picks
   // which Card template renders each item; items use the SELECTED
   // Card's fields as their item_schema.
@@ -45,6 +51,7 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardT
         snippets={snippets}
         depth={depth}
         cardTemplates={cardTemplates ?? {}}
+        basePath={basePath}
       />
     )
   }
@@ -202,6 +209,7 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardT
               onChange={(v) => setField(field.key, v)}
               snippets={snippets}
               aiContext={aiContext}
+              fieldPath={`${basePath}.0.${field.key}`}
             />
           ) : (
             <GroupEditor
@@ -213,6 +221,7 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardT
               depth={depth + 1}
               aiContext={aiContext}
               cardTemplates={cardTemplates}
+              fieldPath={`${basePath}.0.${field.key}`}
             />
           )
         ))}
@@ -275,6 +284,7 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardT
               item={item}
               onPatch={(patch) => setItem(idx, patch)}
               onRemove={() => removeItem(idx)}
+              basePath={basePath}
             />
           ))}
         </ul>
@@ -303,6 +313,7 @@ export function GroupEditor({ group, value, onChange, snippets, depth = 0, cardT
                 onMoveUp={() => moveItem(idx, -1)}
                 onMoveDown={() => moveItem(idx, 1)}
                 cardTemplates={cardTemplates}
+                basePath={basePath}
               />
             </li>
           ))}
@@ -341,7 +352,7 @@ function readPaletteValue(value: unknown, defaultId?: string): { templateId: str
 }
 
 function PaletteGroupEditor({
-  group, value, onChange, snippets, depth, cardTemplates,
+  group, value, onChange, snippets, depth, cardTemplates, basePath,
 }: {
   group: WebGroupDef
   value: unknown
@@ -349,6 +360,7 @@ function PaletteGroupEditor({
   snippets: readonly WMSnippetOption[]
   depth: number
   cardTemplates: Record<string, WebContentTemplate>
+  basePath?: string
 }) {
   const { templateId, items } = readPaletteValue(value, group.referenced_template_id)
   const selectedCard = templateId ? cardTemplates[templateId] : null
@@ -468,6 +480,7 @@ function PaletteGroupEditor({
                 onRemove={() => removeItem(idx)}
                 depth={depth + 1}
                 cardTemplates={cardTemplates}
+                basePath={basePath ? `${basePath}.items` : undefined}
               />
             </li>
           ))}
@@ -478,7 +491,7 @@ function PaletteGroupEditor({
 }
 
 function PaletteItemBlock({
-  idx, schema, snippets, item, onPatch, onRemove, depth, cardTemplates,
+  idx, schema, snippets, item, onPatch, onRemove, depth, cardTemplates, basePath,
 }: {
   idx: number
   schema: WebFieldDef[]
@@ -488,6 +501,7 @@ function PaletteItemBlock({
   onRemove: () => void
   depth: number
   cardTemplates: Record<string, WebContentTemplate>
+  basePath?: string
 }) {
   const [open, setOpen] = useState(idx < 2)
   return (
@@ -512,14 +526,16 @@ function PaletteItemBlock({
       </div>
       {open && (
         <div className="mt-2 space-y-2.5">
-          {schema.filter(isEditableSchemaField).map((field, i) => (
-            field.kind === 'slot' ? (
+          {schema.filter(isEditableSchemaField).map((field, i) => {
+            const childPath = basePath ? `${basePath}.${idx}.${field.key}` : undefined
+            return field.kind === 'slot' ? (
               <SlotEditor
                 key={field.key + '-' + i}
                 slot={field}
                 value={item[field.key]}
                 onChange={(v) => onPatch({ [field.key]: v })}
                 snippets={snippets}
+                fieldPath={childPath}
               />
             ) : (
               <GroupEditor
@@ -530,9 +546,10 @@ function PaletteItemBlock({
                 snippets={snippets}
                 depth={depth + 1}
                 cardTemplates={cardTemplates}
+                fieldPath={childPath}
               />
             )
-          ))}
+          })}
         </div>
       )}
     </div>
@@ -543,7 +560,7 @@ function PaletteItemBlock({
  *  is just a single editable slot (e.g. FAQ heading, list_item heading).
  *  Avoids the chevron-nested feel inside cards. */
 function FlatListRow({
-  idx, total: _total, schema, semantics, snippets, item, onPatch, onRemove,
+  idx, total: _total, schema, semantics, snippets, item, onPatch, onRemove, basePath,
 }: {
   idx: number
   total: number
@@ -553,6 +570,7 @@ function FlatListRow({
   item: Record<string, unknown>
   onPatch: (patch: Record<string, unknown>) => void
   onRemove: () => void
+  basePath?: string
 }) {
   const slot = schema.find(f => f.kind === 'slot')
   if (!slot || slot.kind !== 'slot') return null
@@ -567,6 +585,7 @@ function FlatListRow({
           value={item[slot.key]}
           onChange={(v) => onPatch({ [slot.key]: v })}
           snippets={snippets}
+          fieldPath={basePath ? `${basePath}.${idx}.${slot.key}` : undefined}
         />
       </div>
       <button
@@ -594,7 +613,7 @@ function isSingleSlotList(group: WebGroupDef): boolean {
 
 function ItemCard({
   item, idx, total, schema, semantics, snippets, depth, isOpen,
-  onToggle, onPatch, onRemove, onMoveUp, onMoveDown, cardTemplates,
+  onToggle, onPatch, onRemove, onMoveUp, onMoveDown, cardTemplates, basePath,
 }: {
   item: Record<string, unknown>
   idx: number
@@ -610,6 +629,7 @@ function ItemCard({
   onMoveUp: () => void
   onMoveDown: () => void
   cardTemplates?: Record<string, WebContentTemplate>
+  basePath?: string
 }) {
   const preview = buildItemPreview(item, schema)
   const itemLabel = `${semantics.itemLabel} ${idx + 1}`
@@ -644,6 +664,7 @@ function ItemCard({
       {isOpen && (
         <div className="mt-2 space-y-2.5">
           {visibleSchema.map((field, i) => {
+            const childPath = basePath ? `${basePath}.${idx}.${field.key}` : undefined
             if (field.kind === 'slot') {
               return (
                 <SlotEditor
@@ -653,6 +674,7 @@ function ItemCard({
                   onChange={(v) => onPatch({ [field.key]: v })}
                   snippets={snippets}
                   depth={depth}
+                  fieldPath={childPath}
                 />
               )
             }
@@ -665,6 +687,7 @@ function ItemCard({
                 snippets={snippets}
                 depth={depth}
                 cardTemplates={cardTemplates}
+                fieldPath={childPath}
               />
             )
           })}

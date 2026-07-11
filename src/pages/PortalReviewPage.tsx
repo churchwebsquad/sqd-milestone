@@ -43,8 +43,12 @@ import { loadEditorSnippets } from '../lib/webSnippets'
 import type { SnippetMap } from '../lib/webBrixiesRender'
 import type {
   WebReview, WebPage, WebSection, WebContentTemplate, WebFieldDef, WebGroupDef,
-  WebReviewComment, StrategyWebProject,
+  WebReviewComment, StrategyWebProject, WebSectionFieldFlag,
 } from '../types/database'
+import {
+  loadFlagsForProject,
+  resolveFlagByPartnerToken,
+} from '../lib/webSectionFieldFlags'
 
 // ── Local state shapes ─────────────────────────────────────────────
 
@@ -61,6 +65,10 @@ interface PortalData {
    *  Null when the partner row has no portal_token yet (rare — the
    *  page still renders without the back link). */
   partnerPortalToken: string | null
+  /** Open field-level flags Squad has requested the partner supply.
+   *  Only status='open' rows. Rendered as a page-scoped checklist
+   *  above the section preview. */
+  openFlags: WebSectionFieldFlag[]
 }
 
 interface FieldSuggestion {
@@ -242,6 +250,11 @@ export default function PortalReviewPage() {
           partnerPortalToken = (apRow as { portal_token: string | null } | null)?.portal_token ?? null
         }
 
+        // Load open flags for the project — anon RLS gates on an open
+        // partner review existing for the project, which is true by
+        // definition here since we resolved the review by token above.
+        const openFlags = await loadFlagsForProject(projectId, { status: 'open' })
+
         if (cancelled) return
         setData({
           review:        review as WebReview,
@@ -252,6 +265,7 @@ export default function PortalReviewPage() {
           cardTemplates,
           snippetMap,
           partnerPortalToken,
+          openFlags,
         })
 
         // Pick the first page by default
@@ -740,6 +754,43 @@ export default function PortalReviewPage() {
 
         {/* Preview */}
         <main className="flex-1 min-w-0">
+          {token && !isInternalReview && (
+            <PartnerFlagsChecklist
+              flags={data.openFlags}
+              activeSections={activeSections}
+              partnerToken={token}
+              partnerName={partnerName}
+              projectId={data.project.id}
+              onResolved={async () => {
+                // Refresh flags from DB after a resolution so the
+                // checklist updates immediately. We also refresh the
+                // active page's section data to reflect the just-
+                // written field value in the preview.
+                const [nextFlags, { data: freshSections }] = await Promise.all([
+                  loadFlagsForProject(data.project.id, { status: 'open' }),
+                  supabase.from('web_sections')
+                    .select('*')
+                    .in('id', activeSections.map(s => s.id))
+                    .order('sort_order'),
+                ])
+                setData(prev => {
+                  if (!prev) return prev
+                  const nextSectionsByPage = { ...prev.sectionsByPage }
+                  if (freshSections && activePage) {
+                    // Merge only the sections we just refreshed —
+                    // preserves other pages' state.
+                    const updatedMap = new Map<string, WebSection>()
+                    for (const s of freshSections as WebSection[]) updatedMap.set(s.id, s)
+                    const currentPageSections = (prev.sectionsByPage[activePage.id] ?? []).map(s =>
+                      updatedMap.get(s.id) ?? s,
+                    )
+                    nextSectionsByPage[activePage.id] = currentPageSections
+                  }
+                  return { ...prev, openFlags: nextFlags, sectionsByPage: nextSectionsByPage }
+                })
+              }}
+            />
+          )}
           {activePage ? (
             activeSections.length === 0 ? (
               <div className="text-center py-16 rounded-xl bg-white border border-lavender text-purple-gray text-[13px]">
@@ -1277,6 +1328,124 @@ function NameCaptureModal({
         </button>
       </form>
     </FullScreen>
+  )
+}
+
+/** Partner-facing checklist card: "Squad needs N things from you."
+ *  Renders when Squad has flagged one or more fields on the active
+ *  page's sections. Each row is an inline input the partner fills +
+ *  saves; the RPC patches the section's field_values directly and
+ *  closes the flag. Empty state (no open flags on the active page)
+ *  renders nothing. */
+function PartnerFlagsChecklist({
+  flags, activeSections, partnerToken, partnerName, projectId, onResolved,
+}: {
+  flags:          WebSectionFieldFlag[]
+  activeSections: WebSection[]
+  partnerToken:   string
+  partnerName:    string | null
+  projectId:      string
+  onResolved:     () => void | Promise<void>
+}) {
+  const sectionIds = new Set(activeSections.map(s => s.id))
+  const pageFlags  = flags.filter(f => sectionIds.has(f.web_section_id) && f.status === 'open')
+  if (pageFlags.length === 0) return null
+
+  return (
+    <section
+      aria-labelledby="squad-needs-heading"
+      className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 shadow-sm"
+    >
+      <div className="flex items-baseline gap-2 mb-2 flex-wrap">
+        <h2 id="squad-needs-heading" className="text-[15px] font-bold text-amber-900">
+          Squad needs {pageFlags.length} {pageFlags.length === 1 ? 'thing' : 'things'} from you
+        </h2>
+        <span className="text-[12px] text-amber-700">
+          Fill each one below — it lands directly on your page.
+        </span>
+      </div>
+      <ul className="space-y-2.5">
+        {pageFlags.map(flag => (
+          <FlagChecklistRow
+            key={flag.id}
+            flag={flag}
+            partnerToken={partnerToken}
+            partnerName={partnerName}
+            projectId={projectId}
+            onResolved={onResolved}
+          />
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function FlagChecklistRow({
+  flag, partnerToken, partnerName, onResolved,
+}: {
+  flag:         WebSectionFieldFlag
+  partnerToken: string
+  partnerName:  string | null
+  projectId:    string
+  onResolved:   () => void | Promise<void>
+}) {
+  const [value,   setValue]   = useState('')
+  const [saving,  setSaving]  = useState(false)
+  const [error,   setError]   = useState<string | null>(null)
+  const [done,    setDone]    = useState(false)
+
+  const submit = async () => {
+    const trimmed = value.trim()
+    if (!trimmed) { setError('Please enter a value first.'); return }
+    setError(null)
+    setSaving(true)
+    // The value we write is a JSON scalar (string) — matches how the
+    // existing field types store text/url/email/phone in field_values.
+    // CTA sub-fields (buttons.0.url) are also just string values.
+    const res = await resolveFlagByPartnerToken({
+      partnerToken,
+      flagId:      flag.id,
+      value:       trimmed,
+      partnerName,
+    })
+    setSaving(false)
+    if (!res.ok) { setError(res.error); return }
+    setDone(true)
+    await onResolved()
+  }
+
+  if (done) {
+    return (
+      <li className="flex items-start gap-2 text-[13px] text-emerald-800">
+        <span aria-hidden className="mt-0.5">✓</span>
+        <span className="line-through decoration-emerald-700/60">{flag.prompt}</span>
+      </li>
+    )
+  }
+
+  return (
+    <li className="rounded-md bg-white border border-amber-200 px-3 py-2.5 space-y-2">
+      <p className="text-[13px] font-semibold text-deep-plum leading-snug">{flag.prompt}</p>
+      <div className="flex items-center gap-2 flex-wrap">
+        <input
+          type="text"
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          disabled={saving}
+          placeholder="Type your answer here…"
+          className="flex-1 min-w-[16rem] text-[13px] text-deep-plum bg-cream border border-lavender rounded px-2.5 py-1.5 focus:outline-none focus:border-primary-purple disabled:opacity-50"
+        />
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={saving || !value.trim()}
+          className="inline-flex items-center gap-1 h-8 px-3 rounded-full bg-primary-purple text-white text-[12.5px] font-semibold hover:bg-purple-mid disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : 'Save →'}
+        </button>
+      </div>
+      {error && <p className="text-[11.5px] text-red-700">{error}</p>}
+    </li>
   )
 }
 

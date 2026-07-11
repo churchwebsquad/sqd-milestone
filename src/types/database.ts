@@ -2229,6 +2229,36 @@ export interface WebReviewComment {
   updated_at: string
 }
 
+/** Section-scoped flag: "Squad needs the partner to supply a value for
+ *  this specific field." Orthogonal to WebReviewComment — flags live
+ *  on the section/field and persist across review rounds. Partners
+ *  resolve via a token-gated RPC that auto-applies their input to
+ *  web_sections.field_values at the dotted field_key path. */
+export type WebSectionFieldFlagStatus = 'open' | 'applied' | 'dismissed'
+
+export interface WebSectionFieldFlag {
+  id: string
+  web_project_id: string
+  web_page_id: string
+  web_section_id: string
+  /** Dotted path into web_sections.field_values. Numeric segments
+   *  become array indices when the current node is an array
+   *  (e.g. 'buttons.0.url'). */
+  field_key: string
+  /** Staff-authored partner-facing ask shown next to the field on
+   *  the review portal ("Add your Summit registration URL"). */
+  prompt: string
+  status: WebSectionFieldFlagStatus
+  created_by_user_id: string | null
+  created_by_name: string | null
+  created_at: string
+  resolved_by_user_id: string | null
+  resolved_by_name: string | null
+  resolved_at: string | null
+  /** What the partner typed in on resolve. null on dismiss. */
+  resolved_value: unknown
+}
+
 export interface WebReviewAttachment {
   id: string
   comment_id: string
