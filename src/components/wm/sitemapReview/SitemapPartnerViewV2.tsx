@@ -1561,13 +1561,51 @@ function hydrateNavPresentation(
   if (shellChoice === 'megamenu') {
     const parents = nonHomeHeader.filter(h => (h.children ?? []).length > 0)
     megamenu_panels = parents.map(p => {
-      const derivedLinks = (p.children ?? [])
-        .filter(c => !isHomeNavItem(c))
-        .map(c => ({ label: c.label ?? c.slug ?? '' }))
+      const derivedChildren = (p.children ?? []).filter(c => !isHomeNavItem(c))
+      const derivedLinks = derivedChildren.map(c => ({ label: c.label ?? c.slug ?? '', slug: c.slug }))
       const authored = authoredMegaByLabel.get(normalize(p.label))
-      const authoredFirstCol = authored?.columns?.[0]
-      const heading = authoredFirstCol?.heading ?? p.label
       const featured = authored?.featured_tile
+
+      // Preserve authored MULTI-COLUMN layouts (e.g. Woodcreek's Next
+      // Steps → Gather / Go / Grow) when the authored columns
+      // cover every derived child. If the authored panel is missing
+      // any slug the live nav has, fall back to a single derived
+      // column so nothing goes silently invisible.
+      const authoredCols = authored?.columns ?? []
+      const derivedSlugSet = new Set(derivedChildren.map(c => (c.slug ?? '').trim()).filter(s => s.length > 0))
+      const authoredSlugSet = new Set<string>()
+      for (const col of authoredCols) {
+        for (const link of col.links ?? []) {
+          const s = (link.slug ?? '').trim()
+          if (s.length > 0) authoredSlugSet.add(s)
+        }
+      }
+      const authoredCoversDerived = derivedSlugSet.size > 0
+        && authoredCols.length > 1
+        && [...derivedSlugSet].every(s => authoredSlugSet.has(s))
+
+      if (authoredCoversDerived) {
+        // Use the authored multi-column shape as-is (headings +
+        // per-column ordering come from the strategist's authored
+        // Gather / Go / Grow layout). Rewrite each link's label
+        // against site_strategy so a page rename lands here too.
+        const labelBySlug = new Map(derivedChildren.map(c => [c.slug ?? '', c.label ?? c.slug ?? '']))
+        return {
+          triggered_by: p.label,
+          columns: authoredCols.map(col => ({
+            ...col,
+            links: (col.links ?? []).map(link => ({
+              ...link,
+              label: labelBySlug.get(link.slug ?? '') ?? link.label ?? link.slug ?? '',
+            })),
+          })),
+          ...(featured ? { featured_tile: featured } : {}),
+        }
+      }
+
+      // Fallback: single derived column.
+      const authoredFirstCol = authoredCols[0]
+      const heading = authoredFirstCol?.heading ?? p.label
       return {
         triggered_by: p.label,
         columns: [{
