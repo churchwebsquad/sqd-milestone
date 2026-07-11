@@ -460,6 +460,16 @@ interface CoworkGroupedFooter {
   primary_links?: Array<string | { slug?: string; label?: string }>
   explore?:       Array<string | { slug?: string; label?: string }>
   legal?:         Array<string | { slug?: string; label?: string }>
+  /** Optional per-column heading overrides. When absent the extractor
+   *  falls back to the built-in defaults ("Take a next step" /
+   *  "Explore" / "Fine print"). Woodcreek Round 3 wants "Next Steps"
+   *  / "Explore" / "About" — authored per-partner via this map so
+   *  the default naming can differ from the visible heading. */
+  column_headings?: {
+    primary_links?: string
+    explore?:       string
+    legal?:         string
+  }
   social?:        string[]
   parked?:        Array<{ label?: string; reason?: string }>
   contact_block?: boolean
@@ -623,10 +633,16 @@ export function extractCoworkFooterGroups(
   }
 
   if (isGroupedFooter(footer)) {
+    // Per-column heading overrides (footer.column_headings.<key>) let
+    // partners rename the visible heading without changing the
+    // canonical CoworkGroupedFooter key. Woodcreek Round 3: partner
+    // requested "Next Steps" / "Explore" / "About" instead of the
+    // default "Take a next step" / "Explore" / "Fine print".
+    const overrides = footer.column_headings ?? {}
     const columnOrder: Array<{ key: keyof CoworkGroupedFooter & string; heading: string; groupId: string }> = [
-      { key: 'primary_links', heading: 'Take a next step', groupId: 'grp-primary' },
-      { key: 'explore',       heading: 'Explore',           groupId: 'grp-explore' },
-      { key: 'legal',         heading: 'Fine print',        groupId: 'grp-legal'   },
+      { key: 'primary_links', heading: overrides.primary_links?.trim() || 'Take a next step', groupId: 'grp-primary' },
+      { key: 'explore',       heading: overrides.explore?.trim()       || 'Explore',           groupId: 'grp-explore' },
+      { key: 'legal',         heading: overrides.legal?.trim()         || 'Fine print',        groupId: 'grp-legal'   },
     ]
     for (const col of columnOrder) {
       const rawList = footer[col.key]

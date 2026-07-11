@@ -1603,14 +1603,33 @@ function hydrateNavPresentation(
         }
       }
 
-      // Fallback: single derived column.
+      // Fallback: single derived column. Layer authored per-LINK
+      // one-line descriptions on top by slug — this is how the
+      // Sonshine "Parent's Day Out (6mo–5yr, Tue/Thu)" subtitle
+      // survives even though Life at Woodcreek is a single-column
+      // panel and therefore skips the multi-column preservation
+      // branch above.
+      type AuthoredLink = { one_line_description?: string }
+      const authoredLinksBySlug = new Map<string, AuthoredLink>()
+      for (const col of authoredCols) {
+        for (const link of col.links ?? []) {
+          const s = (link.slug ?? '').trim()
+          if (s) authoredLinksBySlug.set(s, link as AuthoredLink)
+        }
+      }
+      const enrichedLinks = derivedLinks.map(l => {
+        const authoredLink = l.slug ? authoredLinksBySlug.get(l.slug) : undefined
+        return authoredLink?.one_line_description
+          ? { ...l, one_line_description: authoredLink.one_line_description }
+          : l
+      })
       const authoredFirstCol = authoredCols[0]
       const heading = authoredFirstCol?.heading ?? p.label
       return {
         triggered_by: p.label,
         columns: [{
           heading,
-          links: derivedLinks,
+          links: enrichedLinks,
           ...(authoredFirstCol?.description ? { description: authoredFirstCol.description } : {}),
         }],
         ...(featured ? { featured_tile: featured } : {}),
