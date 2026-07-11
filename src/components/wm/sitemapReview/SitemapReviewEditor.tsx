@@ -3247,7 +3247,7 @@ function ReviewActionBar({
               }}
               disabled={saving}
               className="inline-flex items-center gap-1 text-[12px] font-semibold bg-wm-accent-strong text-white rounded-full px-4 py-1.5 hover:bg-wm-accent disabled:opacity-50"
-              title="Snapshot this round's feedback and open Round N+1 as a new draft."
+              title="Click AFTER you've applied the partner's edits via cowork (see the numbered workflow below). Snapshots this round's feedback + timestamps into round history, resets to draft, bumps to Round N+1. Nothing gets deleted."
             >
               Start next round →
             </button>
@@ -3358,10 +3358,12 @@ function CoworkPromptPanel({
   churchName: string | null
 }) {
   const openReqCount = (review.partner_edit_requests ?? []).filter(r => r.status === 'open').length
-  const [copied, setCopied] = useState(false)
+  const [copied,     setCopied]     = useState(false)
+  const [promptOpen, setPromptOpen] = useState(false)
   if (review.status !== 'partner_reviewed') return null
   if (openReqCount === 0) return null
   const prompt = buildCoworkPrompt(review, projectId, churchName)
+  const nextRound = (review.round_number ?? 1) + 1
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(prompt)
@@ -3370,36 +3372,84 @@ function CoworkPromptPanel({
     } catch { /* ignore */ }
   }
   return (
-    <section className="rounded-lg border border-wm-border bg-wm-bg-elevated">
-      <details>
-        <summary className="cursor-pointer px-4 py-2.5 flex items-baseline gap-2 flex-wrap">
-          <span className="text-[10px] uppercase tracking-widest font-bold text-wm-text-subtle">
-            Apply feedback via cowork
-          </span>
-          <span className="text-[11.5px] text-wm-text-muted">
-            {openReqCount} open {openReqCount === 1 ? 'note' : 'notes'} · copy the prompt below and paste into a fresh Claude Code session
-          </span>
-        </summary>
-        <div className="px-4 pb-3 space-y-2">
-          <p className="text-[11.5px] text-wm-text-muted leading-snug">
-            Self-contained prompt: names the Supabase project, inlines the <code>revise-site-strategy</code> skill, gives the exact SQL, and lists the note IDs to resolve. A fresh session with zero project context can run it end-to-end.
-          </p>
-          <textarea
-            readOnly
-            value={prompt}
-            className="w-full text-[11.5px] font-mono text-wm-text bg-white leading-snug px-3 py-2 border border-wm-border rounded outline-none resize-y min-h-[180px]"
-          />
-          <div>
-            <button
-              type="button"
-              onClick={() => void copy()}
-              className="text-[12px] font-semibold px-3 py-1.5 rounded-full bg-wm-accent-strong text-white hover:bg-wm-accent"
-            >
-              {copied ? 'Copied ✓' : 'Copy cowork prompt'}
-            </button>
+    <section className="rounded-xl border-2 border-wm-accent bg-wm-accent/5 px-5 py-4 shadow-sm">
+      <div className="flex items-baseline gap-2 flex-wrap mb-2.5">
+        <span className="text-[11px] uppercase tracking-widest font-bold text-wm-accent-strong">
+          Apply this feedback
+        </span>
+        <span className="text-[12px] text-wm-text-muted">
+          {openReqCount} open {openReqCount === 1 ? 'note' : 'notes'} from the partner · here's the workflow
+        </span>
+      </div>
+      <ol className="space-y-2.5 text-[12.5px] text-wm-text leading-snug">
+        <li className="flex gap-2.5">
+          <span className="shrink-0 w-5 h-5 rounded-full bg-wm-accent-strong text-white text-[11px] font-bold grid place-items-center mt-0.5">1</span>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold">Copy the cowork prompt</div>
+            <p className="text-wm-text-muted">Self-contained: names the Supabase project, inlines the <code>revise-site-strategy</code> skill, gives the exact SQL, and lists the note IDs to resolve.</p>
+            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => void copy()}
+                className="text-[12px] font-semibold px-3 py-1.5 rounded-full bg-wm-accent-strong text-white hover:bg-wm-accent"
+              >
+                {copied ? 'Copied ✓' : 'Copy cowork prompt'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setPromptOpen(v => !v)}
+                className="text-[11.5px] font-semibold text-wm-accent-strong hover:underline"
+              >
+                {promptOpen ? 'Hide prompt' : 'Preview prompt'}
+              </button>
+            </div>
+            {promptOpen && (
+              <textarea
+                readOnly
+                value={prompt}
+                className="mt-2 w-full text-[11px] font-mono text-wm-text bg-white leading-snug px-3 py-2 border border-wm-border rounded outline-none resize-y min-h-[180px]"
+              />
+            )}
           </div>
-        </div>
-      </details>
+        </li>
+        <li className="flex gap-2.5">
+          <span className="shrink-0 w-5 h-5 rounded-full bg-wm-accent-strong text-white text-[11px] font-bold grid place-items-center mt-0.5">2</span>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold">Paste into a fresh Claude Code session</div>
+            <p className="text-wm-text-muted">
+              Open a new session (<code>cd ~/Documents/Claude/Projects/milestone-comms-app && claude</code>), paste. Cowork walks you through each edit with confirm-before-persist, writes to <code>site_strategy</code> via SQL, and marks each note resolved. <strong>Never hand-edit the JSON block</strong> — that's an emergency escape hatch, not the workflow.
+            </p>
+          </div>
+        </li>
+        <li className="flex gap-2.5">
+          <span className="shrink-0 w-5 h-5 rounded-full bg-wm-accent-strong text-white text-[11px] font-bold grid place-items-center mt-0.5">3</span>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold">Reload the composer</div>
+            <p className="text-wm-text-muted">Click <strong>↻ Reload</strong> in the header. The preview refreshes with the applied edits; resolved notes drop from the inbox above.</p>
+          </div>
+        </li>
+        <li className="flex gap-2.5">
+          <span className="shrink-0 w-5 h-5 rounded-full bg-wm-accent-strong text-white text-[11px] font-bold grid place-items-center mt-0.5">4</span>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold">Start Round {nextRound}</div>
+            <p className="text-wm-text-muted">Click <strong>Start next round →</strong> in the action bar at the top. Round {review.round_number ?? 1} snapshots into round history; the composer resets to draft.</p>
+          </div>
+        </li>
+        <li className="flex gap-2.5">
+          <span className="shrink-0 w-5 h-5 rounded-full bg-wm-accent-strong text-white text-[11px] font-bold grid place-items-center mt-0.5">5</span>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold">Write the "What's new in Round {nextRound}" note</div>
+            <p className="text-wm-text-muted">The field appears at the top of the composer after Step 4. One or two sentences the partner reads at the top of their portal.</p>
+          </div>
+        </li>
+        <li className="flex gap-2.5">
+          <span className="shrink-0 w-5 h-5 rounded-full bg-wm-accent-strong text-white text-[11px] font-bold grid place-items-center mt-0.5">6</span>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold">Publish for partner review</div>
+            <p className="text-wm-text-muted">Same partner link, now Round {nextRound} with the "What's new" card up top.</p>
+          </div>
+        </li>
+      </ol>
     </section>
   )
 }
