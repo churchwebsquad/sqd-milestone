@@ -321,6 +321,19 @@ export default function SitemapPartnerViewV2({
     )
     return groups.length > 0 ? groups : null
   }, [siteStrategy, nameBySlug])
+  // When the strategist has authored custom_columns on
+  // site_strategy.nav.footer, the footer becomes fully partner-defined
+  // and the built-in built-in brand block + newsletter widget + connect
+  // card get suppressed to avoid duplication (Woodcreek Round 4 was
+  // showing the church address twice, and "Subscribe" AND "Stay in the
+  // loop" side-by-side). custom_columns SHOULD carry those surfaces if
+  // the partner wants them — the built-in blocks are the fallback for
+  // partners without a custom footer authored.
+  const hasCustomFooterColumns = useMemo(() => {
+    const cc = (siteStrategy?.nav as { footer?: { custom_columns?: unknown } } | undefined)?.footer?.custom_columns
+    return Array.isArray(cc) && cc.length > 0
+  }, [siteStrategy])
+
   // Small utility strip under the copyright row, populated from
   // site_strategy.nav.footer.utility_links. Used for gated / secondary
   // links (staff-only page, etc.) that shouldn't sit inside a main
@@ -610,13 +623,20 @@ export default function SitemapPartnerViewV2({
                 .filter(g => (g.links ?? []).length > 0).length
               const linksColumnCount = groupCount > 0 ? groupCount : 1
               const columns = [
-                '1.3fr',
+                // Suppress the 1.3fr brand column when custom_columns
+                // is authored — the partner's own brand block lives
+                // inside custom_columns[kind='brand'] instead.
+                hasCustomFooterColumns ? null : '1.3fr',
                 (pres?.congregations && pres.congregations.length > 0) ? '1.1fr' : null,
                 ...Array.from({ length: linksColumnCount }, () => '1fr'),
-                review.footer_info?.newsletter_signup_url ? '1fr' : null,
+                // Suppress the newsletter column when custom_columns
+                // is authored — partner-defined subscribe column
+                // covers it (custom_columns[kind='subscribe']).
+                (!hasCustomFooterColumns && review.footer_info?.newsletter_signup_url) ? '1fr' : null,
               ].filter(Boolean).join(' ')
               return (
                 <div style={{ display: 'grid', gridTemplateColumns: columns, gap: 28 }}>
+              {!hasCustomFooterColumns && (
               <div>
                 <div className="fbrand" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                   <span style={{ width: 26, height: 26, background: '#fff', borderRadius: 6, display: 'grid', placeItems: 'center', color: '#341756', fontSize: 13 }}>◆</span>
@@ -658,6 +678,7 @@ export default function SitemapPartnerViewV2({
                   </p>
                 )}
               </div>
+              )}
 
               {pres?.congregations && pres.congregations.length > 0 && (
                 <div>
@@ -706,7 +727,7 @@ export default function SitemapPartnerViewV2({
                 )
               })()}
 
-              {footerConnectCard && (
+              {!hasCustomFooterColumns && footerConnectCard && (
                 <div>
                   <div className="mega-label" style={{ color: '#B8B0D2', marginBottom: 12 }}>{footerConnectCard.heading}</div>
                   <div style={{ fontSize: 12.5, color: '#EDE9FC', lineHeight: 1.6 }}>
@@ -722,7 +743,7 @@ export default function SitemapPartnerViewV2({
                 </div>
               )}
 
-              {review.footer_info?.newsletter_signup_url && (
+              {!hasCustomFooterColumns && review.footer_info?.newsletter_signup_url && (
                 <div>
                   <div className="mega-label" style={{ color: '#B8B0D2', marginBottom: 12 }}>Stay in the loop</div>
                   <p style={{ fontSize: 12, color: '#D8CFF3', margin: '0 0 10px', lineHeight: 1.5 }}>Weekend recaps and upcoming events.</p>
