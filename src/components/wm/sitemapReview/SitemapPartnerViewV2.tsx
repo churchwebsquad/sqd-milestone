@@ -321,6 +321,29 @@ export default function SitemapPartnerViewV2({
     )
     return groups.length > 0 ? groups : null
   }, [siteStrategy, nameBySlug])
+  // Small utility strip under the copyright row, populated from
+  // site_strategy.nav.footer.utility_links. Used for gated / secondary
+  // links (staff-only page, etc.) that shouldn't sit inside a main
+  // link column.
+  const footerUtilityLinks = useMemo(() => {
+    const nav = siteStrategy?.nav as { footer?: { utility_links?: Array<string | { slug?: string; label?: string; url?: string }> } } | undefined
+    const raw = nav?.footer?.utility_links
+    if (!Array.isArray(raw) || raw.length === 0) return null
+    const out: Array<{ label: string; url: string | null }> = []
+    for (const item of raw) {
+      if (typeof item === 'string') {
+        const label = nameBySlug.get(item) ?? titleCaseSlug(item)
+        if (label) out.push({ label, url: `/${item.replace(/^\/+/, '')}` })
+      } else if (item && typeof item === 'object') {
+        const slug = item.slug
+        const url  = item.url ?? (slug ? `/${slug.replace(/^\/+/, '')}` : null)
+        const label = item.label ?? (slug ? (nameBySlug.get(slug) ?? titleCaseSlug(slug)) : '')
+        if (label) out.push({ label, url })
+      }
+    }
+    return out.length > 0 ? out : null
+  }, [siteStrategy, nameBySlug])
+
   // Optional "connect card" surfaced from site_strategy.nav.footer.
   // Cowork writes it when the church has a "get in touch" panel worth
   // pinning to the footer (say hello / ask a question / ministry info /
@@ -709,9 +732,14 @@ export default function SitemapPartnerViewV2({
             </div>
               )
             })()}
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', marginTop: 22, paddingTop: 14, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontSize: 11, color: '#B8B0D2' }}>
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.15)', marginTop: 22, paddingTop: 14, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontSize: 11, color: '#B8B0D2', alignItems: 'baseline' }}>
               <span>© {new Date().getFullYear()} {review.footer_info?.church_name ?? church}</span>
-              <span>Privacy · Terms</span>
+              <span style={{ display: 'inline-flex', gap: 12, flexWrap: 'wrap' }}>
+                {footerUtilityLinks?.map((l, i) => (
+                  <span key={i}>{l.label}</span>
+                ))}
+                <span>Privacy · Terms</span>
+              </span>
             </div>
           </div>
         </section>
@@ -1144,6 +1172,12 @@ export default function SitemapPartnerViewV2({
  *  established: topnav with pill chips + mega-panels with columns +
  *  featured tiles. Explicitly does NOT reuse NavPresentationPanel
  *  because that component's layout is different by design. */
+function titleCaseSlug(slug: string): string {
+  return slug.split(/[-_/]/).filter(Boolean)
+    .map(s => s.charAt(0).toUpperCase() + s.slice(1))
+    .join(' ')
+}
+
 function PrimaryNavPreview({
   np, church, featured, congregations,
 }: {

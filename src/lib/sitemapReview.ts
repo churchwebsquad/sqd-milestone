@@ -470,6 +470,25 @@ interface CoworkGroupedFooter {
     explore?:       string
     legal?:         string
   }
+  /** Advanced N-column layout for partners whose footer needs more
+   *  than the 3-fixed shape above. When present, the extractor emits
+   *  ONE FooterLinkGroup per custom_columns entry, in order, and
+   *  ignores primary_links/explore/legal. Woodcreek Round 4 wants a
+   *  5-column footer (brand block + Explore + Next Steps + About +
+   *  Subscribe). Kinds:
+   *    - 'links':     ordinary link column (heading + link list)
+   *    - 'brand':     brand block (church name + address + service
+   *                    times + phone) rendered as label-only rows
+   *    - 'subscribe': newsletter signup CTA */
+  custom_columns?: Array<
+    | { kind: 'links';    heading: string; links: Array<string | { slug?: string; label?: string; url?: string }> }
+    | { kind: 'brand';    heading?: string; lines?: string[] }
+    | { kind: 'subscribe'; heading: string; description?: string; cta_label?: string; signup_url?: string }
+  >
+  /** Utility link strip rendered BELOW the main columns (used for
+   *  gated / secondary items like the staff-only page). Renders as
+   *  a small inline list under the copyright row. */
+  utility_links?: Array<string | { slug?: string; label?: string; url?: string }>
   social?:        string[]
   parked?:        Array<{ label?: string; reason?: string }>
   contact_block?: boolean
@@ -633,11 +652,60 @@ export function extractCoworkFooterGroups(
   }
 
   if (isGroupedFooter(footer)) {
-    // Per-column heading overrides (footer.column_headings.<key>) let
-    // partners rename the visible heading without changing the
-    // canonical CoworkGroupedFooter key. Woodcreek Round 3: partner
-    // requested "Next Steps" / "Explore" / "About" instead of the
-    // default "Take a next step" / "Explore" / "Fine print".
+    // Advanced path: partner-authored N-column layout via custom_columns.
+    // When present, EVERY column is emitted in order and the 3-fixed
+    // primary_links/explore/legal shape is ignored. Woodcreek Round 4
+    // wants 5 columns (brand + Explore + Next Steps + About + Subscribe);
+    // partners without custom_columns keep the 3-column shape below.
+    const custom = Array.isArray(footer.custom_columns) ? footer.custom_columns : null
+    if (custom && custom.length > 0) {
+      custom.forEach((col, i) => {
+        const groupId = `grp-custom-${i}`
+        if (col.kind === 'links') {
+          const links = (col.links ?? [])
+            .map(item => resolveEntry(typeof item === 'string' ? item : { slug: item.slug, label: item.label }))
+            .filter((l): l is { label: string; url?: string | null } => !!l)
+          // Some `links` items may carry an explicit url (e.g. absolute
+          // external). Re-map to preserve that when present.
+          const linksWithUrl = (col.links ?? []).map((item, li) => {
+            if (typeof item === 'string' || !item?.url) return links[li]
+            const label = item.label ?? (item.slug ? (nameBySlug.get(item.slug) ?? formatSlugAsTitle(item.slug)) : '')
+            return label ? { label, url: item.url } : links[li]
+          }).filter((l): l is { label: string; url?: string | null } => !!l)
+          if (linksWithUrl.length > 0) {
+            groups.push({ id: groupId, heading: col.heading, links: linksWithUrl })
+          }
+          for (const raw of (col.links ?? [])) {
+            flat.push(typeof raw === 'string' ? raw : { slug: raw.slug, label: raw.label })
+          }
+        } else if (col.kind === 'brand') {
+          const lines = Array.isArray(col.lines) ? col.lines.filter(l => l && l.trim().length > 0) : []
+          if (lines.length > 0 || col.heading) {
+            groups.push({
+              id:      groupId,
+              heading: col.heading ?? '',
+              // Emit brand lines as label-only rows (url=null). The
+              // render already treats null-url rows as plain text.
+              links:   lines.map(line => ({ label: line, url: null })),
+            })
+          }
+        } else if (col.kind === 'subscribe') {
+          const links: Array<{ label: string; url?: string | null }> = []
+          if (col.description) links.push({ label: col.description, url: null })
+          if (col.signup_url && col.cta_label) links.push({ label: col.cta_label, url: col.signup_url })
+          else if (col.signup_url)             links.push({ label: 'Subscribe', url: col.signup_url })
+          groups.push({ id: groupId, heading: col.heading, links })
+        }
+      })
+      return { groups, flat }
+    }
+
+    // Legacy 3-column shape. Per-column heading overrides
+    // (footer.column_headings.<key>) let partners rename the visible
+    // heading without changing the canonical CoworkGroupedFooter key.
+    // Woodcreek Round 3 used "Next Steps" / "Explore" / "About"
+    // instead of the default "Take a next step" / "Explore" /
+    // "Fine print" via this path; Round 4 supersedes with custom_columns.
     const overrides = footer.column_headings ?? {}
     const columnOrder: Array<{ key: keyof CoworkGroupedFooter & string; heading: string; groupId: string }> = [
       { key: 'primary_links', heading: overrides.primary_links?.trim() || 'Take a next step', groupId: 'grp-primary' },
