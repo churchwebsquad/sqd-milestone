@@ -39,11 +39,12 @@ export function TranscriptOverviewStep() {
     transcript,
     account, sermonSubmission,
     setKeyInsights,
+    autoDrafts,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
-  const [overview,    setOverview]    = useState<Overview | null>(null)
+  const [overview,    setOverview]    = useState<Overview | null>(() => autoDrafts?.overview ?? null)
   const [loading,     setLoading]     = useState(false)
   const [error,       setError]       = useState<string | null>(null)
 
@@ -73,7 +74,15 @@ export function TranscriptOverviewStep() {
     }
   }, [transcript, account, sermonSubmission, setKeyInsights])
 
-  // Auto-generate on first mount
+  // Sync keyInsights when overview pre-populated from autoDrafts
+  useEffect(() => {
+    if (autoDrafts?.overview?.keyInsights?.length) {
+      setKeyInsights(autoDrafts.overview.keyInsights)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Auto-generate on first mount only if no autoDraft overview
   useEffect(() => {
     if (!overview && !loading) void generate()
   // eslint-disable-next-line react-hooks/exhaustive-deps

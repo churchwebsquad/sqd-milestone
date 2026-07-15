@@ -141,6 +141,9 @@ interface SrpWorkflowState {
   photoRecapInput: SrpPhotoRecapInput
   setPhotoRecapInput: (i: SrpPhotoRecapInput) => void
 
+  // Auto-generated drafts (pre-populated options for each step)
+  autoDrafts: Record<string, any> | null
+
   // Imperative
   refresh: () => Promise<void>
   manualSave: () => Promise<void>
@@ -242,9 +245,13 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
   const [carouselInput, setCarouselInput] = useState<SrpCarouselInput>({})
   const [photoRecapInput, setPhotoRecapInput] = useState<SrpPhotoRecapInput>({})
 
+  // Auto-generated drafts — pre-populated options for each deliverable step
+  const [autoDrafts, setAutoDrafts] = useState<Record<string, any> | null>(null)
+
   // Refs
   const isLoadingRef = useRef<boolean>(true)   // skip autosave during load
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autoGeneratingRef = useRef<boolean>(false)
 
   // ── Convenience setters ─────────────────────────────────────────────
   const setCurrentStep = useCallback((s: SrpWorkflowStep) => setCurrentStepRaw(s), [])
@@ -262,8 +269,8 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
       if (hasReels) steps.push('clips', 'preRenderEdit', 'reelCaptions')
       if (selectedDeliverables.includes('carousel'))     steps.push('carousel')
       if (selectedDeliverables.includes('facebook'))     steps.push('facebook')
-      if (selectedDeliverables.includes('sundayInvite')) steps.push('sundayInvite')
       if (selectedDeliverables.includes('photoRecap'))   steps.push('photoRecap')
+      if (selectedDeliverables.includes('sundayInvite')) steps.push('sundayInvite')
       if (hasReels)                                      steps.push('clipProcessing')
     }
     steps.push('approved')
@@ -318,6 +325,8 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     setFacebookInput(row.facebook_input ?? {})
     setCarouselInput(row.carousel_input ?? {})
     setPhotoRecapInput(row.photo_recap_input ?? {})
+    setAutoDrafts((row as any).auto_drafts ?? null)
+    setKeyInsights(Array.isArray((row as any).key_insights) ? (row as any).key_insights : [])
 
     if (row.member != null && row.church_name) {
       // Seed minimal account object so child components have church_name/member
@@ -396,6 +405,25 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     setIsResuming(true)
     void refresh()
   }, [refresh])
+
+  // Fire auto-generation when transcript becomes ready and drafts not yet generated
+  useEffect(() => {
+    if (isResuming) return
+    if (!transcript || transcript.trim().length < 200) return
+    if (autoDrafts !== null) return            // already generated
+    if (autoGeneratingRef.current) return
+    autoGeneratingRef.current = true
+    ;(async () => {
+      try {
+        await fetch('/api/srp/auto-generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId }),
+        })
+        await refresh()
+      } catch { /* non-fatal — coach can generate manually */ }
+    })()
+  }, [isResuming, transcript, autoDrafts, sessionId, refresh])
 
   // Auto-load brand voice from church intel if not already set
   useEffect(() => {
@@ -545,6 +573,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     facebookInput, setFacebookInput,
     carouselInput, setCarouselInput,
     photoRecapInput, setPhotoRecapInput,
+    autoDrafts,
     refresh, manualSave,
   }
 

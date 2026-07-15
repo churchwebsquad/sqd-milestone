@@ -1,10 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Brain, Sparkles, CalendarDays, ArrowLeft, ExternalLink, Wand2, X, ChevronRight, User, Video, Link2 } from 'lucide-react'
+import { Brain, Sparkles, CalendarDays, ArrowLeft, ExternalLink, Wand2, X, User, Video, Link2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import SocialIntelProfileView from '../../components/intel/SocialIntelProfileView'
-import { createSession, srpPipeline, suggestDeliverablesFromText, type SrpSessionListRow } from '../../lib/srpSessions'
+import { createSession, srpPipeline, type SrpSessionListRow } from '../../lib/srpSessions'
 import { useAuth } from '../../contexts/AuthContext'
 import type React from 'react'
 
@@ -157,12 +157,11 @@ export default function SocialChurchPage() {
   const [aiUpdateError, setAiUpdateError] = useState('')
 
   const [refreshingNow, setRefreshingNow] = useState(false)
-  const [srpNoIntelWarning, setSrpNoIntelWarning] = useState(false)
 
   // ── SRP state ────────────────────────────────────────────────────────────
   const [srpSessions, setSrpSessions] = useState<SrpSessionListRow[]>([])
   const [srpLoading, setSrpLoading] = useState(false)
-  const [srpCreating, setSrpCreating] = useState(false)
+  const [, setSrpCreating] = useState(false)
   const autoCreateFiredRef = useRef(false)
   useEffect(() => { autoCreateFiredRef.current = false }, [member])
 
@@ -294,76 +293,38 @@ export default function SocialChurchPage() {
 
   useEffect(() => { if (tab === 'srp') void loadSrp() }, [tab, loadSrp])
 
-  // Auto-create a session for the most recent SRP task when the tab first loads.
-  // Runs silently in the background so the coach arrives to find "In Progress"
-  // instead of "Start SRP". Fires once per tab open; re-arms when member changes.
+  // When the SRP tab opens, auto-navigate to the most recent active session,
+  // or create a blank session and navigate. Fires once per tab open.
   useEffect(() => {
     if (tab !== 'srp') return
-    if (srpLoading || cuLoading) return
+    if (srpLoading) return
     if (autoCreateFiredRef.current) return
-    if (!srpTasks.length || !church || !user?.email) return
-
-    const mostRecent = srpTasks[0] as CuTask & { member: number }
-    if (!mostRecent.id) return // no task ID in cache — can't link session
-    if (mostRecent.status?.toLowerCase() === 'closed') return // don't auto-create for closed tasks
-
-    // Already has a session for this task — nothing to do
-    const alreadyHasSession = srpSessions.some(
-      s => (s as any).clickup_task_id === mostRecent.id
-    )
-    if (alreadyHasSession) return
+    if (!church || !user?.email || !member) return
 
     autoCreateFiredRef.current = true
 
+    const active = srpSessions.find(s => s.status !== 'completed' && s.status !== 'archived')
+    if (active) {
+      navigate(`/social/srp/${encodeURIComponent(active.session_id)}`)
+      return
+    }
+
     void (async () => {
+      setSrpCreating(true)
       try {
-        // Try to get brand voice from intel — non-blocking, proceed without if missing
-        let brandVoiceGuidelines: string | null = null
-        try {
-          const { data: intelData } = await (supabase as any)
-            .from('strategy_church_intel')
-            .select('intel_profile')
-            .eq('member', member)
-            .eq('status', 'live')
-            .maybeSingle()
-          if (intelData?.intel_profile?.brand_voice) {
-            const bv = intelData.intel_profile.brand_voice
-            const lines: string[] = []
-            if (bv.tone_summary) lines.push(`Tone: ${bv.tone_summary}`)
-            if (bv.casual_to_formal_spectrum) lines.push(`Voice spectrum: ${bv.casual_to_formal_spectrum}`)
-            brandVoiceGuidelines = lines.join('\n').trim() || null
-          }
-        } catch { /* non-fatal */ }
-
-        // Fetch video URL from ClickUp task
-        let videoUrl: string | null = null
-        try {
-          const tvRes = await fetch(`/api/clickup/task-video-url?taskId=${encodeURIComponent(mostRecent.id)}`)
-          if (tvRes.ok) {
-            const tvData = await tvRes.json()
-            if (tvData.videoUrl) videoUrl = tvData.videoUrl
-          }
-        } catch { /* non-fatal */ }
-
-        const sermonTitle = mostRecent.name.replace(/^\d+\s*-\s*/, '').trim()
-        const suggested = suggestDeliverablesFromText(mostRecent.name)
-
-        await createSession({
+        const { session_id } = await createSession({
           member: String(member),
           churchName: church.church_name ?? `Member ${member}`,
           userEmail: user.email ?? null,
-          clickupTaskId: mostRecent.id,
-          sermonTitle,
-          brandVoiceGuidelines,
-          suggestedDeliverables: suggested.length ? suggested : null,
-          videoUrl,
         })
-
-        // Reload so the task row updates to "In Progress"
-        await loadSrp()
-      } catch { /* non-fatal — coach can always click Start SRP manually */ }
+        navigate(`/social/srp/${encodeURIComponent(session_id)}`)
+      } catch (e) {
+        console.error('Failed to create SRP session:', e)
+      } finally {
+        setSrpCreating(false)
+      }
     })()
-  }, [tab, srpLoading, cuLoading, srpTasks, srpSessions, church, user, member, loadSrp])
+  }, [tab, srpLoading, srpSessions, church, user, member, navigate])
 
   // ── Social links edit ────────────────────────────────────────────────────
   const startEditLinks = () => {
@@ -959,209 +920,12 @@ export default function SocialChurchPage() {
       )}
 
       {/* ── SRP TAB ────────────────────────────────────────────────────── */}
-      {tab === 'srp' && (() => {
-        const since30 = Date.now() - 30 * 24 * 60 * 60 * 1000
-        const recentSrpTasks = (srpTasks as (CuTask & { member: number })[])
-          .concat(([] as (CuTask & { member: number })[]))
-          // Squad API often omits timestamps — if both are missing, include the task
-          // rather than silently dropping it (the cache itself is the recency filter).
-          .filter(t => {
-            const created = Number(t.date_created) || 0
-            const updated = new Date(t.updatedAt || 0).getTime() || 0
-            if (!created && !updated) return true
-            return created >= since30 || updated >= since30
-          })
-
-        // Build a map of clickup_task_id → session for quick lookup
-        const sessionByTaskId = new Map<string, SrpSessionListRow>()
-        for (const s of srpSessions) {
-          if ((s as unknown as Record<string, unknown>).clickup_task_id) {
-            sessionByTaskId.set((s as unknown as Record<string, unknown>).clickup_task_id as string, s)
-          }
-        }
-
-        const handleTaskClick = async (task: CuTask & { member: number }) => {
-          const existing = sessionByTaskId.get(task.id)
-          if (existing) {
-            // Always ensure the session starts at deliverables when launched from a task click —
-            // the user picked a specific task and shouldn't land on the Account setup screen.
-            await srpPipeline
-              .from('sessions')
-              .update({ current_step: 'deliverables' })
-              .eq('session_id', existing.session_id)
-            navigate(`/social/srp/${encodeURIComponent(existing.session_id)}`)
-            return
-          }
-          if (!church || !user?.email) return
-          setSrpCreating(true)
-          try {
-            // Fetch intel profile for brand voice
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { data: intelData } = await (supabase as any)
-              .from('strategy_church_intel')
-              .select('intel_profile')
-              .eq('member', member)
-              .eq('status', 'live')
-              .maybeSingle()
-
-            if (!intelData?.intel_profile) {
-              setSrpCreating(false)
-              setSrpNoIntelWarning(true)
-              return
-            }
-            setSrpNoIntelWarning(false)
-
-            // Format brand voice from intel profile
-            const bv = intelData.intel_profile?.brand_voice
-            const lines: string[] = []
-            if (bv?.tone_summary) lines.push(`Tone: ${bv.tone_summary}`)
-            if (bv?.casual_to_formal_spectrum) lines.push(`Voice spectrum: ${bv.casual_to_formal_spectrum}`)
-            if (Array.isArray(bv?.attributes)) {
-              for (const attr of bv.attributes) {
-                lines.push(`- ${attr.name}: ${attr.definition ?? ''}`)
-                if (attr.write_with_this_in_mind) lines.push(`  Write with this in mind: ${attr.write_with_this_in_mind}`)
-                if (Array.isArray(attr.use) && attr.use.length)     lines.push(`  Use: ${attr.use.join(', ')}`)
-                if (Array.isArray(attr.avoid) && attr.avoid.length) lines.push(`  Avoid: ${attr.avoid.join(', ')}`)
-              }
-            }
-            const brandVoiceGuidelines = lines.join('\n').trim() || null
-
-            // Fetch full task details to auto-select deliverables from description
-            let suggestedDeliverables = suggestDeliverablesFromText(task.name)
-            try {
-              const tdRes = await fetch(`/api/clickup/task-detail?taskId=${encodeURIComponent(task.id)}`)
-              if (tdRes.ok) {
-                const td = await tdRes.json()
-                const combined = `${task.name} ${td.description ?? ''}`
-                suggestedDeliverables = suggestDeliverablesFromText(combined)
-              }
-            } catch {
-              // fall back to name-only suggestions already set above
-            }
-
-            const sermonTitle = task.name.replace(/^\d+\s*-\s*/, '').trim()
-
-            // Fetch the video URL from the ClickUp task now so it's stored
-            // on the session row from the start — DeliverableSelectionStep
-            // can then kick off transcription immediately without waiting
-            // for the coach to reach the sermon step.
-            let videoUrl: string | null = null
-            try {
-              const tvRes = await fetch(`/api/clickup/task-video-url?taskId=${encodeURIComponent(task.id)}`)
-              if (tvRes.ok) {
-                const tvData = await tvRes.json()
-                if (tvData.videoUrl) videoUrl = tvData.videoUrl
-              }
-            } catch {
-              // Non-fatal — SermonInputStep will retry
-            }
-
-            const { session_id } = await createSession({
-              member: String(member),
-              churchName: church.church_name ?? `Member ${member}`,
-              userEmail: user.email,
-              clickupTaskId: task.id,
-              sermonTitle,
-              brandVoiceGuidelines,
-              suggestedDeliverables: suggestedDeliverables.length ? suggestedDeliverables : null,
-              videoUrl,
-            })
-            navigate(`/social/srp/${encodeURIComponent(session_id)}`)
-          } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to create SRP session')
-          } finally {
-            setSrpCreating(false)
-          }
-        }
-
-        return (
-          <div>
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="font-bold text-[#341756]">SRP Generator</h2>
-                <p className="text-xs text-gray-400 mt-0.5">ClickUp tasks tagged <span className="font-mono">sms-sermon-recap</span> · most recent 4</p>
-              </div>
-            </div>
-
-            {srpNoIntelWarning && (
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 mb-6 flex items-start gap-4">
-                <span className="text-amber-500 text-xl mt-0.5">⚠</span>
-                <div className="flex-1">
-                  <p className="font-semibold text-amber-800 text-sm mb-1">Intel profile required before starting an SRP</p>
-                  <p className="text-xs text-amber-700 mb-3">The SRP generator uses the church's brand voice from their Intel document to write captions and content. {churchName} doesn't have one yet — you'll need to build it first.</p>
-                  <button
-                    onClick={() => { setSrpNoIntelWarning(false); setTab('intel') }}
-                    className="text-xs bg-amber-500 text-white font-semibold px-4 py-2 rounded-full hover:opacity-90 transition-opacity"
-                  >
-                    Go build Intel profile →
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {cuLoading || srpLoading ? (
-              <div className="flex items-center gap-2 text-sm text-gray-400 py-8">
-                <div className="w-4 h-4 border-2 border-[#513DE5] border-t-transparent rounded-full animate-spin" />
-                Loading tasks…
-              </div>
-            ) : recentSrpTasks.length === 0 ? (
-              <div className="bg-white rounded-2xl border border-[#CFC9F8] p-10 text-center">
-                <Sparkles size={32} className="text-[#CFC9F8] mx-auto mb-4" />
-                <h3 className="font-bold text-[#341756] mb-2">No SRP tasks in the last 30 days</h3>
-                <p className="text-sm text-gray-500 max-w-sm mx-auto">ClickUp tasks tagged <span className="font-mono text-xs">sms-sermon-recap</span> for this church will appear here.</p>
-              </div>
-            ) : (
-              <div className="bg-white rounded-2xl border border-[#CFC9F8] overflow-hidden">
-                {/* Table header */}
-                <div className="grid grid-cols-[1fr_auto_auto_auto] gap-4 px-5 py-3 border-b border-gray-100 bg-[#F9F5F1]">
-                  <p className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider">Task</p>
-                  <p className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider w-20 text-center">Date</p>
-                  <p className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider w-24 text-center">Status</p>
-                  <p className="text-xs font-semibold text-[#513DE5] uppercase tracking-wider w-28 text-center">SRP</p>
-                </div>
-
-                {recentSrpTasks.map((task, i) => {
-                  const session = sessionByTaskId.get(task.id)
-                  const isDone = session?.status === 'completed'
-                  const hasSession = !!session
-                  const dateMs = task.date_created
-                    ? (isNaN(Number(task.date_created)) ? new Date(task.date_created).getTime() : Number(task.date_created))
-                    : 0
-                  const date = dateMs > 0 ? new Date(dateMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—'
-                  const title = task.name.replace(/^\d+\s*-\s*/, '').trim()
-
-                  return (
-                    <button
-                      key={task.id}
-                      onClick={() => handleTaskClick(task as CuTask & { member: number })}
-                      disabled={srpCreating}
-                      className={`w-full grid grid-cols-[1fr_auto_auto_auto] gap-4 px-5 py-4 text-left hover:bg-[#EDE9FC] transition-colors disabled:opacity-60 ${i < recentSrpTasks.length - 1 ? 'border-b border-gray-100' : ''}`}
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-[#341756] truncate">{title}</p>
-                        <p className="text-xs text-gray-400 mt-0.5 font-mono">#{task.id}</p>
-                      </div>
-                      <p className="text-xs text-gray-500 w-20 text-center self-center">{date}</p>
-                      <div className="w-24 flex justify-center self-center">
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 capitalize">{task.status || '—'}</span>
-                      </div>
-                      <div className="w-28 flex justify-center self-center">
-                        {isDone ? (
-                          <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-medium">Complete ✓</span>
-                        ) : hasSession ? (
-                          <span className="text-xs px-2 py-1 rounded-full bg-amber-50 text-amber-600 font-medium flex items-center gap-1">In progress <ChevronRight size={10} /></span>
-                        ) : (
-                          <span className="text-xs px-3 py-1 rounded-full bg-[#513DE5] text-white font-medium flex items-center gap-1">Start SRP <ChevronRight size={10} /></span>
-                        )}
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )
-      })()}
+      {tab === 'srp' && (
+        <div className="flex items-center justify-center gap-2 text-sm text-[#6B6180] py-12">
+          <div className="w-4 h-4 border-2 border-[#513DE5] border-t-transparent rounded-full animate-spin" />
+          Opening SRP…
+        </div>
+      )}
 
       {/* ── CALENDAR TAB ───────────────────────────────────────────────── */}
       {tab === 'calendar' && (

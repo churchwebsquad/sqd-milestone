@@ -66,11 +66,12 @@ export function PhotoRecapStep() {
     clickupTaskId,
     photoRecapCaption, setPhotoRecapCaption,
     photoRecapInput, setPhotoRecapInput,
+    autoDrafts,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
-  const [options, setOptions]       = useState<CaptionOption[]>([])
+  const [options, setOptions]       = useState<CaptionOption[]>(() => autoDrafts?.photoRecap ?? [])
   const [selectedIdx, setSelectedIdx] = useState<number | null>(photoRecapInput?.selectedIdx ?? null)
   const [tags, setTags]             = useState<string[]>([])
   const [generating, setGenerating] = useState(false)

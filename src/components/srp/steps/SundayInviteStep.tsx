@@ -62,11 +62,12 @@ export function SundayInviteStep() {
     clickupTaskId,
     sundayInvite, setSundayInvite,
     sundayInviteInput, setSundayInviteInput,
+    autoDrafts,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
-  const [options, setOptions]         = useState<InviteOption[]>([])
+  const [options, setOptions]         = useState<InviteOption[]>(() => autoDrafts?.sundayInvite ?? [])
   const [selectedIdx, setSelectedIdx] = useState<number | null>(sundayInviteInput?.selectedIdx ?? null)
   const [tags, setTags]               = useState<string[]>([])
   const [generating, setGenerating]   = useState(false)

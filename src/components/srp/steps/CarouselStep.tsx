@@ -39,11 +39,12 @@ export function CarouselStep() {
     carouselSlides, setCarouselSlides,
     carouselCaption, setCarouselCaption,
     carouselInput, setCarouselInput,
+    autoDrafts,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
-  const [options, setOptions] = useState<CarouselOption[]>([])
+  const [options, setOptions] = useState<CarouselOption[]>(() => autoDrafts?.carousel ?? [])
   const [selectedIdx, setSelectedIdx] = useState<number | null>(
     carouselInput?.selectedIdx ?? null,
   )

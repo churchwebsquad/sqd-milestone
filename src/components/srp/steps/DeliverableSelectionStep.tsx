@@ -35,6 +35,15 @@ export function DeliverableSelectionStep() {
     sessionId, videoUrl, transcriptJobId, setTranscriptJobId, transcript,
   } = useSrpWorkflow()
 
+  // Auto-select all standard deliverables for new sessions (none saved yet).
+  // Coach can toggle any off before continuing.
+  useEffect(() => {
+    if (selectedDeliverables.length === 0) {
+      setSelectedDeliverables(['facebook', 'carousel', 'sundayInvite', 'photoRecap'])
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Kick off transcription while the coach is confirming deliverables so it's
   // already in-flight (or done) by the time they reach the transcript step.
   const didFireRef = useRef(false)

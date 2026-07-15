@@ -29,11 +29,12 @@ export function FacebookStep() {
     transcript, keyInsights,
     facebookPost, setFacebookPost,
     facebookInput, setFacebookInput,
+    autoDrafts,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
-  const [options, setOptions] = useState<FacebookOption[]>([])
+  const [options, setOptions] = useState<FacebookOption[]>(() => autoDrafts?.facebook ?? [])
   const [selectedIdx, setSelectedIdx] = useState<number | null>(facebookInput?.selectedIdx ?? null)
   const [tags, setTags] = useState<string[]>([])
   const [generating, setGenerating] = useState(false)

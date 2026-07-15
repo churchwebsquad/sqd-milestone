@@ -24,7 +24,6 @@ import { CHROME_ROLES } from './rules'
 import { buildInventoryDiscoverySections, loadInventoryTopics } from './inventoryDiagnosis'
 import type { InventoryDiscoveryRow } from './inventoryDiagnosis'
 import { compareInventoryToBound } from './inventoryBoundComparator'
-import { llmEnrichPlan } from './llmVerify'
 
 export { loadProjectInputs } from './sources'
 export type { FormationInputs } from './sources'
@@ -124,6 +123,7 @@ export async function computeFormationPlan(
   // skipLlm=true or ANTHROPIC_API_KEY isn't set (graceful no-op).
   if (!opts?.skipLlm) {
     try {
+      const { llmEnrichPlan } = await import('./llmVerify')
       await llmEnrichPlan(discoverySections, inventoryDiscovery, {
         concurrency: 4,
         verify:      true,
