@@ -2632,7 +2632,7 @@ export interface SrpPipelineSession {
   church_name: string | null
   user_email: string | null
   current_step: SrpWorkflowStep | null
-  status: 'in_progress' | 'submitting' | 'completed' | 'submit_failed' | 'archived' | null
+  status: 'in_progress' | 'background' | 'submitting' | 'completed' | 'submit_failed' | 'archived' | null
   created_at: string | null
   updated_at: string | null
 

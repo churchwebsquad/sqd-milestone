@@ -199,6 +199,9 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
   // Step
   const [currentStep, setCurrentStepRaw] = useState<SrpWorkflowStep>('account')
 
+  // Session lifecycle status — preserved so autosave never downgrades 'background' to 'in_progress'
+  const [sessionStatus, setSessionStatus] = useState<string>('in_progress')
+
   // Deliverables
   const [selectedDeliverables, setSelectedDeliverables] = useState<SrpDeliverable[]>([])
 
@@ -291,6 +294,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
   const loadFromRow = useCallback((row: SrpPipelineSession) => {
     isLoadingRef.current = true
     setSessionDbId(row.id)
+    setSessionStatus(row.status ?? 'in_progress')
     setCurrentStepRaw((row.current_step as SrpWorkflowStep) ?? 'account')
     setSelectedDeliverables(
       Array.isArray(row.selected_deliverables) ? row.selected_deliverables.filter(d => typeof d === 'string') as SrpDeliverable[] : [],
@@ -485,7 +489,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
 
     return {
       current_step:           currentStep,
-      status:                 currentStep === 'approved' ? 'completed' : 'in_progress',
+      status:                 currentStep === 'approved' ? 'completed' : sessionStatus === 'background' ? 'background' : 'in_progress',
       selected_deliverables:  selectedDeliverables.length > 0 ? selectedDeliverables : null,
       video_url:              videoUrl || null,
       video_source_type:      videoSourceType,
