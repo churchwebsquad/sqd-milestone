@@ -61,29 +61,34 @@ export function suggestDeliverablesFromText(text: string): SrpDeliverable[] {
 
   // Detect reel count from patterns like:
   //   "3 reel", "reel x3", "x3 reel", "3x reel", "3 sermon video", "sermon video x3"
+  // Count occurrences of "sermon video" (each line = 1 reel)
+  const sermonVideoCount = (lower.match(/sermon\s*video/g) ?? []).length
+
   const reelMatch =
     lower.match(/(\d+)\s*x?\s*reel/) ??
     lower.match(/reel\s*x?\s*(\d+)/) ??
     lower.match(/x\s*(\d+)\s*reel/) ??
     lower.match(/(\d+)\s*x\s*reel/) ??
-    lower.match(/(\d+)\s*sermon\s*video/) ??
-    lower.match(/sermon\s*video\s*x?\s*(\d+)/) ??
     lower.match(/(\d+)\s*x?\s*video/) ??
     lower.match(/video\s*x?\s*(\d+)/)
 
-  const hasReelKeyword = lower.includes('reel') || lower.includes('sermon video') || lower.includes('sermon recap') || lower.includes('video')
+  const hasReelKeyword = lower.includes('reel') || lower.includes('sermon video') || lower.includes('sermon recap')
 
   if (hasReelKeyword) {
-    const count = reelMatch ? Math.min(parseInt(reelMatch[1], 10), SRP_MAX_REELS) : 1
+    const count = sermonVideoCount > 0
+      ? Math.min(sermonVideoCount, SRP_MAX_REELS)
+      : reelMatch
+        ? Math.min(parseInt(reelMatch[1], 10), SRP_MAX_REELS)
+        : 1
     for (let i = 1; i <= count; i++) {
       result.push(`reel${i}` as SrpDeliverable)
     }
   }
 
-  if (lower.includes('carousel'))                                result.push('carousel')
-  if (lower.includes('facebook'))                                result.push('facebook')
-  if (lower.includes('invite') || lower.includes('sunday'))      result.push('sundayInvite')
-  if (lower.includes('photo recap'))  result.push('photoRecap')
+  if (lower.includes('carousel'))                                          result.push('carousel')
+  if (lower.includes('facebook'))                                          result.push('facebook')
+  if (lower.includes('invite') || lower.includes('sunday'))                result.push('sundayInvite')
+  if (lower.includes('photo recap') || lower.includes('photo_recap'))      result.push('photoRecap')
 
   return [...new Set(result)] as SrpDeliverable[]
 }
