@@ -136,6 +136,23 @@ Deno.serve(async (req: Request) => {
 
   const supabase = createClient(supabaseUrl, serviceKey);
 
+  // Verify task status directly from ClickUp before doing anything.
+  // Only proceed for "dependent" or "received" — skip closed or any other status.
+  const ELIGIBLE_STATUSES = new Set(["dependent", "received"]);
+  try {
+    const taskCheck = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
+      headers: { Authorization: clickupToken },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (taskCheck.ok) {
+      const taskData = await taskCheck.json();
+      const taskStatus = (taskData.status?.status ?? "").toLowerCase().trim();
+      if (!ELIGIBLE_STATUSES.has(taskStatus)) {
+        return json({ skipped: true, reason: "ineligible_status", status: taskStatus });
+      }
+    }
+  } catch { /* if the check fails, proceed cautiously — pipeline-start will surface any real errors */ }
+
   // Skip if a session for this task already exists (any non-archived status)
   const { data: existing } = await supabase
     .schema("srp_pipeline")

@@ -466,7 +466,11 @@ Deno.serve(async (req: Request) => {
     const clickupT = clickupToken;
     if (!clickupT) return;
 
-    let weekTasks: Array<{ member: number; taskId: string; taskName: string }> = [];
+    // Only run the pipeline for tasks in these ClickUp statuses.
+    // Closed tasks and any other status are skipped.
+    const PIPELINE_STATUSES = new Set(["dependent", "received"]);
+
+    let weekTasks: Array<{ member: number; taskId: string; taskName: string; status?: string }> = [];
     try {
       const cacheRow = await supabase
         .from("strategy_srp_hub_cache")
@@ -511,6 +515,9 @@ Deno.serve(async (req: Request) => {
 
     for (const task of weekTasks) {
       if (alreadyHasSession.has(task.taskId)) continue;
+      // Skip tasks that aren't in the eligible statuses, or are closed
+      const taskStatus = (task.status ?? "").toLowerCase().trim();
+      if (!PIPELINE_STATUSES.has(taskStatus)) continue;
       const churchName = churchNameMap.get(task.member) ?? `Member ${task.member}`;
       fetch(`${supabaseUrl}/functions/v1/srp-pipeline-start`, {
         method: "POST",
