@@ -57,15 +57,49 @@ export function SermonInputStep() {
   const [autoPullSource, setAutoPullSource] = useState<string | null>(null)
   const [autoPullError, setAutoPullError] = useState<string | null>(null)
 
-  // Auto-pull video URL from ClickUp task on first load if we have a task ID but no URL yet
+  // On mount: if we have a clickupTaskId but no video URL or transcript yet,
+  // first check the background pipeline session (fastest path), then fall back to ClickUp.
   useEffect(() => {
-    if (!clickupTaskId || videoUrl.trim()) return
+    if (!clickupTaskId) return
+    if (videoUrl.trim() && transcript.trim()) return  // already have everything
     let cancelled = false
     setAutoPulling(true)
     setAutoPullError(null)
-    fetch(`/api/clickup/task-video-url?taskId=${encodeURIComponent(clickupTaskId)}`)
-      .then(r => r.json())
-      .then(data => {
+
+    ;(async () => {
+      // 1. Check background pipeline session — has video URL + possibly transcript
+      if (!videoUrl.trim() || !transcript.trim()) {
+        try {
+          const pRes = await fetch('/api/srp/get-background-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clickup_task_id: clickupTaskId }),
+          })
+          if (!cancelled && pRes.ok) {
+            const ps = await pRes.json()
+            if (ps.found) {
+              if (ps.video_url && !videoUrl.trim()) {
+                setVideoUrl(ps.video_url)
+                setAutoPullSource('pipeline')
+                setMode('url')
+              }
+              if (ps.transcript && !transcript.trim()) {
+                setTranscript(ps.transcript)
+                if (ps.transcript_words) setTranscriptWords(ps.transcript_words)
+                if (ps.has_timecodes != null) setHasTimecodes(ps.has_timecodes)
+              }
+              if (!cancelled) setAutoPulling(false)
+              return
+            }
+          }
+        } catch { /* fall through to ClickUp */ }
+      }
+
+      // 2. Fall back to ClickUp task custom fields / description / comments
+      if (cancelled || videoUrl.trim()) { if (!cancelled) setAutoPulling(false); return }
+      try {
+        const r = await fetch(`/api/clickup/task-video-url?taskId=${encodeURIComponent(clickupTaskId)}`)
+        const data = await r.json()
         if (cancelled) return
         if (data.videoUrl) {
           setVideoUrl(data.videoUrl)
@@ -74,11 +108,13 @@ export function SermonInputStep() {
         } else {
           setAutoPullError('No video link found in the ClickUp task. Paste one below or switch to transcript.')
         }
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) setAutoPullError('Could not check ClickUp task for a video link.')
-      })
-      .finally(() => { if (!cancelled) setAutoPulling(false) })
+      } finally {
+        if (!cancelled) setAutoPulling(false)
+      }
+    })()
+
     return () => { cancelled = true }
   // Only run once on mount
   // eslint-disable-next-line react-hooks/exhaustive-deps
