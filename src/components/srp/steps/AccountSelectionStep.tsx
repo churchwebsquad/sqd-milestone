@@ -18,7 +18,7 @@ import { ArrowRight, Loader2, Save, Building2, Sparkles, Link as LinkIcon } from
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import { RecentSubmissionsWidget } from '../RecentSubmissionsWidget'
-import { STEP_LABELS, STEP_DESCRIPTIONS, updateSession, suggestDeliverablesFromText, srpPipeline } from '../../../lib/srpSessions'
+import { STEP_LABELS, STEP_DESCRIPTIONS, updateSession, suggestDeliverablesFromText } from '../../../lib/srpSessions'
 import { saveBrandVoice } from '../../../lib/squadAccount'
 import type { SrpSermonSubmission } from '../../../types/database'
 
@@ -91,26 +91,26 @@ export function AccountSelectionStep() {
     const suggested = suggestDeliverablesFromText(detectedText)
     if (suggested.length > 0) setSelectedDeliverables(suggested)
 
-    // Check if a background pipeline session already fetched a video URL and/or transcript.
-    // If so, copy those into the current session so the Sermon step is pre-populated.
+    // Fetch background pipeline session data server-side (service role key bypasses RLS).
     let pipelineVideoUrl: string | null = null
     let pipelineTranscript: string | null = null
     let pipelineTranscriptWords: unknown[] | null = null
     if (s.clickup_task_id) {
       try {
-        const { data: pipelineSession } = await srpPipeline
-          .from('sessions')
-          .select('video_url, transcript, transcript_words, has_timecodes, pipeline_status')
-          .eq('clickup_task_id', s.clickup_task_id)
-          .eq('status', 'background')
-          .not('pipeline_status', 'is', null)
-          .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-        if (pipelineSession?.video_url) pipelineVideoUrl = pipelineSession.video_url
-        if (pipelineSession?.transcript) pipelineTranscript = pipelineSession.transcript
-        if (pipelineSession?.transcript_words) pipelineTranscriptWords = pipelineSession.transcript_words as unknown[]
-        if (pipelineSession?.has_timecodes != null) setHasTimecodes(pipelineSession.has_timecodes)
+        const res = await fetch('/api/srp/get-background-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clickup_task_id: s.clickup_task_id }),
+        })
+        if (res.ok) {
+          const ps = await res.json()
+          if (ps.found) {
+            if (ps.video_url) pipelineVideoUrl = ps.video_url
+            if (ps.transcript) pipelineTranscript = ps.transcript
+            if (ps.transcript_words) pipelineTranscriptWords = ps.transcript_words
+            if (ps.has_timecodes != null) setHasTimecodes(ps.has_timecodes)
+          }
+        }
       } catch { /* non-fatal */ }
     }
 
