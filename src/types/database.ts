@@ -2685,6 +2685,9 @@ export interface SrpPipelineSession {
   facebook_input:      SrpFacebookInput | null
   carousel_input:      SrpCarouselInput | null
   photo_recap_input:   SrpPhotoRecapInput | null
+
+  // Pre-generated drafts (overview + deliverables, written by auto-generate)
+  auto_drafts:         Record<string, unknown> | null
 }
 
 /** SquadAccount aggregates strategy_account_progress + prf_brand_guides

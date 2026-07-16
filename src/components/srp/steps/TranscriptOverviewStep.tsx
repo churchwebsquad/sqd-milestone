@@ -36,10 +36,10 @@ interface OverviewResponse {
 
 export function TranscriptOverviewStep() {
   const {
-    transcript,
+    transcript, sessionId,
     account, sermonSubmission,
     setKeyInsights,
-    autoDrafts, isResuming,
+    autoDrafts, setAutoDrafts, isResuming,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
@@ -66,13 +66,20 @@ export function TranscriptOverviewStep() {
       })
       setOverview(r.overview)
       setKeyInsights(r.overview.keyInsights ?? [])
+      // Persist to DB so navigating away and back doesn't re-trigger generation
+      const merged = { ...(autoDrafts ?? {}), overview: r.overview }
+      setAutoDrafts(merged)
+      try {
+        const { updateSession } = await import('../../../lib/srpSessions')
+        await updateSession(sessionId, { auto_drafts: merged })
+      } catch { /* non-fatal */ }
     } catch (e) {
       const err = e as Error & { errorCode?: string }
       setError(err.errorCode ? `${err.errorCode}: ${err.message}` : err.message)
     } finally {
       setLoading(false)
     }
-  }, [transcript, account, sermonSubmission, setKeyInsights])
+  }, [transcript, account, sermonSubmission, setKeyInsights, autoDrafts, setAutoDrafts, sessionId])
 
   // When autoDrafts loads (async from DB), populate overview if not already set
   useEffect(() => {

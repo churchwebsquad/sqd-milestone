@@ -143,6 +143,7 @@ interface SrpWorkflowState {
 
   // Auto-generated drafts (pre-populated options for each step)
   autoDrafts: Record<string, any> | null
+  setAutoDrafts: (drafts: Record<string, any>) => void
 
   // Imperative
   refresh: () => Promise<void>
@@ -577,7 +578,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     facebookInput, setFacebookInput,
     carouselInput, setCarouselInput,
     photoRecapInput, setPhotoRecapInput,
-    autoDrafts,
+    autoDrafts, setAutoDrafts,
     refresh, manualSave,
   }
 
