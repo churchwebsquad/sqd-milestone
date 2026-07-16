@@ -224,6 +224,7 @@ export default function SocialDashboardPage() {
   const [srpMap, setSrpMap]       = useState<Map<number, SrpMeta>>(new Map())
   const [smmMap, setSmmMap]       = useState<Map<number, string>>(new Map())
   const [sessionMap, setSessionMap] = useState<Map<number, SessionMeta>>(new Map())
+  const [pipelineMap, setPipelineMap] = useState<Map<number, SessionMeta>>(new Map())
   const [activeOnlySet, setActiveOnlySet] = useState<Set<number>>(new Set())
   const [thisWeekTasks, setThisWeekTasks] = useState<SrpMeta[]>([])
   const [loading, setLoading]     = useState(true)
@@ -275,7 +276,7 @@ export default function SocialDashboardPage() {
       setIntelMap(im)
 
       // Enrichment — read from pre-fetched cache table first, fall back to live APIs
-      const [cacheRes, smmLiveRes, sessionRes] = await Promise.allSettled([
+      const [cacheRes, smmLiveRes, sessionRes, pipelineRes] = await Promise.allSettled([
         (supabase as any)
           .from('strategy_srp_hub_cache')
           .select('cache_key, data, refreshed_at')
@@ -286,7 +287,17 @@ export default function SocialDashboardPage() {
           .from('sessions')
           .select('member, session_id, current_step, status, pipeline_status, pipeline_error, created_at, updated_at')
           .not('status', 'eq', 'archived')
+          .neq('status', 'background')
           .gte('updated_at', new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString())
+          .order('updated_at', { ascending: false })
+          .limit(500),
+        (supabase as any)
+          .schema('srp_pipeline')
+          .from('sessions')
+          .select('member, session_id, current_step, status, pipeline_status, pipeline_error, created_at, updated_at')
+          .eq('status', 'background')
+          .not('pipeline_status', 'is', null)
+          .gte('updated_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
           .order('updated_at', { ascending: false })
           .limit(500),
       ])
@@ -348,7 +359,7 @@ export default function SocialDashboardPage() {
       for (const row of smmData.assignments) smm.set(row.member, row.smm)
       setSmmMap(smm)
 
-      // Most-recent session per member (results are ordered newest-first)
+      // Most-recent active session per member (excludes background sessions)
       const sm2 = new Map<number, SessionMeta>()
       if (sessionRes.status === 'fulfilled' && sessionRes.value.data) {
         for (const row of sessionRes.value.data as SessionMeta[]) {
@@ -356,6 +367,15 @@ export default function SocialDashboardPage() {
         }
       }
       setSessionMap(sm2)
+
+      // Most-recent background pipeline session per member
+      const pm = new Map<number, SessionMeta>()
+      if (pipelineRes.status === 'fulfilled' && pipelineRes.value.data) {
+        for (const row of pipelineRes.value.data as SessionMeta[]) {
+          if (row.member && !pm.has(row.member)) pm.set(row.member, row)
+        }
+      }
+      setPipelineMap(pm)
       setActiveOnlySet(activeOnlyMembers)
     }
     void load()
@@ -757,14 +777,16 @@ export default function SocialDashboardPage() {
                         )
                       })()}
 
-                      {/* Pipeline pre-generation badge — only for background sessions */}
-                      {session?.status === 'background' && session.pipeline_status && (() => {
-                        const ps = session.pipeline_status
+                      {/* Pipeline pre-generation badge — from background sessions */}
+                      {(() => {
+                        const pipeline = pipelineMap.get(c.member)
+                        if (!pipeline?.pipeline_status) return null
+                        const ps = pipeline.pipeline_status
                         if (ps === 'transcribed') {
                           return (
                             <button
                               type="button"
-                              onClick={e => { e.stopPropagation(); navigate(`/social/srp/${session.session_id}`) }}
+                              onClick={e => { e.stopPropagation(); navigate(`/social/srp/${pipeline.session_id}`) }}
                               className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-[#F0FDF4] text-[#15803D] hover:opacity-80 transition-opacity"
                               title="Transcript ready — click to open SRP generator"
                             >
@@ -783,7 +805,7 @@ export default function SocialDashboardPage() {
                           return (
                             <span
                               className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700"
-                              title={session.pipeline_error ?? 'Pipeline error'}
+                              title={pipeline.pipeline_error ?? 'Pipeline error'}
                             >
                               <AlertTriangle size={10} /> No video found
                             </span>
