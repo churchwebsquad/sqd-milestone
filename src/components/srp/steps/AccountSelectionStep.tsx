@@ -17,7 +17,7 @@ import { ArrowRight, Loader2, Save, Building2, Sparkles, Link as LinkIcon } from
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import { RecentSubmissionsWidget } from '../RecentSubmissionsWidget'
-import { STEP_LABELS, STEP_DESCRIPTIONS, updateSession, suggestDeliverablesFromText } from '../../../lib/srpSessions'
+import { STEP_LABELS, STEP_DESCRIPTIONS, updateSession, suggestDeliverablesFromText, srpPipeline } from '../../../lib/srpSessions'
 import { saveBrandVoice } from '../../../lib/squadAccount'
 import type { SrpSermonSubmission } from '../../../types/database'
 
@@ -30,6 +30,7 @@ export function AccountSelectionStep() {
     brandVoice, setBrandVoice,
     clickupTaskId, setClickupTaskId,
     setSelectedDeliverables,
+    setVideoUrl, setTranscript, setTranscriptWords, setHasTimecodes,
     goToNextStep,
   } = useSrpWorkflow()
 
@@ -68,7 +69,6 @@ export function AccountSelectionStep() {
     if (s.clickup_task_id) setClickupTaskId(s.clickup_task_id)
 
     // Fetch the ClickUp task description to get the full deliverable list
-    // (e.g. "Sermon Video\nSermon Video\nFacebook Text Post")
     let detectedText = [s.srp_info_selection, s.sermon_title, s.series_title].filter(Boolean).join(' ')
     if (s.clickup_task_id) {
       try {
@@ -83,6 +83,36 @@ export function AccountSelectionStep() {
     const suggested = suggestDeliverablesFromText(detectedText)
     if (suggested.length > 0) setSelectedDeliverables(suggested)
 
+    // Check if a background pipeline session already fetched a video URL and/or transcript.
+    // If so, copy those into the current session so the Sermon step is pre-populated.
+    let pipelineVideoUrl: string | null = null
+    let pipelineTranscript: string | null = null
+    let pipelineTranscriptWords: unknown[] | null = null
+    if (s.clickup_task_id) {
+      try {
+        const { data: pipelineSession } = await srpPipeline
+          .from('sessions')
+          .select('video_url, transcript, transcript_words, has_timecodes, pipeline_status')
+          .eq('clickup_task_id', s.clickup_task_id)
+          .eq('status', 'background')
+          .not('pipeline_status', 'is', null)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (pipelineSession?.video_url) pipelineVideoUrl = pipelineSession.video_url
+        if (pipelineSession?.transcript) pipelineTranscript = pipelineSession.transcript
+        if (pipelineSession?.transcript_words) pipelineTranscriptWords = pipelineSession.transcript_words as unknown[]
+        if (pipelineSession?.has_timecodes != null) setHasTimecodes(pipelineSession.has_timecodes)
+      } catch { /* non-fatal */ }
+    }
+
+    const videoUrlToSave = pipelineVideoUrl ?? s.video_url ?? null
+    if (pipelineVideoUrl) setVideoUrl(pipelineVideoUrl)
+    if (pipelineTranscript) {
+      setTranscript(pipelineTranscript)
+      setTranscriptWords(pipelineTranscriptWords)
+    }
+
     try {
       await updateSession(sessionId, {
         clickup_task_id:       s.clickup_task_id,
@@ -91,13 +121,15 @@ export function AccountSelectionStep() {
         sermon_description:    s.sermon_description,
         series_title:          s.series_title,
         series_description:    s.series_description,
-        ...(s.video_url ? { video_url: s.video_url } : {}),
+        ...(videoUrlToSave ? { video_url: videoUrlToSave } : {}),
+        ...(pipelineTranscript ? { transcript: pipelineTranscript } : {}),
+        ...(pipelineTranscriptWords ? { transcript_words: pipelineTranscriptWords } : {}),
         ...(suggested.length > 0 ? { selected_deliverables: suggested } : {}),
       })
     } catch (e) {
       console.error('Failed to persist pairing:', e)
     }
-  }, [sessionId, setSermonSubmission, setClickupTaskId, setSelectedDeliverables])
+  }, [sessionId, setSermonSubmission, setClickupTaskId, setSelectedDeliverables, setVideoUrl, setTranscript, setTranscriptWords, setHasTimecodes])
 
   const stepNum = visibleSteps.indexOf('account') + 1
 
