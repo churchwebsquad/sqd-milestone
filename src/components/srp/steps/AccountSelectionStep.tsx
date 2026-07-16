@@ -67,9 +67,19 @@ export function AccountSelectionStep() {
     setSermonSubmission(s)
     if (s.clickup_task_id) setClickupTaskId(s.clickup_task_id)
 
-    // Detect deliverables from the submission's srp_info_selection field
-    // (contains lines like "Sermon Video", "Facebook Text Post", etc.)
-    const detectedText = [s.srp_info_selection, s.sermon_title, s.series_title].filter(Boolean).join(' ')
+    // Fetch the ClickUp task description to get the full deliverable list
+    // (e.g. "Sermon Video\nSermon Video\nFacebook Text Post")
+    let detectedText = [s.srp_info_selection, s.sermon_title, s.series_title].filter(Boolean).join(' ')
+    if (s.clickup_task_id) {
+      try {
+        const res = await fetch(`/api/clickup/task-detail?taskId=${encodeURIComponent(s.clickup_task_id)}`)
+        if (res.ok) {
+          const td = await res.json()
+          detectedText = `${detectedText} ${td.description ?? ''}`.trim()
+        }
+      } catch { /* fall back to submission text */ }
+    }
+
     const suggested = suggestDeliverablesFromText(detectedText)
     if (suggested.length > 0) setSelectedDeliverables(suggested)
 
