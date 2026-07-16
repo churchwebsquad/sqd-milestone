@@ -2731,9 +2731,12 @@ export interface SrpSermonSubmission {
   sermon_description:  string | null
   srp_info_selection:  string | null
   clickup_task_id:     string | null
-  video_url:           string | null
-  external_link:       string | null
-  is_this_week?:       boolean
+  video_url:            string | null
+  external_link:        string | null
+  is_this_week?:        boolean
+  pipeline_status?:     string | null
+  pipeline_error?:      string | null
+  pipeline_session_id?: string | null
 }
 
 export interface SmsPromptSetting {

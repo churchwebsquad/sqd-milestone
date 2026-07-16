@@ -46,6 +46,13 @@ interface UploadRow {
   external_link: string | null
 }
 
+interface PipelineRow {
+  clickup_task_id: string | null
+  pipeline_status: string | null
+  pipeline_error:  string | null
+  session_id:      string | null
+}
+
 const SERMON_COLUMNS =
   'account, created_at, series_title, series_description, sermon_title, sermon_description, srp_info_selection, clickup_task_id'
 
@@ -130,28 +137,46 @@ export default async function handler(req: any, res: any) {
   const taskIds = rows.map(r => r.clickup_task_id).filter((id): id is string => Boolean(id))
 
   const uploadsMap = new Map<string, UploadRow>()
+  const pipelineMap = new Map<string, PipelineRow>()
+
   if (taskIds.length > 0) {
-    const { data: uploads, error: uploadError } = await sb
-      .from('sf-srp-uploads')
-      .select('task_id, supabase_url, external_link')
-      .in('task_id', taskIds)
-    if (uploadError) {
-      // Non-fatal — the submissions still surface, just without video URLs.
-      console.warn(`[fetch-sermon-submissions] sf-srp-uploads lookup failed: ${uploadError.message}`)
+    const [uploadsResult, pipelineResult] = await Promise.all([
+      sb.from('sf-srp-uploads').select('task_id, supabase_url, external_link').in('task_id', taskIds),
+      sb.schema('srp_pipeline').from('sessions')
+        .select('clickup_task_id, pipeline_status, pipeline_error, session_id')
+        .in('clickup_task_id', taskIds)
+        .neq('status', 'archived')
+        .order('updated_at', { ascending: false }),
+    ])
+
+    if (uploadsResult.error) {
+      console.warn(`[fetch-sermon-submissions] sf-srp-uploads lookup failed: ${uploadsResult.error.message}`)
     } else {
-      for (const u of (uploads as UploadRow[] | null) ?? []) {
+      for (const u of (uploadsResult.data as UploadRow[] | null) ?? []) {
         if (u.task_id) uploadsMap.set(u.task_id, u)
+      }
+    }
+
+    if (!pipelineResult.error) {
+      for (const p of (pipelineResult.data as PipelineRow[] | null) ?? []) {
+        if (p.clickup_task_id && !pipelineMap.has(p.clickup_task_id)) {
+          pipelineMap.set(p.clickup_task_id, p)
+        }
       }
     }
   }
 
   const submissions = rows.map(row => {
-    const upload = row.clickup_task_id ? uploadsMap.get(row.clickup_task_id) : null
+    const upload   = row.clickup_task_id ? uploadsMap.get(row.clickup_task_id) : null
+    const pipeline = row.clickup_task_id ? pipelineMap.get(row.clickup_task_id) : null
     return {
       ...row,
-      video_url:     upload?.supabase_url ?? null,
-      external_link: upload?.external_link ?? null,
-      is_this_week:  new Date(row.created_at) >= weekStart,
+      video_url:       upload?.supabase_url ?? null,
+      external_link:   upload?.external_link ?? null,
+      is_this_week:    new Date(row.created_at) >= weekStart,
+      pipeline_status: pipeline?.pipeline_status ?? null,
+      pipeline_error:  pipeline?.pipeline_error ?? null,
+      pipeline_session_id: pipeline?.session_id ?? null,
     }
   })
 

@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, RefreshCw, Search, ExternalLink, Sparkles, Check } from 'lucide-react'
+import { Loader2, RefreshCw, Search, ExternalLink, Sparkles, Check, FileText, AlertTriangle } from 'lucide-react'
 import { callSrpApi } from '../../lib/srpApi'
 import type { SrpSermonSubmission } from '../../types/database'
 
@@ -177,11 +177,31 @@ export function RecentSubmissionsWidget({
                           </span>
                         </p>
                       </div>
-                      {isPaired && (
-                        <span className="shrink-0 inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-bold text-[var(--color-primary-purple)]">
-                          <Check size={11} /> paired
-                        </span>
-                      )}
+                      <div className="shrink-0 flex flex-col items-end gap-1">
+                        {isPaired && (
+                          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-bold text-[var(--color-primary-purple)]">
+                            <Check size={11} /> paired
+                          </span>
+                        )}
+                        {s.pipeline_status === 'transcribed' && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#15803D] bg-[#F0FDF4] px-1.5 py-px rounded-full">
+                            <FileText size={9} /> Transcript ready
+                          </span>
+                        )}
+                        {s.pipeline_status === 'pending' && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#513DE5] bg-[#EDE9FC] px-1.5 py-px rounded-full">
+                            <Loader2 size={9} className="animate-spin" /> Processing…
+                          </span>
+                        )}
+                        {s.pipeline_status === 'error' && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-px rounded-full"
+                            title={s.pipeline_error ?? 'Pipeline error'}
+                          >
+                            <AlertTriangle size={9} /> No video
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </button>
                 </li>

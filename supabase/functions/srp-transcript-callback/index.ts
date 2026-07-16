@@ -142,6 +142,9 @@ serve(async (req) => {
       if (transcript !== undefined) sessionUpdate.transcript = transcript;
       if (words !== undefined) sessionUpdate.transcript_words = words;
 
+      // Advance pipeline_status from 'pending' → 'transcribed' for background sessions
+      sessionUpdate.pipeline_status = "transcribed";
+
       const { error: sessionError } = await supabase
         .schema("srp_pipeline")
         .from("sessions")
@@ -154,6 +157,20 @@ serve(async (req) => {
       } else {
         console.log(`Updated session ${job.session_id} with transcript data`);
       }
+    }
+
+    // If failed, mark pipeline as errored (only affects background sessions)
+    if (status === "failed" && job.session_id) {
+      await supabase
+        .schema("srp_pipeline")
+        .from("sessions")
+        .update({
+          pipeline_status: "error",
+          pipeline_error:  error_message?.slice(0, 400) ?? "transcription_failed",
+          updated_at:      new Date().toISOString(),
+        })
+        .eq("session_id", job.session_id)
+        .eq("pipeline_status", "pending"); // only touch background sessions
     }
 
     return new Response(

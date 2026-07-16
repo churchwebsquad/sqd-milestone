@@ -458,5 +458,80 @@ Deno.serve(async (req: Request) => {
     results.smm_assignments = "skipped — NOTION_TOKEN not set";
   }
 
+  // ── Background pipeline: kick off transcript pre-generation for new tasks ────
+  // For each task in srp_tasks_this_week that doesn't already have a session,
+  // fire srp-pipeline-start (fire-and-forget). This runs after the cache
+  // upserts so the result json returns promptly.
+  const pipelineWork = (async () => {
+    const clickupT = clickupToken;
+    if (!clickupT) return;
+
+    let weekTasks: Array<{ member: number; taskId: string; taskName: string }> = [];
+    try {
+      const cacheRow = await supabase
+        .from("strategy_srp_hub_cache")
+        .select("data")
+        .eq("cache_key", "srp_tasks_this_week")
+        .maybeSingle();
+      weekTasks = (cacheRow.data?.data as typeof weekTasks)?.tasks ?? [];
+    } catch { /* non-fatal */ }
+
+    if (weekTasks.length === 0) return;
+
+    // Find which task IDs already have sessions
+    const taskIds = weekTasks.map(t => t.taskId).filter(Boolean);
+    const { data: existingSessions } = await supabase
+      .schema("srp_pipeline")
+      .from("sessions")
+      .select("clickup_task_id")
+      .in("clickup_task_id", taskIds)
+      .neq("status", "archived");
+
+    const alreadyHasSession = new Set(
+      (existingSessions ?? []).map((s: { clickup_task_id: string | null }) => s.clickup_task_id).filter(Boolean)
+    );
+
+    // Also need church names — look up from strategy_srp_hub_cache srp_tasks
+    const allTasksCache = await supabase
+      .from("strategy_srp_hub_cache")
+      .select("data")
+      .eq("cache_key", "srp_tasks")
+      .maybeSingle();
+    const churchNameMap = new Map<number, string>();
+    for (const t of (allTasksCache.data?.data as { tasks?: Array<{ member: number; taskName?: string }> } | null)?.tasks ?? []) {
+      if (t.member && !churchNameMap.has(t.member)) {
+        // taskName format: "4077 - Church Name July 5 Sermon Recap Posts"
+        const nameMatch = t.taskName?.match(/^\d+\s*-\s*(.+?)\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)/i);
+        churchNameMap.set(t.member, nameMatch?.[1]?.trim() ?? `Member ${t.member}`);
+      }
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+    for (const task of weekTasks) {
+      if (alreadyHasSession.has(task.taskId)) continue;
+      const churchName = churchNameMap.get(task.member) ?? `Member ${task.member}`;
+      fetch(`${supabaseUrl}/functions/v1/srp-pipeline-start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${serviceKey}`,
+          "apikey": serviceKey,
+        },
+        body: JSON.stringify({ taskId: task.taskId, member: task.member, churchName }),
+      }).catch(e => console.warn("[srp-hub-cache-refresh] pipeline-start failed:", e));
+    }
+
+    results.pipeline = `fired for ${weekTasks.filter(t => !alreadyHasSession.has(t.taskId)).length} new tasks`;
+  })();
+
+  try {
+    // @ts-expect-error EdgeRuntime available in Supabase Edge Functions
+    EdgeRuntime.waitUntil(pipelineWork);
+  } catch {
+    await pipelineWork;
+  }
+
   return json({ ok: true, refreshed_at: new Date().toISOString(), results });
 });

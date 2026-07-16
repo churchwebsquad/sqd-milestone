@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Search, Brain, Sparkles, ArrowUpDown, Plus, X, Loader2, Save, AlertCircle, Zap } from 'lucide-react'
+import { Search, Brain, Sparkles, ArrowUpDown, Plus, X, Loader2, Save, AlertCircle, Zap, FileText, AlertTriangle } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import type { StrategySocialProProfile } from '../../types/database'
@@ -34,6 +34,8 @@ interface SessionMeta {
   session_id: string | null
   current_step: string | null
   status: string | null
+  pipeline_status: string | null
+  pipeline_error: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -282,7 +284,7 @@ export default function SocialDashboardPage() {
         (supabase as any)
           .schema('srp_pipeline')
           .from('sessions')
-          .select('member, session_id, current_step, status, created_at, updated_at')
+          .select('member, session_id, current_step, status, pipeline_status, pipeline_error, created_at, updated_at')
           .not('status', 'eq', 'archived')
           .gte('updated_at', new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString())
           .order('updated_at', { ascending: false })
@@ -753,6 +755,41 @@ export default function SocialDashboardPage() {
                             {label}
                           </button>
                         )
+                      })()}
+
+                      {/* Pipeline pre-generation badge — only for background sessions */}
+                      {session?.status === 'background' && session.pipeline_status && (() => {
+                        const ps = session.pipeline_status
+                        if (ps === 'transcribed') {
+                          return (
+                            <button
+                              type="button"
+                              onClick={e => { e.stopPropagation(); navigate(`/social/srp/${session.session_id}`) }}
+                              className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-[#F0FDF4] text-[#15803D] hover:opacity-80 transition-opacity"
+                              title="Transcript ready — click to open SRP generator"
+                            >
+                              <FileText size={10} /> Transcript ready
+                            </button>
+                          )
+                        }
+                        if (ps === 'pending') {
+                          return (
+                            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-[#EDE9FC] text-[#513DE5]">
+                              <Loader2 size={10} className="animate-spin" /> Pre-generating…
+                            </span>
+                          )
+                        }
+                        if (ps === 'error') {
+                          return (
+                            <span
+                              className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700"
+                              title={session.pipeline_error ?? 'Pipeline error'}
+                            >
+                              <AlertTriangle size={10} /> No video found
+                            </span>
+                          )
+                        }
+                        return null
                       })()}
                     </div>
                   </div>
