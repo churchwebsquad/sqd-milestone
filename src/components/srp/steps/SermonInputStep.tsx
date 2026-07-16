@@ -21,7 +21,7 @@ import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { useTranscriptJob } from '../../../lib/srpRealtime'
 import { SrpButton } from '../_shared/SrpButton'
 import { callSrpApi } from '../../../lib/srpApi'
-import { STEP_LABELS, STEP_DESCRIPTIONS } from '../../../lib/srpSessions'
+import { STEP_LABELS, STEP_DESCRIPTIONS, updateSession } from '../../../lib/srpSessions'
 import { supabase } from '../../../lib/supabase'
 
 type Mode = 'url' | 'paste'
@@ -78,10 +78,22 @@ export function SermonInputStep() {
           if (!cancelled && pRes.ok) {
             const ps = await pRes.json()
             if (ps.found) {
+              const dbUpdate: Record<string, unknown> = {}
               if (ps.video_url && !videoUrl.trim()) {
+                dbUpdate.video_url = ps.video_url
                 setVideoUrl(ps.video_url)
                 setAutoPullSource('pipeline')
                 setMode('url')
+              }
+              if (ps.transcript && !transcript.trim()) {
+                dbUpdate.transcript = ps.transcript
+                if (ps.transcript_words) dbUpdate.transcript_words = ps.transcript_words
+                if (ps.has_timecodes != null) dbUpdate.has_timecodes = ps.has_timecodes
+              }
+              // Save to DB before updating state so auto-generate effect
+              // can read the transcript when it fires.
+              if (Object.keys(dbUpdate).length > 0) {
+                await updateSession(sessionId, dbUpdate)
               }
               if (ps.transcript && !transcript.trim()) {
                 setTranscript(ps.transcript)

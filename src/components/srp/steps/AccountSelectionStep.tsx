@@ -115,12 +115,9 @@ export function AccountSelectionStep() {
     }
 
     const videoUrlToSave = pipelineVideoUrl ?? s.video_url ?? null
-    if (pipelineVideoUrl) setVideoUrl(pipelineVideoUrl)
-    if (pipelineTranscript) {
-      setTranscript(pipelineTranscript)
-      setTranscriptWords(pipelineTranscriptWords)
-    }
 
+    // Write to DB first — auto-generate effect reads transcript from DB,
+    // so the write must complete before React state triggers that effect.
     try {
       await updateSession(sessionId, {
         clickup_task_id:       s.clickup_task_id,
@@ -136,6 +133,13 @@ export function AccountSelectionStep() {
       })
     } catch (e) {
       console.error('Failed to persist pairing:', e)
+    }
+
+    // Now update state — this triggers the auto-generate effect which reads from DB
+    if (pipelineVideoUrl) setVideoUrl(pipelineVideoUrl)
+    if (pipelineTranscript) {
+      setTranscript(pipelineTranscript)
+      setTranscriptWords(pipelineTranscriptWords)
     }
   }, [sessionId, setSermonSubmission, setClickupTaskId, setSelectedDeliverables, setVideoUrl, setTranscript, setTranscriptWords, setHasTimecodes])
 
