@@ -75,11 +75,11 @@ export function suggestDeliverablesFromText(text: string): SrpDeliverable[] {
   const hasReelKeyword = lower.includes('reel') || lower.includes('sermon video') || lower.includes('worship video') || lower.includes('sermon recap')
 
   if (hasReelKeyword) {
-    const count = sermonVideoCount > 0
-      ? Math.min(sermonVideoCount, SRP_MAX_REELS)
-      : reelMatch
-        ? Math.min(parseInt(reelMatch[1], 10), SRP_MAX_REELS)
-        : 1
+    const count = reelMatch
+      ? Math.min(parseInt(reelMatch[1], 10), SRP_MAX_REELS)
+      : sermonVideoCount > 1
+        ? Math.min(sermonVideoCount, SRP_MAX_REELS)
+        : 2 // default to 2 reels when keyword detected but no explicit count
     for (let i = 1; i <= count; i++) {
       result.push(`reel${i}` as SrpDeliverable)
     }

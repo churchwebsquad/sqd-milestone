@@ -21,11 +21,16 @@ export default async function handler(req: any, res: any) {
     })
     if (!r.ok) throw new Error(`ClickUp API error: ${r.status}`)
     const data = await r.json()
+    // Extract checklist item names as plain text so deliverable detection works
+    const checklistText = (data.checklists ?? [])
+      .flatMap((cl: any) => (cl.items ?? []).map((item: any) => item.name ?? ''))
+      .join('\n')
+
     res.setHeader('Cache-Control', 's-maxage=60')
     return res.status(200).json({
       id:          data.id,
       name:        data.name ?? '',
-      description: data.description ?? '',
+      description: [data.description ?? '', checklistText].filter(Boolean).join('\n'),
       status:      data.status?.status ?? '',
     })
   } catch (e) {
