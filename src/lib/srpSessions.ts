@@ -61,8 +61,8 @@ export function suggestDeliverablesFromText(text: string): SrpDeliverable[] {
 
   // Detect reel count from patterns like:
   //   "3 reel", "reel x3", "x3 reel", "3x reel", "3 sermon video", "sermon video x3"
-  // Count occurrences of "sermon video" (each line = 1 reel)
-  const sermonVideoCount = (lower.match(/sermon\s*video/g) ?? []).length
+  // Count occurrences of "sermon video" or "worship video" (each line = 1 reel)
+  const sermonVideoCount = (lower.match(/(?:sermon|worship)\s*video/g) ?? []).length
 
   const reelMatch =
     lower.match(/(\d+)\s*x?\s*reel/) ??
@@ -72,7 +72,7 @@ export function suggestDeliverablesFromText(text: string): SrpDeliverable[] {
     lower.match(/(\d+)\s*x?\s*video/) ??
     lower.match(/video\s*x?\s*(\d+)/)
 
-  const hasReelKeyword = lower.includes('reel') || lower.includes('sermon video') || lower.includes('sermon recap')
+  const hasReelKeyword = lower.includes('reel') || lower.includes('sermon video') || lower.includes('worship video') || lower.includes('sermon recap')
 
   if (hasReelKeyword) {
     const count = sermonVideoCount > 0
