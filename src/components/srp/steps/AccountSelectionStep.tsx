@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ArrowRight, Loader2, Save, Building2, Sparkles, Link as LinkIcon } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
@@ -22,6 +23,7 @@ import { saveBrandVoice } from '../../../lib/squadAccount'
 import type { SrpSermonSubmission } from '../../../types/database'
 
 export function AccountSelectionStep() {
+  const navigate = useNavigate()
   const {
     sessionId,
     account,
@@ -65,6 +67,12 @@ export function AccountSelectionStep() {
   }, [account?.member, voiceDraft, setBrandVoice])
 
   const handlePair = useCallback(async (s: SrpSermonSubmission) => {
+    // If a real coach session already exists for this task, navigate there directly.
+    if (s.pipeline_session_id && s.session_status && s.session_status !== 'background') {
+      navigate(`/social/srp/${encodeURIComponent(s.pipeline_session_id)}`)
+      return
+    }
+
     setSermonSubmission(s)
     if (s.clickup_task_id) setClickupTaskId(s.clickup_task_id)
 

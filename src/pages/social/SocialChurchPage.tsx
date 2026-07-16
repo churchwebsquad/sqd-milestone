@@ -303,7 +303,7 @@ export default function SocialChurchPage() {
 
     autoCreateFiredRef.current = true
 
-    const active = srpSessions.find(s => s.status !== 'completed' && s.status !== 'archived')
+    const active = srpSessions.find(s => s.status === 'in_progress')
     if (active) {
       navigate(`/social/srp/${encodeURIComponent(active.session_id)}`)
       return

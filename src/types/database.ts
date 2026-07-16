@@ -2737,6 +2737,7 @@ export interface SrpSermonSubmission {
   pipeline_status?:     string | null
   pipeline_error?:      string | null
   pipeline_session_id?: string | null
+  session_status?:      string | null
 }
 
 export interface SmsPromptSetting {

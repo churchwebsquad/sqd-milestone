@@ -51,6 +51,7 @@ interface PipelineRow {
   pipeline_status: string | null
   pipeline_error:  string | null
   session_id:      string | null
+  status:          string | null
 }
 
 const SERMON_COLUMNS =
@@ -143,7 +144,7 @@ export default async function handler(req: any, res: any) {
     const [uploadsResult, pipelineResult] = await Promise.all([
       sb.from('sf-srp-uploads').select('task_id, supabase_url, external_link').in('task_id', taskIds),
       sb.schema('srp_pipeline').from('sessions')
-        .select('clickup_task_id, pipeline_status, pipeline_error, session_id')
+        .select('clickup_task_id, pipeline_status, pipeline_error, session_id, status')
         .in('clickup_task_id', taskIds)
         .neq('status', 'archived')
         .order('updated_at', { ascending: false }),
@@ -159,7 +160,10 @@ export default async function handler(req: any, res: any) {
 
     if (!pipelineResult.error) {
       for (const p of (pipelineResult.data as PipelineRow[] | null) ?? []) {
-        if (p.clickup_task_id && !pipelineMap.has(p.clickup_task_id)) {
+        if (!p.clickup_task_id) continue
+        const existing = pipelineMap.get(p.clickup_task_id)
+        // Prefer in_progress coach sessions over background pipeline sessions
+        if (!existing || (existing.status === 'background' && p.status !== 'background')) {
           pipelineMap.set(p.clickup_task_id, p)
         }
       }
@@ -174,9 +178,10 @@ export default async function handler(req: any, res: any) {
       video_url:       upload?.supabase_url ?? null,
       external_link:   upload?.external_link ?? null,
       is_this_week:    new Date(row.created_at) >= weekStart,
-      pipeline_status: pipeline?.pipeline_status ?? null,
-      pipeline_error:  pipeline?.pipeline_error ?? null,
+      pipeline_status:     pipeline?.pipeline_status ?? null,
+      pipeline_error:      pipeline?.pipeline_error ?? null,
       pipeline_session_id: pipeline?.session_id ?? null,
+      session_status:      pipeline?.status ?? null,
     }
   })
 
