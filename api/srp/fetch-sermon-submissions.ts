@@ -120,9 +120,9 @@ export default async function handler(req: any, res: any) {
     .select(SERMON_COLUMNS)
     .order('created_at', { ascending: false })
     .not('srp_info_selection', 'is', null)
-    .gte('created_at', weekStartIso)
-    .limit(200)
+    .limit(memberFilter ? 6 : 200)
   if (memberFilter) weeklyQuery = weeklyQuery.eq('account', memberFilter)
+  else weeklyQuery = weeklyQuery.gte('created_at', weekStartIso)
   const { data: submissionData, error: subError } = await weeklyQuery
   if (subError) return res.status(500).json({ error: `Weekly fetch failed: ${subError.message}` })
 
