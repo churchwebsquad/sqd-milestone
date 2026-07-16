@@ -156,6 +156,27 @@ serve(async (req) => {
         // Non-fatal — the job update already succeeded
       } else {
         console.log(`Updated session ${job.session_id} with transcript data`);
+
+        // Pre-generate overview + drafts on the background session so they're
+        // ready before a coach ever opens it. Fire-and-forget.
+        const appUrl = Deno.env.get("APP_URL") ?? "";
+        if (appUrl) {
+          const pregenWork = fetch(`${appUrl}/api/srp/auto-generate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: job.session_id }),
+          }).then(r => {
+            if (!r.ok) console.error(`[srp-transcript-callback] auto-generate returned ${r.status}`);
+            else console.log(`[srp-transcript-callback] auto-generate started for ${job.session_id}`);
+          }).catch(e => console.error("[srp-transcript-callback] auto-generate failed:", e));
+
+          try {
+            // @ts-expect-error EdgeRuntime available in Supabase Edge Functions
+            EdgeRuntime.waitUntil(pregenWork);
+          } catch {
+            await pregenWork;
+          }
+        }
       }
     }
 

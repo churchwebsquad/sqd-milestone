@@ -26,7 +26,7 @@ export default async function handler(req: any, res: any) {
   const { data, error } = await sb
     .schema('srp_pipeline')
     .from('sessions')
-    .select('video_url, transcript, transcript_words, has_timecodes, pipeline_status')
+    .select('video_url, transcript, transcript_words, has_timecodes, pipeline_status, auto_drafts')
     .eq('clickup_task_id', clickupTaskId)
     .eq('status', 'background')
     .not('pipeline_status', 'is', null)
@@ -44,5 +44,6 @@ export default async function handler(req: any, res: any) {
     transcript_words: data.transcript_words ?? null,
     has_timecodes:    data.has_timecodes ?? true,
     pipeline_status:  data.pipeline_status ?? null,
+    auto_drafts:      data.auto_drafts ?? null,
   })
 }

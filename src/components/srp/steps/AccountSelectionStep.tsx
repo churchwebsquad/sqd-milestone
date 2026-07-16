@@ -95,6 +95,7 @@ export function AccountSelectionStep() {
     let pipelineVideoUrl: string | null = null
     let pipelineTranscript: string | null = null
     let pipelineTranscriptWords: unknown[] | null = null
+    let pipelineAutoDrafts: Record<string, unknown> | null = null
     if (s.clickup_task_id) {
       try {
         const res = await fetch('/api/srp/get-background-session', {
@@ -108,6 +109,7 @@ export function AccountSelectionStep() {
             if (ps.video_url) pipelineVideoUrl = ps.video_url
             if (ps.transcript) pipelineTranscript = ps.transcript
             if (ps.transcript_words) pipelineTranscriptWords = ps.transcript_words
+            if (ps.auto_drafts) pipelineAutoDrafts = ps.auto_drafts
             if (ps.has_timecodes != null) setHasTimecodes(ps.has_timecodes)
           }
         }
@@ -116,8 +118,8 @@ export function AccountSelectionStep() {
 
     const videoUrlToSave = pipelineVideoUrl ?? s.video_url ?? null
 
-    // Write to DB first — auto-generate effect reads transcript from DB,
-    // so the write must complete before React state triggers that effect.
+    // Write to DB first — auto-generate effect reads transcript + auto_drafts
+    // from DB, so the write must complete before React state triggers that effect.
     try {
       await updateSession(sessionId, {
         clickup_task_id:       s.clickup_task_id,
@@ -129,13 +131,14 @@ export function AccountSelectionStep() {
         ...(videoUrlToSave ? { video_url: videoUrlToSave } : {}),
         ...(pipelineTranscript ? { transcript: pipelineTranscript } : {}),
         ...(pipelineTranscriptWords ? { transcript_words: pipelineTranscriptWords } : {}),
+        ...(pipelineAutoDrafts ? { auto_drafts: pipelineAutoDrafts } : {}),
         ...(suggested.length > 0 ? { selected_deliverables: suggested } : {}),
       })
     } catch (e) {
       console.error('Failed to persist pairing:', e)
     }
 
-    // Now update state — this triggers the auto-generate effect which reads from DB
+    // Now update state — auto_drafts in DB prevents auto-generate from re-running
     if (pipelineVideoUrl) setVideoUrl(pipelineVideoUrl)
     if (pipelineTranscript) {
       setTranscript(pipelineTranscript)

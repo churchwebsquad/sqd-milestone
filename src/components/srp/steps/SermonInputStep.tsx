@@ -92,6 +92,7 @@ export function SermonInputStep() {
               }
               // Save to DB before updating state so auto-generate effect
               // can read the transcript when it fires.
+              if (ps.auto_drafts) dbUpdate.auto_drafts = ps.auto_drafts
               if (Object.keys(dbUpdate).length > 0) {
                 await updateSession(sessionId, dbUpdate)
               }
