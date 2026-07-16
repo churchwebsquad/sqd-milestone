@@ -39,7 +39,7 @@ export function TranscriptOverviewStep() {
     transcript,
     account, sermonSubmission,
     setKeyInsights,
-    autoDrafts,
+    autoDrafts, isResuming,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
@@ -74,19 +74,23 @@ export function TranscriptOverviewStep() {
     }
   }, [transcript, account, sermonSubmission, setKeyInsights])
 
-  // Sync keyInsights when overview pre-populated from autoDrafts
+  // When autoDrafts loads (async from DB), populate overview if not already set
   useEffect(() => {
-    if (autoDrafts?.overview?.keyInsights?.length) {
-      setKeyInsights(autoDrafts.overview.keyInsights)
+    if (autoDrafts?.overview) {
+      setOverview(prev => prev ?? autoDrafts.overview)
+      if (autoDrafts.overview.keyInsights?.length) {
+        setKeyInsights(autoDrafts.overview.keyInsights)
+      }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [autoDrafts, setKeyInsights])
 
-  // Auto-generate on first mount only if no autoDraft overview
+  // Auto-generate only after session has loaded and there's no pre-built overview
   useEffect(() => {
+    if (isResuming) return
+    if (autoDrafts?.overview) return
     if (!overview && !loading) void generate()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [isResuming, autoDrafts])
 
   return (
     <div className="space-y-6">
