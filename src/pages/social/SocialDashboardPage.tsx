@@ -796,9 +796,14 @@ export default function SocialDashboardPage() {
                         }
                         if (ps === 'pending') {
                           return (
-                            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-[#EDE9FC] text-[#513DE5]">
+                            <button
+                              type="button"
+                              onClick={e => { e.stopPropagation(); navigate(`/social/srp/${pipeline.session_id}`) }}
+                              className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium bg-[#EDE9FC] text-[#513DE5] hover:opacity-80 transition-opacity"
+                              title="Transcript in progress — click to open session"
+                            >
                               <Loader2 size={10} className="animate-spin" /> Pre-generating…
-                            </span>
+                            </button>
                           )
                         }
                         if (ps === 'error') {
