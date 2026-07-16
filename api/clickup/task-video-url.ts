@@ -79,6 +79,26 @@ export default async function handler(req: any, res: any) {
       const comments: any[] = commentsData.comments ?? []
       for (const comment of comments) {
         const text = comment.comment_text ?? ''
+
+        // Look for the upload portal comment pattern:
+        // "🎥 Click here to view the uploaded video file: <link>"
+        // The URL lives in the rich-text blocks as an href attribute.
+        if (text.includes('uploaded video file') || text.includes('🎥')) {
+          const blocks: any[] = comment.comment ?? []
+          for (const block of blocks) {
+            const attrs = block.attributes ?? {}
+            if (attrs.link) { videoUrl = attrs.link; break }
+            // Also check nested items
+            const nested: any[] = block.items ?? []
+            for (const item of nested) {
+              if ((item.attributes ?? {}).link) { videoUrl = item.attributes.link; break }
+            }
+            if (videoUrl) break
+          }
+          if (videoUrl) { source = 'upload_portal'; break }
+        }
+
+        // Fallback: scan plain text for video URLs
         videoUrl = extractVideoUrl(text)
         if (videoUrl) { source = 'comment'; break }
       }
