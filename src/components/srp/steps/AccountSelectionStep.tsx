@@ -17,7 +17,7 @@ import { ArrowRight, Loader2, Save, Building2, Sparkles, Link as LinkIcon } from
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import { RecentSubmissionsWidget } from '../RecentSubmissionsWidget'
-import { STEP_LABELS, STEP_DESCRIPTIONS, updateSession } from '../../../lib/srpSessions'
+import { STEP_LABELS, STEP_DESCRIPTIONS, updateSession, suggestDeliverablesFromText } from '../../../lib/srpSessions'
 import { saveBrandVoice } from '../../../lib/squadAccount'
 import type { SrpSermonSubmission } from '../../../types/database'
 
@@ -29,6 +29,7 @@ export function AccountSelectionStep() {
     setCurrentStep, visibleSteps,
     brandVoice, setBrandVoice,
     clickupTaskId, setClickupTaskId,
+    setSelectedDeliverables,
     goToNextStep,
   } = useSrpWorkflow()
 
@@ -65,23 +66,28 @@ export function AccountSelectionStep() {
   const handlePair = useCallback(async (s: SrpSermonSubmission) => {
     setSermonSubmission(s)
     if (s.clickup_task_id) setClickupTaskId(s.clickup_task_id)
-    // Persist immediately so a navigation away preserves the pairing
-    // even before the 1s autosave fires.
+
+    // Detect deliverables from the submission's srp_info_selection field
+    // (contains lines like "Sermon Video", "Facebook Text Post", etc.)
+    const detectedText = [s.srp_info_selection, s.sermon_title, s.series_title].filter(Boolean).join(' ')
+    const suggested = suggestDeliverablesFromText(detectedText)
+    if (suggested.length > 0) setSelectedDeliverables(suggested)
+
     try {
       await updateSession(sessionId, {
-        clickup_task_id:    s.clickup_task_id,
-        clickup_url:        s.clickup_task_id ? `https://app.clickup.com/t/${s.clickup_task_id}` : null,
-        sermon_title:       s.sermon_title,
-        sermon_description: s.sermon_description,
-        series_title:       s.series_title,
-        series_description: s.series_description,
-        // Seed the video URL if the submission carries one; coach can overwrite on Step 3.
+        clickup_task_id:       s.clickup_task_id,
+        clickup_url:           s.clickup_task_id ? `https://app.clickup.com/t/${s.clickup_task_id}` : null,
+        sermon_title:          s.sermon_title,
+        sermon_description:    s.sermon_description,
+        series_title:          s.series_title,
+        series_description:    s.series_description,
         ...(s.video_url ? { video_url: s.video_url } : {}),
+        ...(suggested.length > 0 ? { selected_deliverables: suggested } : {}),
       })
     } catch (e) {
       console.error('Failed to persist pairing:', e)
     }
-  }, [sessionId, setSermonSubmission, setClickupTaskId])
+  }, [sessionId, setSermonSubmission, setClickupTaskId, setSelectedDeliverables])
 
   const stepNum = visibleSteps.indexOf('account') + 1
 
