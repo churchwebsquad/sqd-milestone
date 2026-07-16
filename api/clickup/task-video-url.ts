@@ -52,9 +52,26 @@ export default async function handler(req: any, res: any) {
     const task = await taskRes.json()
     const description = task.description ?? ''
 
-    // Check description first
-    let videoUrl = extractVideoUrl(description)
-    let source = 'description'
+    // Check custom fields first (e.g. "Publicly Shared Link")
+    let videoUrl: string | null = null
+    let source = 'custom_field'
+    const customFields: any[] = task.custom_fields ?? []
+    for (const field of customFields) {
+      const name = (field.name ?? '').toLowerCase()
+      if (name.includes('publicly') || name.includes('shared link') || name.includes('video url') || name.includes('video link')) {
+        const val = field.value ?? ''
+        if (typeof val === 'string' && val.trim()) {
+          videoUrl = val.trim()
+          break
+        }
+      }
+    }
+
+    // Then check description
+    if (!videoUrl) {
+      videoUrl = extractVideoUrl(description)
+      source = 'description'
+    }
 
     // Then check comments if not found
     if (!videoUrl && commentsRes.ok) {
