@@ -67,9 +67,11 @@ export function suggestDeliverablesFromText(text: string): SrpDeliverable[] {
     lower.match(/x\s*(\d+)\s*reel/) ??
     lower.match(/(\d+)\s*x\s*reel/) ??
     lower.match(/(\d+)\s*sermon\s*video/) ??
-    lower.match(/sermon\s*video\s*x?\s*(\d+)/)
+    lower.match(/sermon\s*video\s*x?\s*(\d+)/) ??
+    lower.match(/(\d+)\s*x?\s*video/) ??
+    lower.match(/video\s*x?\s*(\d+)/)
 
-  const hasReelKeyword = lower.includes('reel') || lower.includes('sermon video') || lower.includes('sermon recap')
+  const hasReelKeyword = lower.includes('reel') || lower.includes('sermon video') || lower.includes('sermon recap') || lower.includes('video')
 
   if (hasReelKeyword) {
     const count = reelMatch ? Math.min(parseInt(reelMatch[1], 10), SRP_MAX_REELS) : 1
