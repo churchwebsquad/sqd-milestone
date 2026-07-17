@@ -160,7 +160,7 @@ export default function SocialChurchPage() {
 
   // ── SRP state ────────────────────────────────────────────────────────────
   const [srpSessions, setSrpSessions] = useState<SrpSessionListRow[]>([])
-  const [srpLoading, setSrpLoading] = useState(false)
+  const [srpLoading, setSrpLoading] = useState(true)
   const [, setSrpCreating] = useState(false)
   const autoCreateFiredRef = useRef(false)
   useEffect(() => { autoCreateFiredRef.current = false }, [member])
