@@ -640,6 +640,8 @@ export function ClipSelectionStep() {
         <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
           {clipSuggestions.length} suggestions — ranked by social potential · pick {reelCount}
           {clipSelections.length > 0 && ` · ${clipSelections.length} selected`}
+          {/* DEBUG — remove once multiselect verified */}
+          {' '}· deliverables: {selectedDeliverables.join(',')}
         </p>
       )}
 
