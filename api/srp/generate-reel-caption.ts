@@ -22,6 +22,7 @@ import {
   BRAND_VOICE_TAGS_BLOCK,
   GatewayRateLimitError,
   GatewayTransientError,
+  MODEL_TRANSCRIPTION,
 } from './_lib/aiGateway.js'
 
 export const maxDuration = 45
@@ -105,6 +106,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     const result = await callGateway<ReelCaptionArgs>({
+      model:  MODEL_TRANSCRIPTION, // gemini-2.5-flash — reliable tool_choice, matches original app
       system: systemPrompt,
       user:   userPrompt,
       toolName: 'return_caption',
@@ -125,7 +127,6 @@ export default async function handler(req: any, res: any) {
         required: ['caption', 'brandVoiceTags'],
         additionalProperties: false,
       },
-      maxTokens: 600,
     })
     return res.status(200).json({
       caption:        result.args.caption,

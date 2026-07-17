@@ -96,20 +96,32 @@ export class GatewayContractError extends Error {
   constructor(message: string) { super(message); this.name = 'GatewayContractError' }
 }
 
-/** Extract a JSON object from a text response (handles ```json ... ``` blocks and bare JSON). */
+/** Extract a JSON object from a text response (handles bare JSON, ```json blocks, and embedded objects). */
 function extractJsonFromText(text: string): Record<string, any> | null {
-  // Strip markdown code fences
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/)
-  const candidate = fenced ? fenced[1].trim() : text.trim()
-  // Find the outermost { ... }
-  const start = candidate.indexOf('{')
-  const end   = candidate.lastIndexOf('}')
-  if (start === -1 || end === -1) return null
-  try {
-    return JSON.parse(candidate.slice(start, end + 1))
-  } catch {
-    return null
+  const trimmed = text.trim()
+  // 1. Direct parse — model returned pure JSON
+  try { return JSON.parse(trimmed) } catch { /* fall through */ }
+  // 2. Strip markdown code fences and parse
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (fenced) {
+    try { return JSON.parse(fenced[1].trim()) } catch { /* fall through */ }
   }
+  // 3. Find outermost { ... } using bracket counting (handles nested objects)
+  const start = trimmed.indexOf('{')
+  if (start === -1) return null
+  let depth = 0
+  let inString = false
+  let escape = false
+  for (let i = start; i < trimmed.length; i++) {
+    const ch = trimmed[i]
+    if (escape)           { escape = false; continue }
+    if (ch === '\\')      { escape = true;  continue }
+    if (ch === '"')       { inString = !inString; continue }
+    if (inString)         continue
+    if (ch === '{')       depth++
+    else if (ch === '}')  { depth--; if (depth === 0) { try { return JSON.parse(trimmed.slice(start, i + 1)) } catch { return null } } }
+  }
+  return null
 }
 
 /**
