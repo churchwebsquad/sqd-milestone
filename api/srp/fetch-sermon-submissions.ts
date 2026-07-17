@@ -52,6 +52,7 @@ interface PipelineRow {
   pipeline_error:  string | null
   session_id:      string | null
   status:          string | null
+  current_step:    string | null
 }
 
 const SERMON_COLUMNS =
@@ -144,9 +145,10 @@ export default async function handler(req: any, res: any) {
     const [uploadsResult, pipelineResult] = await Promise.all([
       sb.from('sf-srp-uploads').select('task_id, supabase_url, external_link').in('task_id', taskIds),
       sb.schema('srp_pipeline').from('sessions')
-        .select('clickup_task_id, pipeline_status, pipeline_error, session_id, status')
+        .select('clickup_task_id, pipeline_status, pipeline_error, session_id, status, current_step')
         .in('clickup_task_id', taskIds)
         .neq('status', 'archived')
+        .neq('current_step', 'account')
         .order('updated_at', { ascending: false }),
     ])
 
