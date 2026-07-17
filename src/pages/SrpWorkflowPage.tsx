@@ -16,8 +16,9 @@
  */
 
 import { useEffect, useMemo, type ReactElement } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import {
+  ArrowLeft,
   Building2, ListChecks, FileVideo, Scissors, Film,
   LayoutGrid, MessageSquare, Mail, Camera,
   Wand2, Sparkles, ClipboardList, Sliders,
@@ -165,13 +166,50 @@ function SrpWorkflowInner() {
 
   const ActiveStep = STEP_COMPONENTS[currentStep]
 
+  // On the account step the coach is still picking which sermon to work on.
+  // Show a clean picker layout — no workflow stepper yet.
+  if (currentStep === 'account') {
+    return (
+      <div className="min-h-full bg-[var(--color-cream)] py-6 px-4 md:px-8">
+        <div className="max-w-3xl mx-auto">
+          <Link
+            to="/social/srp"
+            className="inline-flex items-center gap-1 text-[12px] text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] mb-4 transition-colors"
+          >
+            <ArrowLeft size={12} /> Back to SRP dashboard
+          </Link>
+          <header className="mb-6">
+            <p className="text-[10px] uppercase tracking-[0.12em] font-bold text-[var(--color-primary-purple)]">
+              SRP · {account?.member ?? '—'}
+            </p>
+            <h1 className="text-[24px] sm:text-[28px] font-semibold text-[var(--color-deep-plum)] mt-0.5">
+              {account?.church_name ?? 'SRP session'}
+            </h1>
+          </header>
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-6 items-start">
+            <main className="min-w-0">
+              <AccountSelectionStep />
+            </main>
+            <aside className="space-y-3">
+              <SrpQuickLinks account={account} />
+              <SrpAccountInfoPanel account={account} />
+              <p className="text-[9px] font-mono text-[var(--color-purple-gray)]/40 truncate" title={sessionId}>
+                {sessionId}
+              </p>
+            </aside>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <SrpWorkflowShell
       backHref="/social/srp"
       backLabel="Back to SRP dashboard"
       kicker={`SRP · ${account?.member ?? '—'}`}
       title={account?.church_name ?? 'SRP session'}
-      connected={false /* Realtime publication isn't on sessions; UI relies on autosave loop */}
+      connected={false}
       stepItems={stepItems}
       currentStep={currentStep}
       onJump={setCurrentStep}
@@ -181,7 +219,6 @@ function SrpWorkflowInner() {
         <>
           <SrpQuickLinks account={account} />
           <SrpAccountInfoPanel account={account} />
-          {/* hidden — present for debugging future regressions */}
           <p className="text-[9px] font-mono text-[var(--color-purple-gray)]/40 truncate" title={sessionId}>
             {sessionId}
           </p>
