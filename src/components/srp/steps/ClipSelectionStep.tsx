@@ -57,6 +57,54 @@ function extractYouTubeId(url: string): string | null {
   return null
 }
 
+/**
+ * Re-anchor a clip's timestamps by finding the AI quote's first and last words
+ * in transcript_words. The AI often drifts from the true word-level timestamps,
+ * so we search for the actual position of the first 4 words in the quote to
+ * get the real startTime, and the last word to get the real endTime.
+ */
+function reanchorClip(
+  words: any[] | null | undefined,
+  clip: { quote?: string; startTime?: string; endTime?: string },
+): { startTime: string; endTime: string } | null {
+  if (!words?.length || !clip.quote) return null
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const quoteWords = clip.quote.split(/\s+/).filter(Boolean)
+  if (quoteWords.length < 3) return null
+
+  const needle = quoteWords.slice(0, 4).map(normalize)
+  const lastNeedle = normalize(quoteWords[quoteWords.length - 1])
+
+  // Find the best-matching run of words for the first 4 words of the quote
+  let bestIdx = -1
+  let bestScore = 0
+  for (let i = 0; i <= words.length - needle.length; i++) {
+    let score = 0
+    for (let j = 0; j < needle.length; j++) {
+      if (normalize(words[i + j]?.word ?? words[i + j]?.text ?? '') === needle[j]) score++
+    }
+    if (score > bestScore) { bestScore = score; bestIdx = i }
+    if (score === needle.length) break // perfect match, stop early
+  }
+  if (bestScore < 2 || bestIdx < 0) return null
+
+  const startWord = words[bestIdx]
+  const startSec = typeof startWord.start === 'number' ? startWord.start : mmssToSeconds(startWord.start ?? '')
+
+  // Find the last word of the quote starting from bestIdx
+  const endSearchFrom = bestIdx + quoteWords.length - 8
+  const endSearchTo   = bestIdx + quoteWords.length + 8
+  let endSec = startSec + (mmssToSeconds(clip.endTime ?? '') - mmssToSeconds(clip.startTime ?? ''))
+  for (let i = Math.max(bestIdx, endSearchFrom); i < Math.min(words.length, endSearchTo); i++) {
+    if (normalize(words[i]?.word ?? words[i]?.text ?? '') === lastNeedle) {
+      const t = typeof words[i].start === 'number' ? words[i].start : mmssToSeconds(words[i].start ?? '')
+      endSec = t
+    }
+  }
+
+  return { startTime: secondsToMmss(Math.round(startSec)), endTime: secondsToMmss(Math.round(endSec)) }
+}
+
 /** Slice a verbatim quote from transcript_words for a given time range. */
 function sliceQuoteFromWords(
   words: any[] | null | undefined,
@@ -404,9 +452,14 @@ export function ClipSelectionStep() {
         guidance: guidance.trim() || undefined,
         keyInsights: keyInsights.length ? keyInsights : undefined,
       })
+      // Re-anchor AI timestamps to actual word-level positions
+      const anchored = (r.clips ?? []).map(c => {
+        const fix = reanchorClip(transcriptWords, c)
+        return fix ? { ...c, ...fix } : c
+      })
       // Preserve pinned clips, replace the rest
       const pinned = clipSuggestions.filter(c => c.clip_id && pinnedIds.has(c.clip_id))
-      const fresh  = (r.clips ?? []).filter(c => !pinnedQuotes.includes(c.quote ?? ''))
+      const fresh  = anchored.filter(c => !pinnedQuotes.includes(c.quote ?? ''))
       setClipSuggestions([...pinned, ...fresh])
     } catch (e) {
       const err = e as Error & { errorCode?: string }
