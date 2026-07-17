@@ -487,17 +487,18 @@ export function ClipSelectionStep() {
 
   // ── Pick / unpick ────────────────────────────────────────────────────────
 
+  // Use a ref so togglePick always sees the latest clipSelections without
+  // a stale closure — the context setter is typed as direct (not functional).
+  const clipSelectionsRef = useRef(clipSelections)
+  clipSelectionsRef.current = clipSelections
+
   const togglePick = useCallback((clip: SrpClipSelection) => {
-    const idx = clipSelections.findIndex(c => c.quote === clip.quote)
-    if (idx >= 0) {
-      // Deselect
-      setClipSelections(clipSelections.filter((_, i) => i !== idx))
-      return
-    }
-    // Already at the limit — do nothing (user must deselect first)
-    if (clipSelections.length >= reelCount) return
-    setClipSelections([...clipSelections, assignClipId(clip, clipSelections.length + 1)])
-  }, [clipSelections, reelCount, setClipSelections])
+    const prev = clipSelectionsRef.current
+    const idx = prev.findIndex((c: SrpClipSelection) => c.quote === clip.quote)
+    if (idx >= 0) { setClipSelections(prev.filter((_: SrpClipSelection, i: number) => i !== idx)); return }
+    if (prev.length >= reelCount) return
+    setClipSelections([...prev, assignClipId(clip, prev.length + 1)])
+  }, [reelCount, setClipSelections])
 
   const isPicked = useCallback((clip: SrpClipSelection) =>
     clipSelections.some(c => c.quote === clip.quote), [clipSelections])
