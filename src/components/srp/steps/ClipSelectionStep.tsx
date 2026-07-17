@@ -1,22 +1,20 @@
 /**
- * Step 4 — Clip selection + per-clip caption setup (combined).
+ * Step 4 — Clip selection (redesigned).
  *
- * 1. Coach generates AI clip suggestions from the transcript.
- * 2. Coach picks N clips matching the reel count.
- * 3. For each picked clip, inline panel shows:
- *    - Editable caption text (defaults to the quote)
- *    - Caption style picker (23 styles from Duane)
- *    - "Use last week's style" shortcut from clip_templates
- * Continue is gated on selecting the correct reel count AND each clip
- * having a caption style chosen.
+ * Layout:
+ *   1. Controls: guidance input + Refresh + Manual Entry
+ *   2. Sticky video player — seeks to whichever clip is playing
+ *   3. Scrollable clip list — select, play, edit timestamps, pin
+ *
+ * Caption style picker has moved to a later step.
+ * Continue is gated on selecting the correct reel count.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowLeft, ArrowRight, Loader2, Sparkles,
-  Check, X, ChevronDown, ChevronUp, Clock, Pin, PinOff,
-  Lightbulb, Zap, MessageSquare, Play, EyeOff,
+  ArrowLeft, ArrowRight, Loader2,
+  Check, Pin, PinOff, Play, Pencil, Plus, RefreshCw,
 } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
@@ -24,45 +22,8 @@ import { callSrpApi } from '../../../lib/srpApi'
 import { STEP_LABELS, STEP_DESCRIPTIONS } from '../../../lib/srpSessions'
 import { isSrpReelDeliverable, type SrpClipSelection } from '../../../types/database'
 import { buildAccountContext } from '../../../lib/accountContext'
-import { srpPipeline } from '../../../lib/srpSessions'
 
-// ── Caption styles from Duane ────────────────────────────────────────────────
-
-interface CaptionStyleMeta {
-  slug: string
-  label: string
-  group: 'Traditional' | 'Elevated' | 'Reference' | 'Basic'
-}
-
-const CAPTION_STYLES: CaptionStyleMeta[] = [
-  { slug: 'cap01-hormozi-pill',       label: 'Spotlight Pill',      group: 'Traditional' },
-  { slug: 'cap02-mrbeast-pop',        label: 'MrBeast Pop',         group: 'Traditional' },
-  { slug: 'cap03-youtube-bar',        label: 'YouTube Bar',         group: 'Traditional' },
-  { slug: 'cap04-outline-classic',    label: 'Outline Classic',     group: 'Traditional' },
-  { slug: 'cap05-word-punch',         label: 'Word Punch',          group: 'Traditional' },
-  { slug: 'cap06-fade-fill',          label: 'Fade Fill',           group: 'Traditional' },
-  { slug: 'cap07-fade-slide-up',      label: 'Fade + Slide Up',     group: 'Traditional' },
-  { slug: 'cap08-typewriter',         label: 'Typewriter',          group: 'Traditional' },
-  { slug: 'cap09-brand-italic',       label: 'Brand Italic',        group: 'Traditional' },
-  { slug: 'cap11-liquid-morph',       label: 'Liquid Morph',        group: 'Elevated'    },
-  { slug: 'cap14-stamped',            label: 'Stamped',             group: 'Elevated'    },
-  { slug: 'cap15-typewriter-glitch',  label: 'Typewriter Glitch',   group: 'Elevated'    },
-  { slug: 'cap16-chip-row',           label: 'Chip Row',            group: 'Elevated'    },
-  { slug: 'cap20-confession-quote',   label: 'Confession Quote',    group: 'Elevated'    },
-  { slug: 'cap22-index-card-stack',   label: 'Index Card Stack',    group: 'Elevated'    },
-  { slug: 'cap23-neon-glow',          label: 'Neon Glow',           group: 'Elevated'    },
-  { slug: 'cap24-cinematic-fade',     label: 'Cinematic Fade',      group: 'Elevated'    },
-  { slug: 'cap25-caret-cursor',       label: 'Caret Cursor',        group: 'Elevated'    },
-  { slug: 'cap26-vinyl-tracking',     label: 'Vinyl Tracking',      group: 'Elevated'    },
-  { slug: 'cap31-outline-pop',        label: 'Outline Pop',         group: 'Reference'   },
-  { slug: 'cap32-framed-card',        label: 'Framed Card',         group: 'Reference'   },
-  { slug: 'cap33-bold-emphasis',      label: 'Bold Emphasis',       group: 'Reference'   },
-  { slug: 'cap40-simple-clean',       label: 'Simple Clean',        group: 'Basic'       },
-  { slug: 'cap41-simple-boxed',       label: 'Simple Boxed',        group: 'Basic'       },
-  { slug: 'cap42-bold-statement',     label: 'Bold Statement',      group: 'Basic'       },
-]
-
-const GROUPS: CaptionStyleMeta['group'][] = ['Traditional', 'Elevated', 'Reference', 'Basic']
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 const CATEGORY_COLORS: Record<string, string> = {
   'Profound Ideas':        'bg-[#EDE9FC] text-[#341756]',
@@ -72,8 +33,6 @@ const CATEGORY_COLORS: Record<string, string> = {
   'Life of Jesus':         'bg-[#E0E8FA] text-[#1F3A7A]',
 }
 
-// ── Video preview helpers ────────────────────────────────────────────────────
-
 function mmssToSeconds(ts: string | undefined): number {
   if (!ts) return 0
   const parts = ts.split(':').map(Number)
@@ -82,136 +41,276 @@ function mmssToSeconds(ts: string | undefined): number {
   return parts[0] || 0
 }
 
+function secondsToMmss(s: number): string {
+  const m = Math.floor(s / 60)
+  const sec = Math.floor(s % 60)
+  return `${m}:${sec.toString().padStart(2, '0')}`
+}
+
 function extractYouTubeId(url: string): string | null {
   try {
     const u = new URL(url)
     if (u.hostname.includes('youtu.be')) return u.pathname.slice(1).split('?')[0]
-    if (u.hostname.includes('youtube.com')) {
+    if (u.hostname.includes('youtube.com'))
       return u.searchParams.get('v') ?? u.pathname.split('/').pop() ?? null
-    }
   } catch { /* invalid URL */ }
   return null
 }
 
-function dropboxDirectUrl(url: string): string {
-  // Convert dropbox share link to raw direct download URL for <video> playback
-  return url.replace('www.dropbox.com', 'dl.dropboxusercontent.com').replace(/[?&]dl=\d/, '')
+/** Slice a verbatim quote from transcript_words for a given time range. */
+function sliceQuoteFromWords(
+  words: any[] | null | undefined,
+  startTs: string,
+  endTs: string,
+): string {
+  if (!words?.length) return ''
+  const startSec = mmssToSeconds(startTs)
+  const endSec   = mmssToSeconds(endTs)
+  return words
+    .filter((w: any) => {
+      const t = typeof w.start === 'number' ? w.start : mmssToSeconds(w.start)
+      return t >= startSec && t <= endSec
+    })
+    .map((w: any) => w.word ?? w.text ?? '')
+    .join(' ')
+    .trim()
 }
 
-function ClipVideoPreview({
-  videoUrl, videoSourceType, startTime, endTime,
-}: {
-  videoUrl: string
-  videoSourceType: string | null | undefined
-  startTime: string | undefined
-  endTime:   string | undefined
-}) {
-  const startSecs = mmssToSeconds(startTime)
-  const endSecs   = mmssToSeconds(endTime)
+// ── Sticky YouTube player ─────────────────────────────────────────────────────
 
-  if (videoSourceType === 'youtube') {
-    const videoId = extractYouTubeId(videoUrl)
-    if (!videoId) return <UnsupportedPreview reason="Couldn't parse YouTube ID" />
-    const src = `https://www.youtube.com/embed/${videoId}?start=${startSecs}&autoplay=1&rel=0&modestbranding=1`
+function StickyVideoPlayer({
+  videoUrl,
+  videoSourceType,
+  activeStart,
+  playerRef,
+}: {
+  videoUrl:        string
+  videoSourceType: string | null | undefined
+  activeStart:     number | null
+  playerRef:       React.MutableRefObject<HTMLIFrameElement | null>
+}) {
+  const ytId = videoSourceType === 'youtube' ? extractYouTubeId(videoUrl) : null
+
+  if (ytId) {
+    const src = `https://www.youtube.com/embed/${ytId}?enablejsapi=1&rel=0&modestbranding=1`
     return (
-      <div className="aspect-video w-full rounded-lg overflow-hidden bg-black">
-        <iframe
-          src={src}
-          className="w-full h-full"
-          allow="autoplay; encrypted-media"
-          allowFullScreen
-          title="Clip preview"
-        />
+      <div className="sticky top-0 z-10 bg-[var(--color-cream)] pt-1 pb-3">
+        <div className="aspect-video w-full rounded-xl overflow-hidden bg-black shadow-md">
+          <iframe
+            ref={playerRef}
+            src={src}
+            className="w-full h-full"
+            allow="autoplay; encrypted-media"
+            allowFullScreen
+            title="Sermon video"
+          />
+        </div>
+        {activeStart !== null && (
+          <p className="text-[10px] text-[var(--color-purple-gray)] mt-1 text-center">
+            Playing from {secondsToMmss(activeStart)}
+          </p>
+        )}
       </div>
     )
   }
 
-  if (videoSourceType === 'dropbox') {
-    const direct = dropboxDirectUrl(videoUrl)
-    const srcWithTime = endSecs > startSecs
-      ? `${direct}#t=${startSecs},${endSecs}`
-      : `${direct}#t=${startSecs}`
+  // Dropbox / direct video — re-keyed on seek
+  if (videoSourceType === 'dropbox' || videoSourceType === 'direct') {
+    const direct = videoSourceType === 'dropbox'
+      ? videoUrl.replace('www.dropbox.com', 'dl.dropboxusercontent.com').replace(/[?&]dl=\d/, '')
+      : videoUrl
+    const src = activeStart !== null ? `${direct}#t=${activeStart}` : direct
     return (
-      // eslint-disable-next-line jsx-a11y/media-has-caption
-      <video
-        key={srcWithTime}
-        src={srcWithTime}
-        controls
-        autoPlay
-        className="w-full rounded-lg bg-black"
-        style={{ maxHeight: 360 }}
-      />
+      <div className="sticky top-0 z-10 bg-[var(--color-cream)] pt-1 pb-3">
+        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+        <video key={src} src={src} controls autoPlay={activeStart !== null}
+          className="w-full rounded-xl bg-black shadow-md" style={{ maxHeight: 340 }} />
+      </div>
     )
   }
 
-  if (videoSourceType === 'vimeo') {
-    // eslint-disable-next-line react-hooks/error-boundaries
-    try {
-      const u = new URL(videoUrl)
-      const videoId = u.pathname.split('/').filter(Boolean).pop()
-      // eslint-disable-next-line react-hooks/error-boundaries
-      if (!videoId) return <UnsupportedPreview reason="Couldn't parse Vimeo ID" />
-      const src = `https://player.vimeo.com/video/${videoId}?autoplay=1#t=${startSecs}s`
-      return (
-        <div className="aspect-video w-full rounded-lg overflow-hidden bg-black">
-          <iframe
-            src={src}
-            className="w-full h-full"
-            allow="autoplay; fullscreen"
-            allowFullScreen
-            title="Clip preview"
-          />
-        </div>
-      )
-    } catch {
-      // eslint-disable-next-line react-hooks/error-boundaries
-      return <UnsupportedPreview reason="Invalid Vimeo URL" />
-    }
-  }
-
-  if (videoSourceType === 'direct') {
-    const srcWithTime = endSecs > startSecs
-      ? `${videoUrl}#t=${startSecs},${endSecs}`
-      : `${videoUrl}#t=${startSecs}`
-    return (
-      // eslint-disable-next-line jsx-a11y/media-has-caption
-      <video
-        key={srcWithTime}
-        src={srcWithTime}
-        controls
-        autoPlay
-        className="w-full rounded-lg bg-black"
-        style={{ maxHeight: 360 }}
-      />
-    )
-  }
-
-  return <UnsupportedPreview reason={`Preview not supported for source type: ${videoSourceType ?? 'unknown'}`} />
+  return null
 }
 
-function UnsupportedPreview({ reason }: { reason: string }) {
+// ── Clip card ─────────────────────────────────────────────────────────────────
+
+interface ClipCardProps {
+  clip:      SrpClipSelection & { [k: string]: any }
+  index:     number
+  isPicked:  boolean
+  isPinned:  boolean
+  onSelect:  () => void
+  onPlay:    () => void
+  onPin:     () => void
+  transcriptWords: any[] | null | undefined
+  onUpdateTimes: (startTime: string, endTime: string, quote: string) => void
+}
+
+function ClipCard({
+  clip, index, isPicked, isPinned,
+  onSelect, onPlay, onPin,
+  transcriptWords, onUpdateTimes,
+}: ClipCardProps) {
+  const [editing, setEditing]       = useState(false)
+  const [editStart, setEditStart]   = useState(clip.startTime ?? '')
+  const [editEnd, setEditEnd]       = useState(clip.endTime ?? '')
+  const catColor = CATEGORY_COLORS[clip.category ?? ''] ?? 'bg-[var(--color-lavender-tint)] text-[var(--color-deep-plum)]'
+
+  const duration = useMemo(() => {
+    if (!clip.startTime || !clip.endTime) return null
+    const d = mmssToSeconds(clip.endTime) - mmssToSeconds(clip.startTime)
+    return d > 0 ? `${d}s` : null
+  }, [clip.startTime, clip.endTime])
+
+  const handleSaveEdit = () => {
+    const newQuote = sliceQuoteFromWords(transcriptWords, editStart, editEnd) || clip.quote || ''
+    onUpdateTimes(editStart, editEnd, newQuote)
+    setEditing(false)
+  }
+
   return (
-    <div className="rounded-lg border border-dashed border-[var(--color-lavender)] bg-[var(--color-lavender-tint)]/40 px-4 py-3 text-[11px] text-[var(--color-purple-gray)]">
-      {reason}
+    <div className={[
+      'rounded-xl border overflow-hidden transition-colors',
+      isPicked
+        ? 'border-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)]/60'
+        : 'border-[var(--color-lavender)] bg-white',
+    ].join(' ')}>
+      <div className="flex items-start gap-3 px-4 py-3">
+
+        {/* Select radio */}
+        <button
+          type="button"
+          onClick={() => { onSelect(); onPlay() }}
+          aria-label={isPicked ? 'Deselect clip' : 'Select clip'}
+          className={[
+            'shrink-0 mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors',
+            isPicked
+              ? 'border-[var(--color-primary-purple)] bg-[var(--color-primary-purple)]'
+              : 'border-[var(--color-lavender)] hover:border-[var(--color-primary-purple)]',
+          ].join(' ')}
+        >
+          {isPicked && <Check size={10} strokeWidth={3} className="text-white" />}
+        </button>
+
+        {/* Content */}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <span className="text-[10px] font-bold text-[var(--color-purple-gray)]">
+              {index + 1}
+            </span>
+            {clip.category && (
+              <span className={['text-[10px] uppercase tracking-wider font-bold rounded-full px-2 py-0.5', catColor].join(' ')}>
+                {clip.category}
+              </span>
+            )}
+            {clip.startTime && clip.endTime && (
+              <span className="text-[10px] font-mono text-[var(--color-purple-gray)]">
+                {clip.startTime} → {clip.endTime}
+              </span>
+            )}
+            {duration && (
+              <span className="text-[10px] font-mono text-[var(--color-purple-gray)]">{duration}</span>
+            )}
+          </div>
+          <p className="text-[12px] text-[var(--color-deep-plum)] leading-snug">
+            "{clip.quote}"
+          </p>
+
+          {/* Inline time editor */}
+          {editing && (
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <label className="text-[10px] font-semibold text-[var(--color-purple-gray)] w-12">Start</label>
+                <input
+                  type="text"
+                  value={editStart}
+                  onChange={e => setEditStart(e.target.value)}
+                  placeholder="MM:SS"
+                  className="w-20 rounded border border-[var(--color-lavender)] px-2 py-1 text-[11px] font-mono text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)]"
+                />
+                <label className="text-[10px] font-semibold text-[var(--color-purple-gray)] w-12">End</label>
+                <input
+                  type="text"
+                  value={editEnd}
+                  onChange={e => setEditEnd(e.target.value)}
+                  placeholder="MM:SS"
+                  className="w-20 rounded border border-[var(--color-lavender)] px-2 py-1 text-[11px] font-mono text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)]"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveEdit}
+                  className="text-[10px] font-semibold text-white bg-[var(--color-primary-purple)] rounded-full px-3 py-1 hover:bg-[var(--color-purple-mid)] transition-colors"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditing(false)}
+                  className="text-[10px] font-semibold text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Action icons */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            type="button"
+            onClick={onPlay}
+            title="Play clip in video above"
+            className="p-1.5 rounded-lg text-[var(--color-purple-gray)] hover:text-[var(--color-primary-purple)] hover:bg-[var(--color-lavender-tint)] transition-colors"
+          >
+            <Play size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing(e => !e)}
+            title="Edit clip timestamps"
+            className={[
+              'p-1.5 rounded-lg transition-colors',
+              editing
+                ? 'text-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)]'
+                : 'text-[var(--color-purple-gray)] hover:text-[var(--color-primary-purple)] hover:bg-[var(--color-lavender-tint)]',
+            ].join(' ')}
+          >
+            <Pencil size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={onPin}
+            title={isPinned ? 'Pinned — kept on regenerate' : 'Pin to keep on regenerate'}
+            className={[
+              'p-1.5 rounded-lg transition-colors',
+              isPinned
+                ? 'text-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)]'
+                : 'text-[var(--color-purple-gray)] hover:text-[var(--color-primary-purple)] hover:bg-[var(--color-lavender-tint)]',
+            ].join(' ')}
+          >
+            {isPinned ? <Pin size={13} /> : <PinOff size={13} />}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
 
-// ── Generate clips response ──────────────────────────────────────────────────
+// ── Generate clips response ───────────────────────────────────────────────────
 
 interface GenerateClipsResponse {
   clips: SrpClipSelection[]
   has_timecodes: boolean
-  usage?: { input_tokens: number; output_tokens: number }
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 
 export function ClipSelectionStep() {
   const {
     account, sermonSubmission, brandVoice,
     selectedDeliverables,
-    transcript, hasTimecodes,
+    transcript, transcriptWords, hasTimecodes,
     keyInsights,
     clipSuggestions, setClipSuggestions,
     clipSelections, setClipSelections,
@@ -220,13 +319,17 @@ export function ClipSelectionStep() {
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
+  const playerRef  = useRef<HTMLIFrameElement | null>(null)
+  const [activeStartSec, setActiveStartSec] = useState<number | null>(null)
   const [generating, setGenerating]         = useState(false)
   const [genError, setGenError]             = useState<string | null>(null)
-  const [expandedClipId, setExpandedClipId] = useState<string | null>(null)
-  const [lastWeekSlug, setLastWeekSlug]     = useState<string | null>(null)
-  const [lastWeekLabel, setLastWeekLabel]   = useState<string | null>(null)
+  const [guidance, setGuidance]             = useState('')
   const [pinnedIds, setPinnedIds]           = useState<Set<string>>(new Set())
-  const [previewKey, setPreviewKey]         = useState<string | null>(null)
+
+  // Manual entry state
+  const [showManual, setShowManual]         = useState(false)
+  const [manualStart, setManualStart]       = useState('')
+  const [manualEnd, setManualEnd]           = useState('')
 
   const stepNum   = visibleSteps.indexOf('clips') + 1
   const reelCount = useMemo(
@@ -234,29 +337,19 @@ export function ClipSelectionStep() {
     [selectedDeliverables],
   )
 
-  // Load last week's caption style from clip_templates for this church
-  useEffect(() => {
-    const member = account?.member
-    if (!member) return
-    let cancelled = false
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(srpPipeline as any)
-      .from('clip_templates')
-      .select('animated_captions')
-      .eq('member', member)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .then(({ data }: { data: any }) => {
-        if (cancelled || !data?.animated_captions?.default?.motion_slug) return
-        const slug = data.animated_captions.default.motion_slug as string
-        const style = CAPTION_STYLES.find(s => s.slug === slug)
-        setLastWeekSlug(slug)
-        setLastWeekLabel(style?.label ?? slug)
-      })
-    return () => { cancelled = true }
-  }, [account?.member])
+  // ── YouTube seek via postMessage ─────────────────────────────────────────
+
+  const seekAndPlay = useCallback((startSec: number) => {
+    setActiveStartSec(startSec)
+    const iframe = playerRef.current
+    if (!iframe?.contentWindow) return
+    iframe.contentWindow.postMessage(
+      JSON.stringify({ event: 'command', func: 'seekTo', args: [startSec, true] }), '*',
+    )
+    iframe.contentWindow.postMessage(
+      JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*',
+    )
+  }, [])
 
   // ── Clip generation ──────────────────────────────────────────────────────
 
@@ -266,8 +359,7 @@ export function ClipSelectionStep() {
       return
     }
     setGenerating(true); setGenError(null)
-    // Pass pinned clips' quotes so the AI avoids regenerating the same moments
-    const pinnedQuotes = clipSelections
+    const pinnedQuotes = clipSuggestions
       .filter(c => c.clip_id && pinnedIds.has(c.clip_id) && c.quote)
       .map(c => c.quote!)
     try {
@@ -277,16 +369,49 @@ export function ClipSelectionStep() {
         accountContext: buildAccountContext(account, sermonSubmission),
         hasTimecodes,
         pinnedQuotes,
+        guidance: guidance.trim() || undefined,
         keyInsights: keyInsights.length ? keyInsights : undefined,
       })
-      setClipSuggestions(r.clips ?? [])
+      // Preserve pinned clips, replace the rest
+      const pinned = clipSuggestions.filter(c => c.clip_id && pinnedIds.has(c.clip_id))
+      const fresh  = (r.clips ?? []).filter(c => !pinnedQuotes.includes(c.quote ?? ''))
+      setClipSuggestions([...pinned, ...fresh])
     } catch (e) {
       const err = e as Error & { errorCode?: string }
       setGenError(err.errorCode ? `${err.errorCode}: ${err.message}` : err.message)
     } finally {
       setGenerating(false)
     }
-  }, [transcript, brandVoice, account, sermonSubmission, hasTimecodes, clipSelections, pinnedIds, setClipSuggestions])
+  }, [transcript, brandVoice, account, sermonSubmission, hasTimecodes,
+      clipSuggestions, pinnedIds, guidance, keyInsights, setClipSuggestions])
+
+  // Auto-generate if no suggestions yet
+  useEffect(() => {
+    if (clipSuggestions.length === 0 && transcript && transcript.length > 200 && !generating) {
+      void handleGenerate()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Pick / unpick ────────────────────────────────────────────────────────
+
+  const togglePick = useCallback((clip: SrpClipSelection) => {
+    const idx = clipSelections.findIndex(c => c.quote === clip.quote)
+    if (idx >= 0) {
+      setClipSelections(clipSelections.filter((_, i) => i !== idx))
+      return
+    }
+    if (clipSelections.length >= reelCount) {
+      setClipSelections([...clipSelections.slice(0, reelCount - 1), assignClipId(clip, reelCount)])
+      return
+    }
+    setClipSelections([...clipSelections, assignClipId(clip, clipSelections.length + 1)])
+  }, [clipSelections, reelCount, setClipSelections])
+
+  const isPicked = useCallback((clip: SrpClipSelection) =>
+    clipSelections.some(c => c.quote === clip.quote), [clipSelections])
+
+  // ── Pin ──────────────────────────────────────────────────────────────────
 
   const togglePin = useCallback((clipId: string) => {
     setPinnedIds(prev => {
@@ -297,53 +422,43 @@ export function ClipSelectionStep() {
     })
   }, [])
 
-  // ── Pick / unpick ────────────────────────────────────────────────────────
+  // ── Update clip times + re-slice quote ──────────────────────────────────
 
-  const togglePick = useCallback((clip: SrpClipSelection) => {
-    const idx = clipSelections.findIndex(c =>
-      c.quote === clip.quote && (c.category ?? '') === (clip.category ?? ''),
-    )
-    if (idx >= 0) {
-      setClipSelections(clipSelections.filter((_, i) => i !== idx))
-      return
-    }
-    if (clipSelections.length >= reelCount) {
-      const next = [...clipSelections.slice(0, reelCount - 1), assignClipId(clip, reelCount)]
-      setClipSelections(next)
-      return
-    }
-    const picked = assignClipId(clip, clipSelections.length + 1)
-    setClipSelections([...clipSelections, picked])
-    setExpandedClipId(picked.clip_id ?? null)
-  }, [clipSelections, reelCount, setClipSelections])
-
-  const isPicked = useCallback((clip: SrpClipSelection): boolean =>
-    clipSelections.some(c =>
-      c.quote === clip.quote && (c.category ?? '') === (clip.category ?? ''),
-    ), [clipSelections])
-
-  // ── Per-clip updates (caption text, style) ────────────────────────────────
-
-  const updateClip = useCallback((clipId: string, patch: Partial<SrpClipSelection>) => {
+  const updateClipTimes = useCallback((
+    index: number, startTime: string, endTime: string, quote: string,
+  ) => {
+    const updated = [...clipSuggestions]
+    updated[index] = { ...updated[index], startTime, endTime, quote }
+    setClipSuggestions(updated)
+    // Also update in selections if picked
     setClipSelections(clipSelections.map(c =>
-      c.clip_id === clipId ? { ...c, ...patch } : c,
+      c.quote === clipSuggestions[index].quote ? { ...c, startTime, endTime, quote } : c,
     ))
-  }, [clipSelections, setClipSelections])
+  }, [clipSuggestions, clipSelections, setClipSuggestions, setClipSelections])
 
-  const applyLastWeekStyle = useCallback((clipId: string) => {
-    if (!lastWeekSlug) return
-    updateClip(clipId, { caption_slug: lastWeekSlug })
-  }, [lastWeekSlug, updateClip])
+  // ── Manual entry ─────────────────────────────────────────────────────────
 
-  // Continue requires correct clip count + every clip has a style chosen
-  const continueReady = clipSelections.length === reelCount &&
-    reelCount > 0 &&
-    clipSelections.every(c => !!c.caption_slug)
+  const handleAddManual = useCallback(() => {
+    if (!manualStart || !manualEnd) return
+    const quote = sliceQuoteFromWords(transcriptWords, manualStart, manualEnd)
+    const manual: SrpClipSelection = {
+      clip_id:          `manual_${Date.now().toString(36)}`,
+      startTime:        manualStart,
+      endTime:          manualEnd,
+      quote:            quote || `${manualStart} – ${manualEnd}`,
+      category:         undefined,
+      estimatedSeconds: mmssToSeconds(manualEnd) - mmssToSeconds(manualStart),
+    } as any
+    setClipSuggestions([...clipSuggestions, manual])
+    setManualStart(''); setManualEnd(''); setShowManual(false)
+  }, [manualStart, manualEnd, transcriptWords, clipSuggestions, setClipSuggestions])
+
+  const continueReady = clipSelections.length === reelCount && reelCount > 0
 
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <header>
         <p className="text-[10px] uppercase tracking-[0.12em] font-bold text-[var(--color-primary-purple)]">
           Step {stepNum} of {visibleSteps.length}
@@ -352,37 +467,65 @@ export function ClipSelectionStep() {
           {STEP_LABELS.clips}
         </h2>
         <p className="text-[13px] text-[var(--color-purple-gray)] mt-1">
-          {STEP_DESCRIPTIONS.clips} · Pick {reelCount} clip{reelCount === 1 ? '' : 's'}, then set captions for each.
+          {STEP_DESCRIPTIONS.clips} · Pick {reelCount} clip{reelCount === 1 ? '' : 's'}.
         </p>
       </header>
 
-      {/* Generate button */}
-      <section className="rounded-xl border border-[var(--color-lavender)] bg-white p-4 flex items-center justify-between gap-4 flex-wrap">
-        <div className="min-w-0">
-          <p className="text-[13px] font-semibold text-[var(--color-deep-plum)]">
-            {clipSuggestions.length > 0 ? `${clipSuggestions.length} suggestions ready` : 'No suggestions yet'}
-          </p>
-          <p className="text-[11px] text-[var(--color-purple-gray)] mt-0.5">
-            {hasTimecodes
-              ? '30-70 second clips with MM:SS ranges from the transcript.'
-              : '100-140 word clips (≈50-70 sec) by word count.'}
-          </p>
+      {/* Controls bar */}
+      <div className="rounded-xl border border-[var(--color-lavender)] bg-white p-3 space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            type="text"
+            value={guidance}
+            onChange={e => setGuidance(e.target.value)}
+            placeholder='Guidance for refresh (e.g. "focus on hope moments")'
+            className="flex-1 min-w-0 rounded-full border border-[var(--color-lavender)] px-3 py-1.5 text-[12px] text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] focus:ring-2 focus:ring-[var(--color-lavender)]"
+          />
+          <button
+            type="button"
+            onClick={() => void handleGenerate()}
+            disabled={generating || !transcript}
+            className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-full border border-[var(--color-lavender)] text-[var(--color-deep-plum)] hover:bg-[var(--color-lavender-tint)] disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            {generating
+              ? <><Loader2 size={12} className="animate-spin" /> Generating…</>
+              : <><RefreshCw size={12} /> {clipSuggestions.length > 0 ? 'Refresh' : 'Generate'}{pinnedIds.size > 0 ? ` (${pinnedIds.size} pinned)` : ''}</>
+            }
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowManual(s => !s)}
+            className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-full border border-[var(--color-lavender)] text-[var(--color-deep-plum)] hover:bg-[var(--color-lavender-tint)] transition-colors whitespace-nowrap"
+          >
+            <Plus size={12} /> Manual Entry
+          </button>
         </div>
-        <SrpButton
-          size="sm"
-          onClick={() => void handleGenerate()}
-          disabled={generating || !transcript}
-          leadingIcon={generating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-        >
-          {generating
-            ? 'Generating…'
-            : clipSuggestions.length > 0
-              ? pinnedIds.size > 0
-                ? `Regenerate (keeping ${pinnedIds.size} pinned)`
-                : 'Regenerate'
-              : 'Generate suggestions'}
-        </SrpButton>
-      </section>
+
+        {/* Manual entry form */}
+        {showManual && (
+          <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-[var(--color-lavender)]">
+            <span className="text-[11px] font-semibold text-[var(--color-purple-gray)]">Start</span>
+            <input
+              type="text" value={manualStart} onChange={e => setManualStart(e.target.value)}
+              placeholder="MM:SS"
+              className="w-20 rounded border border-[var(--color-lavender)] px-2 py-1 text-[11px] font-mono text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)]"
+            />
+            <span className="text-[11px] font-semibold text-[var(--color-purple-gray)]">End</span>
+            <input
+              type="text" value={manualEnd} onChange={e => setManualEnd(e.target.value)}
+              placeholder="MM:SS"
+              className="w-20 rounded border border-[var(--color-lavender)] px-2 py-1 text-[11px] font-mono text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)]"
+            />
+            <button
+              type="button" onClick={handleAddManual}
+              disabled={!manualStart || !manualEnd}
+              className="text-[11px] font-semibold text-white bg-[var(--color-primary-purple)] rounded-full px-3 py-1 hover:bg-[var(--color-purple-mid)] disabled:opacity-50 transition-colors"
+            >
+              Add clip
+            </button>
+          </div>
+        )}
+      </div>
 
       {genError && (
         <div className="rounded-lg border border-wm-danger/30 bg-wm-danger-bg px-4 py-3 text-[12px] text-wm-danger">
@@ -390,302 +533,54 @@ export function ClipSelectionStep() {
         </div>
       )}
 
-      {/* Picked clips with inline caption editor */}
-      {clipSelections.length > 0 && (
-        <section className="space-y-3">
-          <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-primary-purple)]">
-            Picked {clipSelections.length} of {reelCount} · Set captions for each
-          </p>
-          {clipSelections.map((clip, i) => {
-            const isExpanded = expandedClipId === clip.clip_id
-            const hasStyle   = !!clip.caption_slug
-            const styleLabel = CAPTION_STYLES.find(s => s.slug === clip.caption_slug)?.label
-            const isPinned   = !!clip.clip_id && pinnedIds.has(clip.clip_id)
-
-            return (
-              <div
-                key={clip.clip_id ?? `picked-${i}`}
-                className="rounded-xl border border-[var(--color-primary-purple)]/40 bg-white overflow-hidden"
-              >
-                {/* Clip header */}
-                <div className="flex items-start gap-3 p-4">
-                  <span className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-primary-purple)] text-white text-[10px] font-bold mt-0.5">
-                    {i + 1}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      {clip.category && (
-                        <span className={['text-[10px] uppercase tracking-wider font-bold rounded-full px-2 py-0.5', CATEGORY_COLORS[clip.category] ?? 'bg-[var(--color-lavender-tint)] text-[var(--color-deep-plum)]'].join(' ')}>
-                          {clip.category}
-                        </span>
-                      )}
-                      {clip.startTime && clip.endTime && (
-                        <span className="text-[10px] font-mono text-[var(--color-purple-gray)]">
-                          {clip.startTime} → {clip.endTime}
-                        </span>
-                      )}
-                      {hasStyle && (
-                        <span className="text-[10px] text-[var(--color-primary-purple)] font-semibold">
-                          {styleLabel}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[12px] text-[var(--color-deep-plum)] line-clamp-2 leading-snug">
-                      "{clip.caption_text ?? clip.quote}"
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => togglePin(clip.clip_id!)}
-                      className={[
-                        'transition-colors p-1',
-                        isPinned
-                          ? 'text-[var(--color-primary-purple)]'
-                          : 'text-[var(--color-purple-gray)] hover:text-[var(--color-primary-purple)]',
-                      ].join(' ')}
-                      aria-label={isPinned ? 'Unpin clip' : 'Pin clip — keeps this when regenerating'}
-                      title={isPinned ? 'Pinned — will not be replaced on regenerate' : 'Pin to keep on regenerate'}
-                    >
-                      {isPinned ? <Pin size={13} /> : <PinOff size={13} />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setExpandedClipId(isExpanded ? null : (clip.clip_id ?? null))}
-                      className="text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] transition-colors p-1"
-                      aria-label={isExpanded ? 'Collapse' : 'Edit captions'}
-                    >
-                      {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    </button>
-                    {!isPinned && (
-                      <button
-                        type="button"
-                        onClick={() => togglePick(clip)}
-                        className="text-[var(--color-purple-gray)] hover:text-wm-danger transition-colors p-1"
-                        aria-label="Remove clip"
-                      >
-                        <X size={13} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Inline caption editor */}
-                {isExpanded && (
-                  <div className="border-t border-[var(--color-lavender)] px-4 pb-4 pt-3 space-y-4 bg-[var(--color-lavender-tint)]/30">
-
-                    {/* Caption text */}
-                    <div className="space-y-1.5">
-                      <label className="block text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
-                        Caption text
-                      </label>
-                      <textarea
-                        rows={3}
-                        value={clip.caption_text ?? clip.quote ?? ''}
-                        onChange={e => updateClip(clip.clip_id!, { caption_text: e.target.value })}
-                        className="w-full rounded-lg border border-[var(--color-lavender)] bg-white px-3 py-2 text-[12px] text-[var(--color-deep-plum)] font-mono focus:outline-none focus:border-[var(--color-primary-purple)] focus:ring-2 focus:ring-[var(--color-lavender)] resize-y"
-                        placeholder="Edit the transcript text that will appear as captions on this reel…"
-                      />
-                    </div>
-
-                    {/* Last week shortcut */}
-                    {lastWeekSlug && (
-                      <div className="flex items-center gap-2">
-                        <Clock size={11} className="text-[var(--color-purple-gray)] shrink-0" />
-                        <span className="text-[11px] text-[var(--color-purple-gray)]">
-                          Last week: <span className="font-semibold text-[var(--color-deep-plum)]">{lastWeekLabel}</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => applyLastWeekStyle(clip.clip_id!)}
-                          className={[
-                            'text-[10px] font-semibold px-2.5 py-0.5 rounded-full border transition-colors',
-                            clip.caption_slug === lastWeekSlug
-                              ? 'bg-[var(--color-primary-purple)] text-white border-[var(--color-primary-purple)]'
-                              : 'border-[var(--color-lavender)] text-[var(--color-primary-purple)] hover:bg-[var(--color-lavender-tint)]',
-                          ].join(' ')}
-                        >
-                          {clip.caption_slug === lastWeekSlug ? '✓ Applied' : 'Use same'}
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Style picker */}
-                    <div className="space-y-2.5">
-                      <label className="block text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
-                        Caption style
-                      </label>
-                      {GROUPS.map(group => {
-                        const styles = CAPTION_STYLES.filter(s => s.group === group)
-                        return (
-                          <div key={group}>
-                            <p className="text-[9px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]/60 mb-1.5">
-                              {group}
-                            </p>
-                            <div className="flex flex-wrap gap-1.5">
-                              {styles.map(style => {
-                                const selected = clip.caption_slug === style.slug
-                                return (
-                                  <button
-                                    key={style.slug}
-                                    type="button"
-                                    onClick={() => updateClip(clip.clip_id!, { caption_slug: style.slug })}
-                                    className={[
-                                      'text-[11px] px-3 py-1 rounded-full border transition-colors font-medium',
-                                      selected
-                                        ? 'bg-[var(--color-primary-purple)] text-white border-[var(--color-primary-purple)]'
-                                        : 'border-[var(--color-lavender)] text-[var(--color-deep-plum)] hover:bg-[var(--color-lavender-tint)] bg-white',
-                                    ].join(' ')}
-                                  >
-                                    {selected && <Check size={10} className="inline mr-1" strokeWidth={3} />}
-                                    {style.label}
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </section>
+      {/* Sticky video player */}
+      {videoUrl && (
+        <StickyVideoPlayer
+          videoUrl={videoUrl}
+          videoSourceType={videoSourceType}
+          activeStart={activeStartSec}
+          playerRef={playerRef}
+        />
       )}
 
-      {/* Suggestions list */}
+      {/* Status line */}
       {clipSuggestions.length > 0 && (
-        <section className="space-y-3">
-          <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
-            {clipSuggestions.length} suggestions — ranked by social potential · pick {reelCount}
-          </p>
-          <ul className="space-y-3">
-            {clipSuggestions.map((c, i) => {
-              const picked   = isPicked(c)
-              const catColor = CATEGORY_COLORS[c.category ?? ''] ?? 'bg-[var(--color-lavender-tint)] text-[var(--color-deep-plum)]'
-              return (
-                <li key={`${i}-${c.quote?.slice(0, 40)}`}>
-                  <div
-                    className={[
-                      'rounded-xl border overflow-hidden transition-colors',
-                      picked
-                        ? 'border-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)]'
-                        : 'border-[var(--color-lavender)] bg-white',
-                    ].join(' ')}
-                  >
-                    {/* Clickable header row */}
-                    <button
-                      type="button"
-                      onClick={() => togglePick(c)}
-                      className="w-full text-left px-4 pt-3 pb-2 hover:bg-[var(--color-lavender-tint)]/40 transition-colors"
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className={[
-                          'shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full mt-0.5',
-                          picked
-                            ? 'bg-[var(--color-primary-purple)] text-white'
-                            : 'bg-[var(--color-lavender-tint)] text-[var(--color-primary-purple)]',
-                        ].join(' ')}>
-                          {picked ? <Check size={11} strokeWidth={3} /> : <span className="text-[10px] font-bold">{i + 1}</span>}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                            {c.category && (
-                              <span className={['text-[10px] uppercase tracking-wider font-bold rounded-full px-2 py-0.5', catColor].join(' ')}>
-                                {c.category}
-                              </span>
-                            )}
-                            {c.startTime && c.endTime && (
-                              <span className="text-[10px] font-mono text-[var(--color-purple-gray)]">
-                                {c.startTime} → {c.endTime}
-                              </span>
-                            )}
-                            {typeof (c as any).duration === 'number' && (
-                              <span className="text-[10px] font-mono text-[var(--color-purple-gray)]">
-                                {(c as any).duration}s
-                              </span>
-                            )}
-                            {typeof c.estimatedSeconds === 'number' && !(c as any).duration && (
-                              <span className="text-[10px] font-mono text-[var(--color-purple-gray)]">
-                                ≈ {c.estimatedSeconds}s
-                              </span>
-                            )}
-                          </div>
-                          {(c as any).clip_title && (
-                            <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] mb-1">
-                              {(c as any).clip_title}
-                            </p>
-                          )}
-                          <p className="text-[13px] text-[var(--color-deep-plum)] leading-snug">
-                            "{c.quote}"
-                          </p>
-                        </div>
-                      </div>
-                    </button>
+        <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
+          {clipSuggestions.length} suggestions — ranked by social potential · pick {reelCount}
+          {clipSelections.length > 0 && ` · ${clipSelections.length} selected`}
+        </p>
+      )}
 
-                    {/* AI insight pills */}
-                    {((c as any).suggested_hook || (c as any).why_this_clip || (c as any).caption_angle) && (
-                      <div className="px-4 pb-3 space-y-1.5 pl-13">
-                        {(c as any).suggested_hook && (
-                          <div className="flex items-start gap-1.5">
-                            <Zap size={10} className="text-[var(--color-primary-purple)] mt-0.5 shrink-0" />
-                            <p className="text-[11px] text-[var(--color-deep-plum)] font-semibold">
-                              Hook: <span className="font-normal italic">"{(c as any).suggested_hook}"</span>
-                            </p>
-                          </div>
-                        )}
-                        {(c as any).why_this_clip && (
-                          <div className="flex items-start gap-1.5">
-                            <Lightbulb size={10} className="text-amber-500 mt-0.5 shrink-0" />
-                            <p className="text-[11px] text-[var(--color-purple-gray)]">{(c as any).why_this_clip}</p>
-                          </div>
-                        )}
-                        {(c as any).caption_angle && (
-                          <div className="flex items-start gap-1.5">
-                            <MessageSquare size={10} className="text-[var(--color-purple-gray)] mt-0.5 shrink-0" />
-                            <p className="text-[11px] text-[var(--color-purple-gray)] italic">{(c as any).caption_angle}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
+      {/* Clip list */}
+      {clipSuggestions.length > 0 && (
+        <ul className="space-y-2">
+          {clipSuggestions.map((c, i) => {
+            const clipId = (c as any).clip_id ?? `suggestion-${i}`
+            const cWithId = { ...c, clip_id: clipId }
+            return (
+              <li key={clipId}>
+                <ClipCard
+                  clip={cWithId}
+                  index={i}
+                  isPicked={isPicked(c)}
+                  isPinned={pinnedIds.has(clipId)}
+                  onSelect={() => togglePick(cWithId)}
+                  onPlay={() => c.startTime ? seekAndPlay(mmssToSeconds(c.startTime)) : undefined}
+                  onPin={() => togglePin(clipId)}
+                  transcriptWords={transcriptWords}
+                  onUpdateTimes={(st, et, q) => updateClipTimes(i, st, et, q)}
+                />
+              </li>
+            )
+          })}
+        </ul>
+      )}
 
-                    {/* Video preview toggle */}
-                    {videoUrl && c.startTime && (
-                      <div className="px-4 pb-3">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const key = `${i}-${c.startTime}`
-                            setPreviewKey(prev => prev === key ? null : key)
-                          }}
-                          className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--color-primary-purple)] hover:text-[var(--color-deep-plum)] transition-colors"
-                        >
-                          {previewKey === `${i}-${c.startTime}`
-                            ? <><EyeOff size={11} /> Hide preview</>
-                            : <><Play size={11} /> Preview clip</>
-                          }
-                        </button>
-                        {previewKey === `${i}-${c.startTime}` && (
-                          <div className="mt-2">
-                            <ClipVideoPreview
-                              videoUrl={videoUrl}
-                              videoSourceType={videoSourceType}
-                              startTime={c.startTime}
-                              endTime={c.endTime}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        </section>
+      {generating && clipSuggestions.length === 0 && (
+        <div className="flex items-center justify-center py-12 text-[var(--color-purple-gray)]">
+          <Loader2 size={20} className="animate-spin mr-2" />
+          <span className="text-[13px]">Finding the best moments…</span>
+        </div>
       )}
 
       {/* Nav */}
@@ -700,9 +595,7 @@ export function ClipSelectionStep() {
         >
           {continueReady
             ? 'Continue'
-            : clipSelections.length < reelCount
-              ? `Continue (${clipSelections.length}/${reelCount} picked)`
-              : 'Pick a style for each clip'}
+            : `Continue (${clipSelections.length}/${reelCount} picked)`}
         </SrpButton>
       </div>
     </div>
@@ -712,7 +605,7 @@ export function ClipSelectionStep() {
 function assignClipId(clip: SrpClipSelection, slotNumber: number): SrpClipSelection {
   return {
     ...clip,
-    clip_id:      clip.clip_id ?? `clip_${slotNumber}_${Date.now().toString(36)}`,
+    clip_id:      (clip as any).clip_id ?? `clip_${slotNumber}_${Date.now().toString(36)}`,
     caption_text: clip.caption_text ?? clip.quote ?? '',
   }
 }
