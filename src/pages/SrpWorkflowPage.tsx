@@ -15,7 +15,7 @@
  * Batches 2-4. See docs/SRP_PORT_PLAN.md.
  */
 
-import { useEffect, type ReactElement } from 'react'
+import { useEffect, useMemo, type ReactElement } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Building2, ListChecks, FileVideo, Scissors, Film,
@@ -106,8 +106,19 @@ function SrpWorkflowInner() {
     isResuming, error, sessionId,
     account, setAccount,
     visibleSteps, currentStep, setCurrentStep,
+    savedStep,
     clickupTaskId,
   } = useSrpWorkflow()
+
+  // All steps from the start through the furthest point reached (max of
+  // savedStep from DB and the current live step) are marked as started.
+  // This keeps them highlighted when navigating backwards within a session.
+  const startedSteps = useMemo(() => {
+    const savedIx   = visibleSteps.indexOf(savedStep)
+    const currentIx = visibleSteps.indexOf(currentStep)
+    const highIx    = Math.max(savedIx, currentIx)
+    return new Set(visibleSteps.slice(0, highIx + 1))
+  }, [visibleSteps, savedStep, currentStep])
 
   // Once the context loads the session row, fetch the full SquadAccount
   // so the Quick Links + Account Info Panel populate.
@@ -164,6 +175,7 @@ function SrpWorkflowInner() {
       stepItems={stepItems}
       currentStep={currentStep}
       onJump={setCurrentStep}
+      startedSteps={startedSteps}
       clickupTaskId={clickupTaskId}
       sidebarFooter={
         <>

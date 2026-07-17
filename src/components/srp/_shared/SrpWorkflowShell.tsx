@@ -17,21 +17,20 @@ import { SrpSidebarStepper, type SrpSidebarStepperItem } from './SrpSidebarStepp
 export function SrpWorkflowShell({
   backHref, backLabel,
   kicker, title, connected,
-  stepItems, currentStep, onJump,
+  stepItems, currentStep, onJump, startedSteps,
   sidebarFooter,
   clickupTaskId,
   children,
 }: {
-  backHref:    string
-  backLabel:   string
-  /** Primary-Purple eyebrow over the title. */
-  kicker:      string
-  title:       string
-  /** Realtime connection indicator — green dot when live, muted when polling. */
-  connected:   boolean
-  stepItems:   SrpSidebarStepperItem[]
-  currentStep: SrpWorkflowStep
-  onJump:      (s: SrpWorkflowStep) => void
+  backHref:      string
+  backLabel:     string
+  kicker:        string
+  title:         string
+  connected:     boolean
+  stepItems:     SrpSidebarStepperItem[]
+  currentStep:   SrpWorkflowStep
+  onJump:        (s: SrpWorkflowStep) => void
+  startedSteps?: Set<SrpWorkflowStep>
   /** Quick Links + Account Info Panel render here, below the stepper. */
   sidebarFooter?: React.ReactNode
   /** When set, renders a "View in ClickUp" pill below the stepper. */
@@ -73,7 +72,7 @@ export function SrpWorkflowShell({
 
         <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-6 items-start">
           <aside className="lg:sticky lg:top-6 space-y-3">
-            <SrpSidebarStepper items={stepItems} currentStep={currentStep} onJump={onJump} />
+            <SrpSidebarStepper items={stepItems} currentStep={currentStep} onJump={onJump} startedSteps={startedSteps} />
             {clickupTaskId && (
               <a
                 href={`https://app.clickup.com/t/${clickupTaskId}`}

@@ -22,11 +22,12 @@ export interface SrpSidebarStepperItem {
 }
 
 export function SrpSidebarStepper({
-  items, currentStep, onJump,
+  items, currentStep, onJump, startedSteps,
 }: {
-  items:       SrpSidebarStepperItem[]
-  currentStep: SrpWorkflowStep
-  onJump:      (s: SrpWorkflowStep) => void
+  items:         SrpSidebarStepperItem[]
+  currentStep:   SrpWorkflowStep
+  onJump:        (s: SrpWorkflowStep) => void
+  startedSteps?: Set<SrpWorkflowStep>
 }) {
   const currentIx = items.findIndex(it => it.step === currentStep)
 
@@ -37,43 +38,36 @@ export function SrpSidebarStepper({
       </p>
       <ol className="space-y-0.5">
         {items.map((it, i) => {
-          const isActive = i === currentIx
-          const isDone   = i < currentIx
-          // All steps are always jumpable — this is a session workspace,
-          // not a strict wizard. Coaches need to revisit any step after
-          // client revisions without clicking Continue through every step.
-          const canJump  = true
-          const Icon     = it.icon
+          const isActive  = i === currentIx
+          // isStarted: visited at least once (independent of current position)
+          const isStarted = !isActive && (startedSteps?.has(it.step) ?? i < currentIx)
+          const Icon      = it.icon
           return (
             <li key={it.step}>
               <button
-                onClick={() => canJump && onJump(it.step)}
-                disabled={!canJump}
+                onClick={() => onJump(it.step)}
                 aria-current={isActive ? 'step' : undefined}
                 className={[
                   'w-full text-left rounded-md flex items-start gap-3 px-2.5 py-2 transition-colors',
                   isActive
                     ? 'bg-[var(--color-lavender-tint)] text-[var(--color-deep-plum)]'
-                    : isDone
+                    : isStarted
                       ? 'bg-[var(--color-lavender-tint)]/50 text-[var(--color-deep-plum)] hover:bg-[var(--color-lavender-tint)] cursor-pointer'
                       : 'text-[var(--color-purple-gray)] hover:bg-[var(--color-lavender-tint)]/40 cursor-pointer opacity-60',
                 ].join(' ')}
               >
-                {/* Numbered / checked avatar. Active = filled Primary
-                    Purple; done = lavender ring with check; future =
-                    flat lavender outline only. */}
                 <span
                   aria-hidden
                   className={[
                     'shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full text-[11px] font-mono font-bold',
                     isActive
                       ? 'bg-[var(--color-primary-purple)] text-white'
-                      : isDone
+                      : isStarted
                         ? 'bg-[var(--color-lavender)] text-[var(--color-deep-plum)]'
                         : 'border border-[var(--color-lavender)] text-[var(--color-purple-gray)]',
                   ].join(' ')}
                 >
-                  {isDone ? <Check size={12} strokeWidth={3} /> : String(i + 1).padStart(2, '0')}
+                  {isStarted ? <Check size={12} strokeWidth={3} /> : String(i + 1).padStart(2, '0')}
                 </span>
 
                 <span className="flex flex-col min-w-0 pt-0.5">
