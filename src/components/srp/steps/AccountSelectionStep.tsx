@@ -1,24 +1,21 @@
 /**
- * Step 1 — Account selection.
+ * Step 1 — Account / task selection (holding session only).
  *
- * The session is already keyed on a member (set when the dashboard
- * created the row). This step is where the coach:
- *   1. Confirms / reviews the church
- *   2. Pairs a sermon submission from the Recent Submissions popup OR
- *      the Pair-by-Task-ID search
- *   3. Edits the per-account brand voice (writes to
- *      srp_pipeline.clip_templates — NOT strategy_account_progress)
- *
- * Continue is gated on having an account loaded.
+ * This step is shown only for holding sessions (no clickup_task_id).
+ * The coach:
+ *   1. Selects a sermon submission from the Recent Submissions list
+ *   2. Clicks Continue → a dedicated task session is created and the
+ *      coach is navigated there
+ *   3. (Optionally) edits the per-account brand voice
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowRight, Loader2, Save, Building2, Sparkles, Link as LinkIcon } from 'lucide-react'
+import { ArrowRight, Loader2, Save, Sparkles } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import { RecentSubmissionsWidget } from '../RecentSubmissionsWidget'
-import { STEP_LABELS, STEP_DESCRIPTIONS, updateSession, createSession, suggestDeliverablesFromText } from '../../../lib/srpSessions'
+import { createSession, updateSession, suggestDeliverablesFromText } from '../../../lib/srpSessions'
 import { saveBrandVoice } from '../../../lib/squadAccount'
 import type { SrpSermonSubmission } from '../../../types/database'
 
@@ -27,30 +24,22 @@ export function AccountSelectionStep() {
   const {
     sessionId,
     account,
-    sermonSubmission, setSermonSubmission,
-    setCurrentStep, savedStep, visibleSteps,
+    sermonSubmission,
     brandVoice, setBrandVoice,
-    clickupTaskId, setClickupTaskId,
-    setSelectedDeliverables,
-    setVideoUrl, setTranscript, setTranscriptWords, setHasTimecodes,
-    goToNextStep,
   } = useSrpWorkflow()
 
-  // Continue goes to where the session was left off (if past account),
-  // otherwise advances normally to deliverables.
-  const handleContinue = () => {
-    if (savedStep !== 'account') {
-      setCurrentStep(savedStep)
-    } else {
-      goToNextStep()
-    }
-  }
+  // Pre-select the task if this session already had one when it loaded
+  const [selectedTask, setSelectedTask] = useState<SrpSermonSubmission | null>(null)
+  useEffect(() => {
+    if (sermonSubmission && !selectedTask) setSelectedTask(sermonSubmission)
+  }, [sermonSubmission]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Local brand voice draft so the textarea doesn't autosave-thrash.
   const [voiceDraft, setVoiceDraft] = useState<string>('')
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<Date | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [pairing, setPairing] = useState(false)
 
   // Hydrate the draft from the loaded account once.
   const didSeed = useRef(false)
@@ -76,81 +65,79 @@ export function AccountSelectionStep() {
     }
   }, [account?.member, voiceDraft, setBrandVoice])
 
-  const handlePair = useCallback(async (s: SrpSermonSubmission) => {
-    // If a real coach session already exists for this task, navigate to it —
-    // unless the stored session_id is THIS session (stale link from before the
-    // fix that prevented overwriting). In that case fall through and create a
-    // fresh dedicated session for this submission.
-    if (s.pipeline_session_id && s.session_status && s.session_status !== 'background') {
-      if (s.pipeline_session_id !== sessionId) {
-        navigate(`/social/srp/${encodeURIComponent(s.pipeline_session_id)}`)
-        return
-      }
-      // Same session ID AND same task → already paired, nothing to do.
-      if (s.clickup_task_id === clickupTaskId) return
-      // Same session ID but DIFFERENT task → stale link; fall through to create fresh session.
+  const handleContinue = useCallback(async () => {
+    if (!selectedTask) return
+
+    // If this task already has its own dedicated coach session, navigate there
+    if (selectedTask.pipeline_session_id &&
+        selectedTask.session_status &&
+        selectedTask.session_status !== 'background') {
+      navigate(`/social/srp/${encodeURIComponent(selectedTask.pipeline_session_id)}`)
+      return
     }
 
-    // Fetch ClickUp task description for deliverable detection
-    let detectedText = [s.srp_info_selection, s.sermon_title, s.series_title].filter(Boolean).join(' ')
-    if (s.clickup_task_id) {
-      try {
-        const res = await fetch(`/api/clickup/task-detail?taskId=${encodeURIComponent(s.clickup_task_id)}`)
-        if (res.ok) {
-          const td = await res.json()
-          detectedText = `${detectedText} ${td.description ?? ''}`.trim()
-        }
-      } catch { /* fall back to submission text */ }
-    }
-    const suggested = suggestDeliverablesFromText(detectedText)
-
-    // Fetch background pipeline session data (transcript, video, auto_drafts)
-    let pipelineVideoUrl: string | null = null
-    let pipelineTranscript: string | null = null
-    let pipelineTranscriptWords: unknown[] | null = null
-    let pipelineAutoDrafts: Record<string, unknown> | null = null
-    let pipelineHasTimecodes: boolean | null = null
-    if (s.clickup_task_id) {
-      try {
-        const res = await fetch('/api/srp/get-background-session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ clickup_task_id: s.clickup_task_id }),
-        })
-        if (res.ok) {
-          const ps = await res.json()
-          if (ps.found) {
-            if (ps.video_url)         pipelineVideoUrl       = ps.video_url
-            if (ps.transcript)        pipelineTranscript     = ps.transcript
-            if (ps.transcript_words)  pipelineTranscriptWords = ps.transcript_words
-            if (ps.auto_drafts)       pipelineAutoDrafts     = ps.auto_drafts
-            if (ps.has_timecodes != null) pipelineHasTimecodes = ps.has_timecodes
-          }
-        }
-      } catch { /* non-fatal */ }
-    }
-
-    const videoUrlToSave = pipelineVideoUrl ?? s.video_url ?? null
-
-    // This is a different sermon than what the current session was created for.
-    // Create a fresh session so each sermon has its own workspace.
+    // Create a new dedicated session for this task
+    setPairing(true)
     try {
+      // Fetch task description for deliverable detection
+      let detectedText = [selectedTask.srp_info_selection, selectedTask.sermon_title, selectedTask.series_title].filter(Boolean).join(' ')
+      if (selectedTask.clickup_task_id) {
+        try {
+          const res = await fetch(`/api/clickup/task-detail?taskId=${encodeURIComponent(selectedTask.clickup_task_id)}`)
+          if (res.ok) {
+            const td = await res.json()
+            detectedText = `${detectedText} ${td.description ?? ''}`.trim()
+          }
+        } catch { /* non-fatal */ }
+      }
+      const suggested = suggestDeliverablesFromText(detectedText)
+
+      // Fetch background pipeline data
+      let pipelineVideoUrl: string | null = null
+      let pipelineTranscript: string | null = null
+      let pipelineTranscriptWords: unknown[] | null = null
+      let pipelineAutoDrafts: Record<string, unknown> | null = null
+      let pipelineHasTimecodes: boolean | null = null
+      if (selectedTask.clickup_task_id) {
+        try {
+          const res = await fetch('/api/srp/get-background-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clickup_task_id: selectedTask.clickup_task_id }),
+          })
+          if (res.ok) {
+            const ps = await res.json()
+            if (ps.found) {
+              if (ps.video_url)             pipelineVideoUrl        = ps.video_url
+              if (ps.transcript)            pipelineTranscript      = ps.transcript
+              if (ps.transcript_words)      pipelineTranscriptWords = ps.transcript_words
+              if (ps.auto_drafts)           pipelineAutoDrafts      = ps.auto_drafts
+              if (ps.has_timecodes != null) pipelineHasTimecodes    = ps.has_timecodes
+            }
+          }
+        } catch { /* non-fatal */ }
+      }
+
+      const videoUrlToSave = pipelineVideoUrl ?? selectedTask.video_url ?? null
+
+      // Create the dedicated task session starting at deliverables
       const { session_id: newSlug } = await createSession({
         member:                account?.member ?? 0,
         churchName:            account?.church_name ?? '',
         userEmail:             null,
-        clickupTaskId:         s.clickup_task_id ?? null,
-        sermonTitle:           s.sermon_title ?? null,
+        clickupTaskId:         selectedTask.clickup_task_id ?? null,
+        sermonTitle:           selectedTask.sermon_title ?? null,
         suggestedDeliverables: suggested.length > 0 ? suggested : null,
         videoUrl:              videoUrlToSave,
+        startStep:             'deliverables',
       })
 
-      // Hydrate the new session with whatever we pulled from the background run
+      // Hydrate with pipeline data and sermon metadata
       const extras: Record<string, unknown> = {
-        sermon_description: s.sermon_description,
-        series_title:       s.series_title,
-        series_description: s.series_description,
-        ...(s.clickup_task_id ? { clickup_url: `https://app.clickup.com/t/${s.clickup_task_id}` } : {}),
+        sermon_description: selectedTask.sermon_description,
+        series_title:       selectedTask.series_title,
+        series_description: selectedTask.series_description,
+        ...(selectedTask.clickup_task_id ? { clickup_url: `https://app.clickup.com/t/${selectedTask.clickup_task_id}` } : {}),
         ...(pipelineTranscript      ? { transcript:        pipelineTranscript }      : {}),
         ...(pipelineTranscriptWords ? { transcript_words:  pipelineTranscriptWords } : {}),
         ...(pipelineAutoDrafts      ? { auto_drafts:       pipelineAutoDrafts }      : {}),
@@ -162,11 +149,10 @@ export function AccountSelectionStep() {
 
       navigate(`/social/srp/${encodeURIComponent(newSlug)}`)
     } catch (e) {
-      console.error('Failed to create session for paired task:', e)
+      console.error('Failed to create task session:', e)
+      setPairing(false)
     }
-  }, [sessionId, account, navigate, setSermonSubmission, setClickupTaskId, setSelectedDeliverables, setVideoUrl, setTranscript, setTranscriptWords, setHasTimecodes])
-
-  const stepNum = visibleSteps.indexOf('account') + 1
+  }, [selectedTask, account, navigate, sessionId])
 
   const voiceIsDirty = useMemo(
     () => voiceDraft !== (account?.brand_voice_guidelines ?? brandVoice ?? ''),
@@ -175,47 +161,11 @@ export function AccountSelectionStep() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <p className="text-[10px] uppercase tracking-[0.12em] font-bold text-[var(--color-primary-purple)]">
-          Step {stepNum} of {visibleSteps.length}
-        </p>
-        <h2 className="text-[22px] font-semibold text-[var(--color-deep-plum)] mt-0.5">
-          {STEP_LABELS.account}
-        </h2>
-        <p className="text-[13px] text-[var(--color-purple-gray)] mt-1">
-          {STEP_DESCRIPTIONS.account}
-        </p>
-      </header>
-
-      {/* Church card */}
-      <section className="rounded-xl border border-[var(--color-lavender)] bg-white px-5 py-4">
-        <div className="flex items-start gap-3">
-          <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-[var(--color-lavender-tint)] text-[var(--color-primary-purple)] shrink-0">
-            <Building2 size={16} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[15px] font-semibold text-[var(--color-deep-plum)] truncate">
-              {account?.church_name ?? '—'}
-            </p>
-            <p className="text-[12px] text-[var(--color-purple-gray)] font-mono">
-              Member {account?.member ?? '—'}
-            </p>
-            {sermonSubmission && (
-              <div className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)] rounded-full px-2.5 py-1">
-                <LinkIcon size={10} />
-                Paired with: <span className="font-semibold truncate max-w-[260px]">{sermonSubmission.sermon_title ?? sermonSubmission.series_title ?? sermonSubmission.clickup_task_id}</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* Recent submissions */}
+      {/* Recent submissions — selection list */}
       <RecentSubmissionsWidget
-        pairedTaskId={clickupTaskId}
-        currentSessionId={sessionId}
+        selectedTaskId={selectedTask?.clickup_task_id}
         member={account?.member}
-        onPair={handlePair}
+        onSelect={setSelectedTask}
       />
 
       {/* Brand voice editor */}
@@ -268,16 +218,13 @@ export function AccountSelectionStep() {
       {/* Continue */}
       <div className="flex items-center justify-end gap-3 pt-2">
         <SrpButton
-          disabled={!account}
-          onClick={handleContinue}
-          trailingIcon={<ArrowRight size={14} />}
+          disabled={!selectedTask || pairing}
+          onClick={() => void handleContinue()}
+          trailingIcon={pairing ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
         >
-          {savedStep !== 'account' ? 'Continue session →' : 'Continue to deliverables'}
+          {pairing ? 'Loading…' : 'Continue →'}
         </SrpButton>
       </div>
-
-      {/* Suppress unused-import warning for setCurrentStep */}
-      <span className="hidden">{typeof setCurrentStep}</span>
     </div>
   )
 }

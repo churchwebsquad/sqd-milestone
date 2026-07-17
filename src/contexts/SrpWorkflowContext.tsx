@@ -269,7 +269,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
 
   // ── visibleSteps: conditional on selectedDeliverables ───────────────
   const visibleSteps = useMemo<SrpWorkflowStep[]>(() => {
-    const steps: SrpWorkflowStep[] = ['account', 'deliverables']
+    const steps: SrpWorkflowStep[] = [...(clickupTaskId ? [] : ['account' as SrpWorkflowStep]), 'deliverables']
     const hasReels = selectedDeliverables.some(isSrpReelDeliverable)
     if (selectedDeliverables.length > 0) {
       steps.push('sermon', 'overview')
@@ -301,7 +301,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     setSessionStatus(row.status ?? 'in_progress')
     const dbStep = (row.current_step as SrpWorkflowStep) ?? 'account'
     setSavedStep(dbStep)
-    setCurrentStepRaw('account')
+    setCurrentStepRaw(row.clickup_task_id ? dbStep : 'account')
     setSelectedDeliverables(
       Array.isArray(row.selected_deliverables) ? row.selected_deliverables.filter(d => typeof d === 'string') as SrpDeliverable[] : [],
     )

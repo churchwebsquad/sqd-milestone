@@ -103,6 +103,7 @@ export async function createSession(input: {
   sermonTitle?:           string | null
   suggestedDeliverables?: SrpDeliverable[] | null
   videoUrl?:              string | null
+  startStep?:             SrpWorkflowStep | null
 }): Promise<{ id: string; session_id: string }> {
   const session_id = makeSessionId(input.member, input.churchName)
   const memberNum = typeof input.member === 'number' ? input.member : Number(input.member)
@@ -115,7 +116,7 @@ export async function createSession(input: {
       member:                memberNum,
       church_name:           input.churchName,
       user_email:            input.userEmail,
-      current_step:          input.clickupTaskId ? 'deliverables' : 'account',
+      current_step:          input.startStep ?? (input.clickupTaskId ? 'deliverables' : 'account'),
       status:                'in_progress',
       // TODO: restore once v77_srp_sessions_brand_voice.sql migration is run
       // ...(input.brandVoiceGuidelines ? { brand_voice_guidelines: input.brandVoiceGuidelines } : {}),

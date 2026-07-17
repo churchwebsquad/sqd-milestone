@@ -1,20 +1,15 @@
 /**
  * Recent Submissions widget — shown on the AccountSelection step.
  *
- * Two modes:
- *   1. Weekly list — calls /api/srp/fetch-sermon-submissions with no
- *      arguments. Returns the current Friday-Thursday window's
- *      submissions ordered newest-first.
- *   2. Search — coach pastes a ClickUp task ID; the endpoint runs a
- *      targeted lookup and returns the single matching submission
- *      (regardless of date).
+ * Selection-list mode: clicking a row (or its Select button) calls
+ * onSelect(submission). The parent owns selection state and passes
+ * selectedTaskId so the widget can highlight the active row.
  *
- * Clicking a row calls onPair(submission), which the step uses to
- * write clickup_task_id + sermon metadata onto the session.
+ * Rows that already have a dedicated non-background session show a
+ * "Resume" badge to indicate prior work exists.
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Loader2, RefreshCw, Search, ExternalLink, Sparkles, Check, FileText, AlertTriangle } from 'lucide-react'
 import { callSrpApi } from '../../lib/srpApi'
 import type { SrpSermonSubmission } from '../../types/database'
@@ -27,19 +22,20 @@ interface FetchResponse {
 
 export function RecentSubmissionsWidget({
   pairedTaskId,
-  currentSessionId,
+  selectedTaskId,
   member,
-  onPair,
+  onSelect,
 }: {
-  /** Currently paired ClickUp task ID — used to highlight the row. */
+  /** Currently paired/selected ClickUp task ID — used to highlight the row. */
   pairedTaskId?: string | null
-  /** Current session ID — rows whose pipeline_session_id matches this are the active session. */
-  currentSessionId?: string | null
+  /** Alias for pairedTaskId — whichever is provided takes priority. */
+  selectedTaskId?: string | null
   /** Filter weekly submissions to this church member number. */
   member?:       number | null
-  onPair:       (s: SrpSermonSubmission) => void
+  onSelect:      (s: SrpSermonSubmission) => void
 }) {
-  const navigate = useNavigate()
+  const activeTaskId = selectedTaskId ?? pairedTaskId ?? null
+
   const [submissions, setSubmissions] = useState<SrpSermonSubmission[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -108,7 +104,7 @@ export function RecentSubmissionsWidget({
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Pair by ClickUp task ID (e.g. 86c0xyz)"
+            placeholder="Search by ClickUp task ID (e.g. 86c0xyz)"
             className="w-full rounded-full border border-[var(--color-lavender)] bg-white pl-9 pr-3 py-1.5 text-[12px] text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] focus:ring-2 focus:ring-[var(--color-lavender)]"
           />
           {searching && (
@@ -136,27 +132,21 @@ export function RecentSubmissionsWidget({
         {submissions.length > 0 && (
           <ul className="divide-y divide-[var(--color-lavender)]">
             {submissions.map(s => {
-              const isPaired = pairedTaskId && s.clickup_task_id === pairedTaskId
-              // A submission has its own distinct session when it has a
-              // non-background pipeline_session_id that is NOT the current session.
-              const hasOwnSession =
+              const isSelected = activeTaskId && s.clickup_task_id === activeTaskId
+              const hasExistingSession =
                 !!s.pipeline_session_id &&
                 !!s.session_status &&
-                s.session_status !== 'background' &&
-                s.pipeline_session_id !== currentSessionId
-              const handleClick = hasOwnSession
-                ? () => navigate(`/social/srp/${encodeURIComponent(s.pipeline_session_id!)}`)
-                : () => onPair(s)
+                s.session_status !== 'background'
               return (
                 <li key={s.clickup_task_id ?? `${s.account}-${s.created_at}`}>
                   <button
                     type="button"
-                    onClick={handleClick}
+                    onClick={() => onSelect(s)}
                     className={[
                       'w-full text-left px-4 py-3 transition-colors',
-                      isPaired
-                        ? 'bg-[var(--color-lavender-tint)]'
-                        : 'hover:bg-[var(--color-lavender-tint)]/60',
+                      isSelected
+                        ? 'bg-[var(--color-lavender-tint)] border-l-2 border-[var(--color-primary-purple)]'
+                        : 'hover:bg-[var(--color-lavender-tint)]/50',
                     ].join(' ')}
                   >
                     <div className="flex items-start gap-3">
@@ -192,38 +182,37 @@ export function RecentSubmissionsWidget({
                           </span>
                         </p>
                       </div>
-                      <div className="shrink-0 flex flex-col items-end gap-1">
-                        {/* Existing coach session — clicking the row will navigate there */}
-                        {s.pipeline_session_id && s.session_status && s.session_status !== 'background' ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)] px-1.5 py-px rounded-full">
-                            Open session →
+                      <div className="shrink-0 flex flex-col items-end gap-1.5">
+                        {isSelected ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-bold text-[var(--color-primary-purple)]">
+                            <Check size={11} /> Selected
+                          </span>
+                        ) : hasExistingSession ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#15803D] bg-[#F0FDF4] px-2 py-1 rounded-full">
+                            Resume
                           </span>
                         ) : (
-                          <>
-                            {isPaired && (
-                              <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-bold text-[var(--color-primary-purple)]">
-                                <Check size={11} /> paired
-                              </span>
-                            )}
-                            {s.pipeline_status === 'transcribed' && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#15803D] bg-[#F0FDF4] px-1.5 py-px rounded-full">
-                                <FileText size={9} /> Transcript ready
-                              </span>
-                            )}
-                            {s.pipeline_status === 'pending' && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#513DE5] bg-[#EDE9FC] px-1.5 py-px rounded-full">
-                                <Loader2 size={9} className="animate-spin" /> Processing…
-                              </span>
-                            )}
-                            {s.pipeline_status === 'error' && (
-                              <span
-                                className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-px rounded-full"
-                                title={s.pipeline_error ?? 'Pipeline error'}
-                              >
-                                <AlertTriangle size={9} /> No video
-                              </span>
-                            )}
-                          </>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[var(--color-purple-gray)] bg-[var(--color-lavender-tint)] px-2 py-1 rounded-full">
+                            Select
+                          </span>
+                        )}
+                        {s.pipeline_status === 'transcribed' && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#15803D] bg-[#F0FDF4] px-1.5 py-px rounded-full">
+                            <FileText size={9} /> Transcript ready
+                          </span>
+                        )}
+                        {s.pipeline_status === 'pending' && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#513DE5] bg-[#EDE9FC] px-1.5 py-px rounded-full">
+                            <Loader2 size={9} className="animate-spin" /> Processing…
+                          </span>
+                        )}
+                        {s.pipeline_status === 'error' && (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-px rounded-full"
+                            title={s.pipeline_error ?? 'Pipeline error'}
+                          >
+                            <AlertTriangle size={9} /> No video
+                          </span>
                         )}
                       </div>
                     </div>
