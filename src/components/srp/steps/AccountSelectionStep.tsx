@@ -77,13 +77,18 @@ export function AccountSelectionStep() {
   }, [account?.member, voiceDraft, setBrandVoice])
 
   const handlePair = useCallback(async (s: SrpSermonSubmission) => {
-    // If a real coach session already exists for this task, navigate to it.
+    // If a real coach session already exists for this task, navigate to it —
+    // unless the stored session_id is THIS session (stale link from before the
+    // fix that prevented overwriting). In that case fall through and create a
+    // fresh dedicated session for this submission.
     if (s.pipeline_session_id && s.session_status && s.session_status !== 'background') {
       if (s.pipeline_session_id !== sessionId) {
         navigate(`/social/srp/${encodeURIComponent(s.pipeline_session_id)}`)
+        return
       }
-      // If same session, nothing to do.
-      return
+      // Same session ID AND same task → already paired, nothing to do.
+      if (s.clickup_task_id === clickupTaskId) return
+      // Same session ID but DIFFERENT task → stale link; fall through to create fresh session.
     }
 
     // Fetch ClickUp task description for deliverable detection
