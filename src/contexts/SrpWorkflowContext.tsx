@@ -58,6 +58,8 @@ interface SrpWorkflowState {
   // Step
   currentStep: SrpWorkflowStep
   setCurrentStep: (s: SrpWorkflowStep) => void
+  savedStep: SrpWorkflowStep   // step persisted in DB when session loaded
+  setSavedStep: (s: SrpWorkflowStep) => void
   visibleSteps: SrpWorkflowStep[]
   goToNextStep: () => void
   goToPrevStep: () => void
@@ -198,6 +200,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
   const [sermonSubmission, setSermonSubmission] = useState<SrpSermonSubmission | null>(null)
 
   // Step
+  const [savedStep, setSavedStep] = useState<SrpWorkflowStep>('account')
   const [currentStep, setCurrentStepRaw] = useState<SrpWorkflowStep>('account')
 
   // Session lifecycle status — preserved so autosave never downgrades 'background' to 'in_progress'
@@ -296,7 +299,9 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     isLoadingRef.current = true
     setSessionDbId(row.id)
     setSessionStatus(row.status ?? 'in_progress')
-    setCurrentStepRaw((row.current_step as SrpWorkflowStep) ?? 'account')
+    const dbStep = (row.current_step as SrpWorkflowStep) ?? 'account'
+    setSavedStep(dbStep)
+    setCurrentStepRaw('account')
     setSelectedDeliverables(
       Array.isArray(row.selected_deliverables) ? row.selected_deliverables.filter(d => typeof d === 'string') as SrpDeliverable[] : [],
     )
@@ -548,7 +553,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
   const value: SrpWorkflowState = {
     sessionId, sessionDbId, isResuming, error,
     account, setAccount, sermonSubmission, setSermonSubmission,
-    currentStep, setCurrentStep, visibleSteps, goToNextStep, goToPrevStep,
+    currentStep, setCurrentStep, savedStep, setSavedStep, visibleSteps, goToNextStep, goToPrevStep,
     selectedDeliverables, setSelectedDeliverables,
     videoUrl, setVideoUrl,
     videoSourceType, setVideoSourceType,

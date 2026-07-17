@@ -28,13 +28,23 @@ export function AccountSelectionStep() {
     sessionId,
     account,
     sermonSubmission, setSermonSubmission,
-    setCurrentStep, visibleSteps,
+    setCurrentStep, savedStep, visibleSteps,
     brandVoice, setBrandVoice,
     clickupTaskId, setClickupTaskId,
     setSelectedDeliverables,
     setVideoUrl, setTranscript, setTranscriptWords, setHasTimecodes,
     goToNextStep,
   } = useSrpWorkflow()
+
+  // Continue goes to where the session was left off (if past account),
+  // otherwise advances normally to deliverables.
+  const handleContinue = () => {
+    if (savedStep !== 'account') {
+      setCurrentStep(savedStep)
+    } else {
+      goToNextStep()
+    }
+  }
 
   // Local brand voice draft so the textarea doesn't autosave-thrash.
   const [voiceDraft, setVoiceDraft] = useState<string>('')
@@ -67,9 +77,14 @@ export function AccountSelectionStep() {
   }, [account?.member, voiceDraft, setBrandVoice])
 
   const handlePair = useCallback(async (s: SrpSermonSubmission) => {
-    // If a real coach session already exists for this task, navigate there directly.
+    // If a real coach session already exists for this task, load its saved step
+    // so Continue resumes there. Navigate only if it's a different session.
     if (s.pipeline_session_id && s.session_status && s.session_status !== 'background') {
-      navigate(`/social/srp/${encodeURIComponent(s.pipeline_session_id)}`)
+      if (s.pipeline_session_id !== sessionId) {
+        navigate(`/social/srp/${encodeURIComponent(s.pipeline_session_id)}`)
+        return
+      }
+      // Same session — savedStep already set by loadFromRow, nothing else needed.
       return
     }
 
@@ -248,10 +263,10 @@ export function AccountSelectionStep() {
       <div className="flex items-center justify-end gap-3 pt-2">
         <SrpButton
           disabled={!account}
-          onClick={goToNextStep}
+          onClick={handleContinue}
           trailingIcon={<ArrowRight size={14} />}
         >
-          Continue to deliverables
+          {savedStep !== 'account' ? 'Continue session →' : 'Continue to deliverables'}
         </SrpButton>
       </div>
 

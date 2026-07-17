@@ -16,7 +16,7 @@
  */
 
 import { useEffect, type ReactElement } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import {
   Building2, ListChecks, FileVideo, Scissors, Film,
   LayoutGrid, MessageSquare, Mail, Camera,
@@ -102,20 +102,12 @@ export default function SrpWorkflowPage() {
 }
 
 function SrpWorkflowInner() {
-  const [searchParams] = useSearchParams()
-  const fromHub = searchParams.get('from') === 'hub'
   const {
     isResuming, error, sessionId,
     account, setAccount,
     visibleSteps, currentStep, setCurrentStep,
     clickupTaskId,
   } = useSrpWorkflow()
-
-  // When navigated from the hub, always land on the account step
-  // so the coach can pair a new task or confirm the current one.
-  useEffect(() => {
-    if (fromHub && !isResuming) setCurrentStep('account')
-  }, [fromHub, isResuming, setCurrentStep])
 
   // Once the context loads the session row, fetch the full SquadAccount
   // so the Quick Links + Account Info Panel populate.
