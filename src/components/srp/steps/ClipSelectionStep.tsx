@@ -467,7 +467,11 @@ export function ClipSelectionStep() {
       // Preserve pinned clips, replace the rest
       const pinned = clipSuggestions.filter(c => c.clip_id && pinnedIds.has(c.clip_id))
       const fresh  = anchored.filter(c => !pinnedQuotes.includes(c.quote ?? ''))
-      setClipSuggestions([...pinned, ...fresh])
+      const nextSuggestions = [...pinned, ...fresh]
+      setClipSuggestions(nextSuggestions)
+      // Drop any saved selections whose quote no longer exists in the new suggestions
+      const validQuotes = new Set(nextSuggestions.map(c => c.quote))
+      setClipSelections(clipSelectionsRef.current.filter((c: SrpClipSelection) => validQuotes.has(c.quote)))
     } catch (e) {
       const err = e as Error & { errorCode?: string }
       setGenError(err.errorCode ? `${err.errorCode}: ${err.message}` : err.message)
@@ -484,6 +488,19 @@ export function ClipSelectionStep() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // When suggestions load (or change), drop any saved selections whose quote
+  // is no longer present — they're stale from a prior generation run and
+  // silently eat up selection slots.
+  useEffect(() => {
+    if (clipSuggestions.length === 0) return
+    const validQuotes = new Set(clipSuggestions.map(c => c.quote))
+    const pruned = clipSelectionsRef.current.filter((c: SrpClipSelection) => validQuotes.has(c.quote))
+    if (pruned.length !== clipSelectionsRef.current.length) {
+      setClipSelections(pruned)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clipSuggestions])
 
   // ── Pick / unpick ────────────────────────────────────────────────────────
 
