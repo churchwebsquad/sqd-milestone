@@ -18,7 +18,7 @@ import { ArrowRight, Loader2, Save, Building2, Sparkles, Link as LinkIcon } from
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import { RecentSubmissionsWidget } from '../RecentSubmissionsWidget'
-import { STEP_LABELS, STEP_DESCRIPTIONS, updateSession, suggestDeliverablesFromText } from '../../../lib/srpSessions'
+import { STEP_LABELS, STEP_DESCRIPTIONS, updateSession, createSession, suggestDeliverablesFromText } from '../../../lib/srpSessions'
 import { saveBrandVoice } from '../../../lib/squadAccount'
 import type { SrpSermonSubmission } from '../../../types/database'
 
@@ -77,21 +77,16 @@ export function AccountSelectionStep() {
   }, [account?.member, voiceDraft, setBrandVoice])
 
   const handlePair = useCallback(async (s: SrpSermonSubmission) => {
-    // If a real coach session already exists for this task, load its saved step
-    // so Continue resumes there. Navigate only if it's a different session.
+    // If a real coach session already exists for this task, navigate to it.
     if (s.pipeline_session_id && s.session_status && s.session_status !== 'background') {
       if (s.pipeline_session_id !== sessionId) {
         navigate(`/social/srp/${encodeURIComponent(s.pipeline_session_id)}`)
-        return
       }
-      // Same session — savedStep already set by loadFromRow, nothing else needed.
+      // If same session, nothing to do.
       return
     }
 
-    setSermonSubmission(s)
-    if (s.clickup_task_id) setClickupTaskId(s.clickup_task_id)
-
-    // Fetch the ClickUp task description to get the full deliverable list
+    // Fetch ClickUp task description for deliverable detection
     let detectedText = [s.srp_info_selection, s.sermon_title, s.series_title].filter(Boolean).join(' ')
     if (s.clickup_task_id) {
       try {
@@ -102,15 +97,14 @@ export function AccountSelectionStep() {
         }
       } catch { /* fall back to submission text */ }
     }
-
     const suggested = suggestDeliverablesFromText(detectedText)
-    if (suggested.length > 0) setSelectedDeliverables(suggested)
 
-    // Fetch background pipeline session data server-side (service role key bypasses RLS).
+    // Fetch background pipeline session data (transcript, video, auto_drafts)
     let pipelineVideoUrl: string | null = null
     let pipelineTranscript: string | null = null
     let pipelineTranscriptWords: unknown[] | null = null
     let pipelineAutoDrafts: Record<string, unknown> | null = null
+    let pipelineHasTimecodes: boolean | null = null
     if (s.clickup_task_id) {
       try {
         const res = await fetch('/api/srp/get-background-session', {
@@ -121,11 +115,11 @@ export function AccountSelectionStep() {
         if (res.ok) {
           const ps = await res.json()
           if (ps.found) {
-            if (ps.video_url) pipelineVideoUrl = ps.video_url
-            if (ps.transcript) pipelineTranscript = ps.transcript
-            if (ps.transcript_words) pipelineTranscriptWords = ps.transcript_words
-            if (ps.auto_drafts) pipelineAutoDrafts = ps.auto_drafts
-            if (ps.has_timecodes != null) setHasTimecodes(ps.has_timecodes)
+            if (ps.video_url)         pipelineVideoUrl       = ps.video_url
+            if (ps.transcript)        pipelineTranscript     = ps.transcript
+            if (ps.transcript_words)  pipelineTranscriptWords = ps.transcript_words
+            if (ps.auto_drafts)       pipelineAutoDrafts     = ps.auto_drafts
+            if (ps.has_timecodes != null) pipelineHasTimecodes = ps.has_timecodes
           }
         }
       } catch { /* non-fatal */ }
@@ -133,33 +127,39 @@ export function AccountSelectionStep() {
 
     const videoUrlToSave = pipelineVideoUrl ?? s.video_url ?? null
 
-    // Write to DB first — auto-generate effect reads transcript + auto_drafts
-    // from DB, so the write must complete before React state triggers that effect.
+    // This is a different sermon than what the current session was created for.
+    // Create a fresh session so each sermon has its own workspace.
     try {
-      await updateSession(sessionId, {
-        clickup_task_id:       s.clickup_task_id,
-        clickup_url:           s.clickup_task_id ? `https://app.clickup.com/t/${s.clickup_task_id}` : null,
-        sermon_title:          s.sermon_title,
-        sermon_description:    s.sermon_description,
-        series_title:          s.series_title,
-        series_description:    s.series_description,
-        ...(videoUrlToSave ? { video_url: videoUrlToSave } : {}),
-        ...(pipelineTranscript ? { transcript: pipelineTranscript } : {}),
-        ...(pipelineTranscriptWords ? { transcript_words: pipelineTranscriptWords } : {}),
-        ...(pipelineAutoDrafts ? { auto_drafts: pipelineAutoDrafts } : {}),
-        ...(suggested.length > 0 ? { selected_deliverables: suggested } : {}),
+      const { session_id: newSlug } = await createSession({
+        member:                account?.member ?? 0,
+        churchName:            account?.church_name ?? '',
+        userEmail:             null,
+        clickupTaskId:         s.clickup_task_id ?? null,
+        sermonTitle:           s.sermon_title ?? null,
+        suggestedDeliverables: suggested.length > 0 ? suggested : null,
+        videoUrl:              videoUrlToSave,
       })
-    } catch (e) {
-      console.error('Failed to persist pairing:', e)
-    }
 
-    // Now update state — auto_drafts in DB prevents auto-generate from re-running
-    if (pipelineVideoUrl) setVideoUrl(pipelineVideoUrl)
-    if (pipelineTranscript) {
-      setTranscript(pipelineTranscript)
-      setTranscriptWords(pipelineTranscriptWords)
+      // Hydrate the new session with whatever we pulled from the background run
+      const extras: Record<string, unknown> = {
+        sermon_description: s.sermon_description,
+        series_title:       s.series_title,
+        series_description: s.series_description,
+        ...(s.clickup_task_id ? { clickup_url: `https://app.clickup.com/t/${s.clickup_task_id}` } : {}),
+        ...(pipelineTranscript      ? { transcript:        pipelineTranscript }      : {}),
+        ...(pipelineTranscriptWords ? { transcript_words:  pipelineTranscriptWords } : {}),
+        ...(pipelineAutoDrafts      ? { auto_drafts:       pipelineAutoDrafts }      : {}),
+        ...(pipelineHasTimecodes != null ? { has_timecodes: pipelineHasTimecodes }   : {}),
+      }
+      if (Object.keys(extras).length > 0) {
+        await updateSession(newSlug, extras)
+      }
+
+      navigate(`/social/srp/${encodeURIComponent(newSlug)}`)
+    } catch (e) {
+      console.error('Failed to create session for paired task:', e)
     }
-  }, [sessionId, setSermonSubmission, setClickupTaskId, setSelectedDeliverables, setVideoUrl, setTranscript, setTranscriptWords, setHasTimecodes])
+  }, [sessionId, account, navigate, setSermonSubmission, setClickupTaskId, setSelectedDeliverables, setVideoUrl, setTranscript, setTranscriptWords, setHasTimecodes])
 
   const stepNum = visibleSteps.indexOf('account') + 1
 
