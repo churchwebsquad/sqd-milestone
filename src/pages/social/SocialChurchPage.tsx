@@ -305,7 +305,7 @@ export default function SocialChurchPage() {
 
     const active = srpSessions.find(s => s.status === 'in_progress')
     if (active) {
-      navigate(`/social/srp/${encodeURIComponent(active.session_id)}`)
+      navigate(`/social/srp/${encodeURIComponent(active.session_id)}?from=hub`)
       return
     }
 
