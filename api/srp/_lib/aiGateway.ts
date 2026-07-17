@@ -96,6 +96,22 @@ export class GatewayContractError extends Error {
   constructor(message: string) { super(message); this.name = 'GatewayContractError' }
 }
 
+/** Extract a JSON object from a text response (handles ```json ... ``` blocks and bare JSON). */
+function extractJsonFromText(text: string): Record<string, any> | null {
+  // Strip markdown code fences
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/)
+  const candidate = fenced ? fenced[1].trim() : text.trim()
+  // Find the outermost { ... }
+  const start = candidate.indexOf('{')
+  const end   = candidate.lastIndexOf('}')
+  if (start === -1 || end === -1) return null
+  try {
+    return JSON.parse(candidate.slice(start, end + 1))
+  } catch {
+    return null
+  }
+}
+
 /**
  * Call the Vercel AI Gateway and return the parsed tool arguments.
  *
@@ -192,11 +208,23 @@ export async function callGateway<T extends Record<string, any> = Record<string,
   const message = data?.choices?.[0]?.message
   const toolCall = message?.tool_calls?.[0]
   if (!toolCall || toolCall.type !== 'function' || toolCall.function?.name !== input.toolName) {
-    // Defensive: this shouldn't happen with tool_choice forced.
-    const text = typeof message?.content === 'string' ? message.content.slice(0, 300) : ''
+    // Gemini sometimes ignores forced tool_choice and returns JSON in a text
+    // code block. Extract it as a fallback before giving up.
+    const text = typeof message?.content === 'string' ? message.content : ''
+    if (text) {
+      const extracted = extractJsonFromText(text)
+      if (extracted !== null) {
+        const usage = data?.usage ?? {}
+        return {
+          args:  extracted as T,
+          usage: { inputTokens: usage.prompt_tokens ?? usage.input_tokens ?? 0, outputTokens: usage.completion_tokens ?? usage.output_tokens ?? 0 },
+          model: data?.model ?? input.model ?? MODEL_CONTENT,
+        }
+      }
+    }
     throw new GatewayContractError(
       `Expected forced tool call "${input.toolName}", got: ` +
-      (toolCall ? `${toolCall.function?.name ?? toolCall.type}` : `text="${text}"`),
+      (toolCall ? `${toolCall.function?.name ?? toolCall.type}` : `text="${text.slice(0, 300)}"`),
     )
   }
 
