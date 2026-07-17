@@ -123,7 +123,7 @@ function StickyVideoPlayer({
 
   // Dropbox / direct video — seek via currentTime after metadata loads
   if (effectiveSourceType === 'dropbox' || effectiveSourceType === 'direct') {
-    const direct = videoSourceType === 'dropbox'
+    const direct = effectiveSourceType === 'dropbox'
       ? videoUrl
           .replace('www.dropbox.com', 'dl.dropboxusercontent.com')
           .replace(/([?&])dl=0/, '$1dl=1')
