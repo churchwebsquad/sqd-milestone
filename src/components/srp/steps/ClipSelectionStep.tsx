@@ -89,7 +89,14 @@ function StickyVideoPlayer({
   activeStart:     number | null
   playerRef:       React.MutableRefObject<HTMLIFrameElement | null>
 }) {
-  const ytId = videoSourceType === 'youtube' ? extractYouTubeId(videoUrl) : null
+  // Detect source type from URL if not stored
+  const effectiveSourceType = videoSourceType ?? (
+    videoUrl.includes('youtu') ? 'youtube' :
+    videoUrl.includes('dropbox.com') ? 'dropbox' :
+    videoUrl.includes('vimeo.com') ? 'vimeo' : 'direct'
+  )
+
+  const ytId = effectiveSourceType === 'youtube' ? extractYouTubeId(videoUrl) : null
 
   if (ytId) {
     const src = `https://www.youtube.com/embed/${ytId}?enablejsapi=1&rel=0&modestbranding=1`
@@ -115,7 +122,7 @@ function StickyVideoPlayer({
   }
 
   // Dropbox / direct video — seek via currentTime after metadata loads
-  if (videoSourceType === 'dropbox' || videoSourceType === 'direct') {
+  if (effectiveSourceType === 'dropbox' || effectiveSourceType === 'direct') {
     const direct = videoSourceType === 'dropbox'
       ? videoUrl
           .replace('www.dropbox.com', 'dl.dropboxusercontent.com')
