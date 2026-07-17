@@ -653,7 +653,7 @@ export function ClipSelectionStep() {
                   onPlay={() => c.startTime ? seekAndPlay(mmssToSeconds(c.startTime)) : undefined}
                   onPin={() => togglePin(clipId)}
                   transcriptWords={transcriptWords}
-                  onUpdateTimes={(st, et, q) => updateClipTimes(i, st, et, q)}
+                  onUpdateTimes={(st, et, q) => { updateClipTimes(i, st, et, q); seekAndPlay(mmssToSeconds(st)) }}
                 />
               </li>
             )
