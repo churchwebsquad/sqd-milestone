@@ -117,7 +117,10 @@ function StickyVideoPlayer({
   // Dropbox / direct video — re-keyed on seek
   if (videoSourceType === 'dropbox' || videoSourceType === 'direct') {
     const direct = videoSourceType === 'dropbox'
-      ? videoUrl.replace('www.dropbox.com', 'dl.dropboxusercontent.com').replace(/[?&]dl=\d/, '')
+      ? videoUrl
+          .replace('www.dropbox.com', 'dl.dropboxusercontent.com')
+          .replace(/([?&])dl=0/, '$1dl=1')
+          .replace(/([?&])st=[^&]+/, '')
       : videoUrl
     const src = activeStart !== null ? `${direct}#t=${activeStart}` : direct
     return (
