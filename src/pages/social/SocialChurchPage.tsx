@@ -303,12 +303,12 @@ export default function SocialChurchPage() {
 
     autoCreateFiredRef.current = true
 
-    // Prefer the holding session (no task ID) so the coach always lands on
-    // the task picker. Only fall back to a task session if no holding session exists.
+    // Always navigate to a holding session (no task ID) — that's the task picker.
+    // If one exists, use it. If not, fall through to create one below.
+    // Never auto-navigate to a task session — the coach must pick a task first.
     const holding = srpSessions.find(s => s.status === 'in_progress' && !s.clickup_task_id)
-    const active  = holding ?? srpSessions.find(s => s.status === 'in_progress')
-    if (active) {
-      navigate(`/social/srp/${encodeURIComponent(active.session_id)}`)
+    if (holding) {
+      navigate(`/social/srp/${encodeURIComponent(holding.session_id)}`)
       return
     }
 
