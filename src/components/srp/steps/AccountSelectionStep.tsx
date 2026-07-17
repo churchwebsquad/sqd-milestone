@@ -24,15 +24,11 @@ export function AccountSelectionStep() {
   const {
     sessionId,
     account,
-    sermonSubmission,
     brandVoice, setBrandVoice,
   } = useSrpWorkflow()
 
-  // Pre-select the task if this session already had one when it loaded
+  // Picker always starts empty — user explicitly selects a task
   const [selectedTask, setSelectedTask] = useState<SrpSermonSubmission | null>(null)
-  useEffect(() => {
-    if (sermonSubmission && !selectedTask) setSelectedTask(sermonSubmission)
-  }, [sermonSubmission]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Local brand voice draft so the textarea doesn't autosave-thrash.
   const [voiceDraft, setVoiceDraft] = useState<string>('')
@@ -68,10 +64,12 @@ export function AccountSelectionStep() {
   const handleContinue = useCallback(async () => {
     if (!selectedTask) return
 
-    // If this task already has its own dedicated coach session, navigate there
+    // If this task already has its own dedicated coach session (distinct from
+    // the current holding session), navigate there.
     if (selectedTask.pipeline_session_id &&
         selectedTask.session_status &&
-        selectedTask.session_status !== 'background') {
+        selectedTask.session_status !== 'background' &&
+        selectedTask.pipeline_session_id !== sessionId) {
       navigate(`/social/srp/${encodeURIComponent(selectedTask.pipeline_session_id)}`)
       return
     }
