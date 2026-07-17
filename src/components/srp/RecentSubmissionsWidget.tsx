@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Loader2, RefreshCw, Search, ExternalLink, Sparkles, Check, FileText, AlertTriangle } from 'lucide-react'
 import { callSrpApi } from '../../lib/srpApi'
 import type { SrpSermonSubmission } from '../../types/database'
@@ -26,15 +27,19 @@ interface FetchResponse {
 
 export function RecentSubmissionsWidget({
   pairedTaskId,
+  currentSessionId,
   member,
   onPair,
 }: {
   /** Currently paired ClickUp task ID — used to highlight the row. */
   pairedTaskId?: string | null
+  /** Current session ID — rows whose pipeline_session_id matches this are the active session. */
+  currentSessionId?: string | null
   /** Filter weekly submissions to this church member number. */
   member?:       number | null
   onPair:       (s: SrpSermonSubmission) => void
 }) {
+  const navigate = useNavigate()
   const [submissions, setSubmissions] = useState<SrpSermonSubmission[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -132,11 +137,21 @@ export function RecentSubmissionsWidget({
           <ul className="divide-y divide-[var(--color-lavender)]">
             {submissions.map(s => {
               const isPaired = pairedTaskId && s.clickup_task_id === pairedTaskId
+              // A submission has its own distinct session when it has a
+              // non-background pipeline_session_id that is NOT the current session.
+              const hasOwnSession =
+                !!s.pipeline_session_id &&
+                !!s.session_status &&
+                s.session_status !== 'background' &&
+                s.pipeline_session_id !== currentSessionId
+              const handleClick = hasOwnSession
+                ? () => navigate(`/social/srp/${encodeURIComponent(s.pipeline_session_id!)}`)
+                : () => onPair(s)
               return (
                 <li key={s.clickup_task_id ?? `${s.account}-${s.created_at}`}>
                   <button
                     type="button"
-                    onClick={() => onPair(s)}
+                    onClick={handleClick}
                     className={[
                       'w-full text-left px-4 py-3 transition-colors',
                       isPaired

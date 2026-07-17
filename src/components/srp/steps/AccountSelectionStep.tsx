@@ -213,6 +213,7 @@ export function AccountSelectionStep() {
       {/* Recent submissions */}
       <RecentSubmissionsWidget
         pairedTaskId={clickupTaskId}
+        currentSessionId={sessionId}
         member={account?.member}
         onPair={handlePair}
       />
