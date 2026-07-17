@@ -55,7 +55,7 @@ export function SrpSidebarStepper({
                   isActive
                     ? 'bg-[var(--color-lavender-tint)] text-[var(--color-deep-plum)]'
                     : isDone
-                      ? 'text-[var(--color-deep-plum)] hover:bg-[var(--color-lavender-tint)]/60 cursor-pointer'
+                      ? 'bg-[var(--color-lavender-tint)]/50 text-[var(--color-deep-plum)] hover:bg-[var(--color-lavender-tint)] cursor-pointer'
                       : 'text-[var(--color-purple-gray)] hover:bg-[var(--color-lavender-tint)]/40 cursor-pointer opacity-60',
                 ].join(' ')}
               >
