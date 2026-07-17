@@ -2575,6 +2575,10 @@ export interface SrpClipSelection {
    *  clip-local ms (0 = clip start). The clipcutter joins kept segments
    *  on output; if absent, the clip cuts as a single range. */
   cuts?: SrpClipCut[]
+  /** Coach-edited transcript segments for this clip. When present, these
+   *  override the auto-derived word-level segments in Pre-render Review
+   *  and are forwarded to the clipcutter as the caption source. */
+  transcript_segments?: { start: number; end: number; text: string }[]
   /** Instagram/Facebook caption for this reel's social post. */
   social_caption?: string | null
   /** Populated by the clipcutter callback. */

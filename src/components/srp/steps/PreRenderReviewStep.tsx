@@ -1,27 +1,33 @@
 /**
- * Pre-render review step — comes after clip selection and all copy deliverables.
+ * Pre-render review step — comes after all copy deliverables.
  *
- * For each selected clip: shows the sermon video seeked to the clip's start time
- * alongside the transcript segments for that clip's time range. Coach can click
- * a timestamp to seek the video and click any segment text to edit it inline.
+ * For each selected clip: shows the sermon video seeked to the clip's start
+ * time alongside a fully editable transcript segment list. Coach can:
+ *   - Edit any segment's text
+ *   - Edit any segment's start / end timestamp
+ *   - Add new segments
+ *   - Delete segments
  *
- * The video is rendering in the background while the coach works through
- * captions/carousel/facebook. By the time they get here the render may be done.
+ * Edited segments are saved back to clip_selections.transcript_segments so
+ * the clipcutter picks up the corrected data.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Film, ChevronDown, ChevronRight } from 'lucide-react'
+import { Film, Plus, Trash2, ChevronDown, ChevronRight, GripVertical } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import type { SrpClipSelection } from '../../../types/database'
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-interface Word {
+interface Segment {
+  id:    string   // local-only key for React
   start: number
   end:   number
   text:  string
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseTime(val: unknown): number {
   if (typeof val === 'number') return val
@@ -35,25 +41,40 @@ function parseTime(val: unknown): number {
 }
 
 function toMMSS(secs: number): string {
-  const m = Math.floor(secs / 60)
-  const s = Math.floor(secs % 60)
+  const m = Math.floor(Math.max(0, secs) / 60)
+  const s = Math.floor(Math.max(0, secs) % 60)
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-/** Group flat word array into display segments (lines) by pausing on gaps > 1s. */
-function buildSegments(words: Word[], clipStart: number, clipEnd: number) {
+/** Parse a user-typed "M:SS" or "H:MM:SS" string into seconds. Returns NaN if invalid. */
+function parseMMSS(str: string): number {
+  const parts = str.trim().split(':').map(Number)
+  if (parts.some(isNaN)) return NaN
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  if (parts.length === 1) return parts[0]
+  return NaN
+}
+
+/** Group flat word array into display segments for a clip's time range. */
+function buildSegmentsFromWords(
+  words: { start: number; end: number; text: string }[],
+  clipStart: number,
+  clipEnd: number,
+): Segment[] {
   const inRange = words.filter(w => w.start >= clipStart - 0.1 && w.end <= clipEnd + 0.1)
   if (inRange.length === 0) return []
 
-  const lines: { start: number; end: number; text: string }[] = []
-  let lineWords: Word[] = []
+  const lines: Segment[] = []
+  let lineWords: typeof inRange = []
 
   for (let i = 0; i < inRange.length; i++) {
-    const w = inRange[i]
+    const w    = inRange[i]
     const prev = inRange[i - 1]
-    const gap = prev ? w.start - prev.end : 0
+    const gap  = prev ? w.start - prev.end : 0
     if (lineWords.length > 0 && (gap > 1 || lineWords.length >= 10)) {
       lines.push({
+        id:    crypto.randomUUID(),
         start: lineWords[0].start,
         end:   lineWords[lineWords.length - 1].end,
         text:  lineWords.map(x => x.text).join(' '),
@@ -64,6 +85,7 @@ function buildSegments(words: Word[], clipStart: number, clipEnd: number) {
   }
   if (lineWords.length > 0) {
     lines.push({
+      id:    crypto.randomUUID(),
       start: lineWords[0].start,
       end:   lineWords[lineWords.length - 1].end,
       text:  lineWords.map(x => x.text).join(' '),
@@ -72,54 +94,215 @@ function buildSegments(words: Word[], clipStart: number, clipEnd: number) {
   return lines
 }
 
-// ── Single clip panel ─────────────────────────────────────────────────────────
+// ── Timestamp input ───────────────────────────────────────────────────────────
 
-interface ClipPanelProps {
-  idx:     number
-  clip:    SrpClipSelection
-  words:   Word[]
-  videoUrl: string | null
+function TimeInput({
+  value,
+  onChange,
+  label,
+}: {
+  value:    number
+  onChange: (secs: number) => void
+  label:    string
+}) {
+  const [draft, setDraft] = useState(toMMSS(value))
+  const [error, setError] = useState(false)
+
+  useEffect(() => { setDraft(toMMSS(value)) }, [value])
+
+  function commit() {
+    const parsed = parseMMSS(draft)
+    if (isNaN(parsed)) { setError(true); return }
+    setError(false)
+    onChange(parsed)
+  }
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <label className="text-[9px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
+        {label}
+      </label>
+      <input
+        type="text"
+        value={draft}
+        onChange={e => { setDraft(e.target.value); setError(false) }}
+        onBlur={commit}
+        onKeyDown={e => e.key === 'Enter' && commit()}
+        placeholder="0:00"
+        className={[
+          'w-16 rounded border px-2 py-1 text-[11px] font-mono text-[var(--color-deep-plum)] focus:outline-none',
+          error
+            ? 'border-red-400 bg-red-50'
+            : 'border-[var(--color-lavender)] bg-white focus:border-[var(--color-primary-purple)]',
+        ].join(' ')}
+      />
+    </div>
+  )
 }
 
-function ClipPanel({ idx, clip, words, videoUrl }: ClipPanelProps) {
-  const [open, setOpen]               = useState(true)
-  const [editIdx, setEditIdx]         = useState<number | null>(null)
-  const [editText, setEditText]       = useState('')
-  const [segments, setSegments]       = useState<{ start: number; end: number; text: string }[]>([])
-  const videoRef                      = useRef<HTMLVideoElement>(null)
+// ── Single segment row ────────────────────────────────────────────────────────
+
+interface SegmentRowProps {
+  idx:      number
+  seg:      Segment
+  total:    number
+  onSeek:   (t: number) => void
+  onChange: (updated: Segment) => void
+  onDelete: () => void
+  onAdd:    () => void
+}
+
+function SegmentRow({ idx, seg, onSeek, onChange, onDelete, onAdd }: SegmentRowProps) {
+  const [textDraft, setTextDraft] = useState(seg.text)
+
+  function commitText() {
+    if (textDraft !== seg.text) onChange({ ...seg, text: textDraft })
+  }
+
+  return (
+    <li className="group relative rounded-lg border border-[var(--color-lavender)] bg-white hover:border-[var(--color-primary-purple)]/40 transition-colors">
+      <div className="flex items-start gap-2 p-3">
+        {/* Drag handle (visual only) */}
+        <GripVertical size={13} className="mt-1 shrink-0 text-[var(--color-lavender)] group-hover:text-[var(--color-purple-gray)] transition-colors cursor-grab" />
+
+        {/* Index */}
+        <span className="mt-1 shrink-0 w-5 text-center text-[10px] font-bold text-[var(--color-purple-gray)]">
+          {idx + 1}
+        </span>
+
+        {/* Timestamps */}
+        <div className="flex items-end gap-2 shrink-0">
+          <TimeInput
+            label="Start"
+            value={seg.start}
+            onChange={v => onChange({ ...seg, start: v })}
+          />
+          <span className="mb-1.5 text-[10px] text-[var(--color-purple-gray)]">→</span>
+          <TimeInput
+            label="End"
+            value={seg.end}
+            onChange={v => onChange({ ...seg, end: v })}
+          />
+          <button
+            type="button"
+            onClick={() => onSeek(seg.start)}
+            title="Seek video to this timestamp"
+            className="mb-1 shrink-0 text-[10px] font-semibold text-[var(--color-primary-purple)] hover:underline whitespace-nowrap"
+          >
+            ▶ Seek
+          </button>
+        </div>
+
+        {/* Text */}
+        <div className="flex-1 min-w-0">
+          <label className="block text-[9px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] mb-0.5">
+            Text
+          </label>
+          <textarea
+            value={textDraft}
+            onChange={e => setTextDraft(e.target.value)}
+            onBlur={commitText}
+            rows={2}
+            placeholder="Transcript text…"
+            className="w-full rounded border border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] px-2 py-1.5 text-[12px] text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] resize-none"
+          />
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col gap-1 shrink-0 mt-4">
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Delete segment"
+            className="p-1.5 rounded text-[var(--color-purple-gray)] hover:text-red-500 hover:bg-red-50 transition-colors"
+          >
+            <Trash2 size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={onAdd}
+            title="Add segment after this one"
+            className="p-1.5 rounded text-[var(--color-purple-gray)] hover:text-[var(--color-primary-purple)] hover:bg-[var(--color-lavender-tint)] transition-colors"
+          >
+            <Plus size={13} />
+          </button>
+        </div>
+      </div>
+    </li>
+  )
+}
+
+// ── Per-clip panel ────────────────────────────────────────────────────────────
+
+interface ClipPanelProps {
+  idx:      number
+  clip:     SrpClipSelection
+  words:    { start: number; end: number; text: string }[]
+  videoUrl: string | null
+  onChange: (updated: SrpClipSelection) => void
+}
+
+function ClipPanel({ idx, clip, words, videoUrl, onChange }: ClipPanelProps) {
+  const [open, setOpen]     = useState(true)
+  const videoRef            = useRef<HTMLVideoElement>(null)
 
   const clipStart = useMemo(() => parseTime(clip.startTime), [clip.startTime])
   const clipEnd   = useMemo(() => parseTime(clip.endTime),   [clip.endTime])
+  const duration  = clipEnd - clipStart
 
-  useEffect(() => {
-    setSegments(buildSegments(words, clipStart, clipEnd))
-  }, [words, clipStart, clipEnd])
+  // Seed segments from saved data or derived words (lazy initializer runs once).
+  const [segments, setSegs] = useState<Segment[]>(() => {
+    if (clip.transcript_segments && clip.transcript_segments.length > 0) {
+      return clip.transcript_segments.map(s => ({ ...s, id: crypto.randomUUID() }))
+    }
+    return buildSegmentsFromWords(words, clipStart, clipEnd)
+  })
 
-  // Seek video when panel opens
+  // Seek video when panel opens.
   useEffect(() => {
     if (open && videoRef.current && clipStart > 0) {
       videoRef.current.currentTime = clipStart
     }
   }, [open, clipStart])
 
+  // Save segments back to the clip whenever they change.
+  const saveSegments = useCallback((next: Segment[]) => {
+    setSegs(next)
+    onChange({
+      ...clip,
+      transcript_segments: next.map(({ start, end, text }) => ({ start, end, text })),
+    })
+  }, [clip, onChange])
+
   const seekTo = useCallback((t: number) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = t
-      videoRef.current.play().catch(() => {/* user gesture required in some browsers */})
-    }
+    if (!videoRef.current) return
+    videoRef.current.currentTime = t
+    videoRef.current.play().catch(() => {/* user gesture required */})
   }, [])
 
-  function startEdit(i: number) {
-    setEditIdx(i)
-    setEditText(segments[i].text)
+  function updateSeg(i: number, updated: Segment) {
+    saveSegments(segments.map((s, si) => si === i ? updated : s))
   }
 
-  function saveEdit(i: number) {
-    setSegments(prev => prev.map((s, si) => si === i ? { ...s, text: editText } : s))
-    setEditIdx(null)
+  function deleteSeg(i: number) {
+    saveSegments(segments.filter((_, si) => si !== i))
   }
 
-  const duration = clipEnd - clipStart
+  function addSegAfter(i: number) {
+    const prev = segments[i]
+    const next = segments[i + 1]
+    const newStart = prev ? prev.end : clipStart
+    const newEnd   = next ? next.start : Math.min(newStart + 2, clipEnd)
+    const blank: Segment = { id: crypto.randomUUID(), start: newStart, end: newEnd, text: '' }
+    const updated = [...segments]
+    updated.splice(i + 1, 0, blank)
+    saveSegments(updated)
+  }
+
+  function addSegAtStart() {
+    const blank: Segment = { id: crypto.randomUUID(), start: clipStart, end: clipStart + 2, text: '' }
+    saveSegments([blank, ...segments])
+  }
 
   return (
     <div className="rounded-xl border border-[var(--color-lavender)] bg-white overflow-hidden">
@@ -129,26 +312,34 @@ function ClipPanel({ idx, clip, words, videoUrl }: ClipPanelProps) {
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center gap-2 px-4 py-3 hover:bg-[var(--color-lavender-tint)] transition-colors text-left"
       >
-        {open ? <ChevronDown size={14} className="shrink-0 text-[var(--color-purple-gray)]" /> : <ChevronRight size={14} className="shrink-0 text-[var(--color-purple-gray)]" />}
+        {open
+          ? <ChevronDown  size={14} className="shrink-0 text-[var(--color-purple-gray)]" />
+          : <ChevronRight size={14} className="shrink-0 text-[var(--color-purple-gray)]" />
+        }
         <span className="text-[13px] font-semibold text-[var(--color-deep-plum)]">
           Clip {idx + 1}{clip.clip_title ? ` — ${clip.clip_title}` : ''}
         </span>
-        {clip.startTime && (
-          <span className="ml-auto text-[11px] text-[var(--color-purple-gray)] font-mono whitespace-nowrap">
-            {clip.startTime} → {clip.endTime}
-            {duration > 0 && <span className="ml-1 text-[var(--color-primary-purple)]">({Math.round(duration)}s)</span>}
-          </span>
-        )}
+        <span className="ml-auto flex items-center gap-2 text-[11px] text-[var(--color-purple-gray)]">
+          {segments.length > 0 && (
+            <span className="text-[var(--color-primary-purple)] font-semibold">{segments.length} segments</span>
+          )}
+          {clip.startTime && (
+            <span className="font-mono">
+              {clip.startTime} → {clip.endTime}
+              {duration > 0 && <span className="ml-1 text-[var(--color-primary-purple)]">({Math.round(duration)}s)</span>}
+            </span>
+          )}
+        </span>
       </button>
 
       {open && (
         <div className="border-t border-[var(--color-lavender)]">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-0">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-0">
 
             {/* Left: video */}
-            <div className="p-4 border-b lg:border-b-0 lg:border-r border-[var(--color-lavender)] bg-[var(--color-cream)]">
+            <div className="p-4 border-b lg:border-b-0 lg:border-r border-[var(--color-lavender)] bg-[var(--color-cream)] flex flex-col gap-2">
               {videoUrl ? (
-                <div className="space-y-2">
+                <>
                   <video
                     ref={videoRef}
                     src={videoUrl}
@@ -162,85 +353,71 @@ function ClipPanel({ idx, clip, words, videoUrl }: ClipPanelProps) {
                     }}
                   />
                   <p className="text-[10px] text-[var(--color-purple-gray)] text-center">
-                    Click a timestamp on the right to seek
+                    Click <strong>▶ Seek</strong> on a segment to jump to that moment
                   </p>
-                </div>
+                </>
               ) : (
                 <div className="aspect-video rounded-lg bg-[var(--color-lavender-tint)] flex items-center justify-center">
-                  <p className="text-[12px] text-[var(--color-purple-gray)]">No video URL for this session</p>
+                  <p className="text-[12px] text-[var(--color-purple-gray)]">No video for this session</p>
                 </div>
               )}
             </div>
 
-            {/* Right: transcript */}
-            <div className="p-4 overflow-y-auto max-h-[420px]">
-              <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] mb-3">
-                Interactive Transcript ({segments.length} segments)
-              </p>
-              {segments.length === 0 ? (
-                <p className="text-[12px] text-[var(--color-purple-gray)]">
-                  {clip.startTime
-                    ? 'No word-level transcript available for this clip range.'
-                    : 'This clip has no timestamps — transcript sync not available.'}
+            {/* Right: editable transcript */}
+            <div className="p-4 flex flex-col gap-3 max-h-[560px] overflow-y-auto">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
+                  Transcript segments
                 </p>
-              ) : (
-                <ol className="space-y-3">
-                  {segments.map((seg, i) => (
-                    <li key={i} className="flex gap-3 group">
-                      {/* Timestamp (click to seek) */}
-                      <button
-                        type="button"
-                        onClick={() => seekTo(seg.start)}
-                        className="shrink-0 text-[10px] font-mono text-[var(--color-primary-purple)] hover:text-[var(--color-deep-plum)] transition-colors whitespace-nowrap pt-0.5"
-                        title="Click to seek video"
-                      >
-                        #{i + 1} · {toMMSS(seg.start - clipStart)} → {toMMSS(seg.end - clipStart)}
-                      </button>
+                <button
+                  type="button"
+                  onClick={addSegAtStart}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--color-primary-purple)] hover:underline"
+                >
+                  <Plus size={12} /> Add segment
+                </button>
+              </div>
 
-                      {/* Text (click to edit) */}
-                      {editIdx === i ? (
-                        <div className="flex-1 space-y-1">
-                          <textarea
-                            autoFocus
-                            value={editText}
-                            onChange={e => setEditText(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(i) }
-                              if (e.key === 'Escape') setEditIdx(null)
-                            }}
-                            rows={2}
-                            className="w-full rounded border border-[var(--color-primary-purple)] bg-white px-2 py-1 text-[12px] text-[var(--color-deep-plum)] focus:outline-none resize-none"
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => saveEdit(i)}
-                              className="text-[10px] font-semibold text-[var(--color-primary-purple)] hover:underline"
-                            >
-                              Save
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditIdx(null)}
-                              className="text-[10px] text-[var(--color-purple-gray)] hover:underline"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => startEdit(i)}
-                          className="flex-1 text-left text-[13px] text-[var(--color-deep-plum)] hover:text-[var(--color-primary-purple)] transition-colors leading-snug"
-                          title="Click to edit"
-                        >
-                          {seg.text}
-                        </button>
-                      )}
-                    </li>
+              {segments.length === 0 ? (
+                <div className="rounded-lg border-2 border-dashed border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] py-8 text-center space-y-2">
+                  <p className="text-[12px] text-[var(--color-purple-gray)]">
+                    {clip.startTime
+                      ? 'No transcript segments found for this clip range.'
+                      : 'This clip has no timestamps — segments can\'t be auto-derived.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={addSegAtStart}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--color-primary-purple)] text-white text-[11px] font-semibold hover:bg-[var(--color-deep-plum)] transition-colors"
+                  >
+                    <Plus size={12} /> Add first segment manually
+                  </button>
+                </div>
+              ) : (
+                <ol className="space-y-2">
+                  {segments.map((seg, i) => (
+                    <SegmentRow
+                      key={seg.id}
+                      idx={i}
+                      seg={seg}
+                      total={segments.length}
+                      onSeek={seekTo}
+                      onChange={updated => updateSeg(i, updated)}
+                      onDelete={() => deleteSeg(i)}
+                      onAdd={() => addSegAfter(i)}
+                    />
                   ))}
                 </ol>
+              )}
+
+              {segments.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => addSegAfter(segments.length - 1)}
+                  className="inline-flex items-center gap-1.5 self-start text-[11px] font-semibold text-[var(--color-primary-purple)] hover:underline"
+                >
+                  <Plus size={12} /> Add segment at end
+                </button>
               )}
             </div>
           </div>
@@ -253,9 +430,14 @@ function ClipPanel({ idx, clip, words, videoUrl }: ClipPanelProps) {
 // ── Main step ─────────────────────────────────────────────────────────────────
 
 export function PreRenderReviewStep() {
-  const { clipSelections, transcriptWords, videoUrl, goToNextStep, goToPrevStep } = useSrpWorkflow()
+  const {
+    clipSelections, setClipSelections,
+    transcriptWords,
+    videoUrl,
+    goToNextStep, goToPrevStep,
+  } = useSrpWorkflow()
 
-  const words = useMemo<Word[]>(() => {
+  const words = useMemo(() => {
     if (!Array.isArray(transcriptWords)) return []
     return (transcriptWords as unknown[]).map((w: unknown) => {
       const obj = w as Record<string, unknown>
@@ -267,6 +449,10 @@ export function PreRenderReviewStep() {
     })
   }, [transcriptWords])
 
+  function updateClip(idx: number, updated: SrpClipSelection) {
+    setClipSelections(clipSelections.map((c, i) => i === idx ? updated : c) as typeof clipSelections)
+  }
+
   return (
     <div className="space-y-6 pb-8">
       <div>
@@ -274,10 +460,10 @@ export function PreRenderReviewStep() {
           <Film size={12} /> Pre-render review
         </p>
         <h2 className="text-[22px] font-bold text-[var(--color-deep-plum)] mt-0.5">
-          Review your clip cuts
+          Review &amp; edit clip transcripts
         </h2>
         <p className="text-[13px] text-[var(--color-purple-gray)] mt-1">
-          Verify each clip's exact start and end in the video. Click timestamps to seek. Click text to fix any transcript errors before the clips are finalized.
+          Verify each clip's timing in the video. Edit segment text and timestamps, add missing lines, or remove anything that shouldn't be captioned. These segments go straight to the video editor.
         </p>
       </div>
 
@@ -294,6 +480,7 @@ export function PreRenderReviewStep() {
               clip={clip as SrpClipSelection}
               words={words}
               videoUrl={videoUrl}
+              onChange={updated => updateClip(idx, updated)}
             />
           ))}
         </div>
@@ -308,7 +495,7 @@ export function PreRenderReviewStep() {
           ← Back
         </button>
         <SrpButton onClick={goToNextStep}>
-          Continue to Music &amp; edits →
+          Continue to Creative direction →
         </SrpButton>
       </div>
     </div>
