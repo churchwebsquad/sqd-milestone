@@ -114,7 +114,7 @@ function StickyVideoPlayer({
     )
   }
 
-  // Dropbox / direct video — re-keyed on seek
+  // Dropbox / direct video — seek via currentTime after metadata loads
   if (videoSourceType === 'dropbox' || videoSourceType === 'direct') {
     const direct = videoSourceType === 'dropbox'
       ? videoUrl
@@ -122,12 +122,34 @@ function StickyVideoPlayer({
           .replace(/([?&])dl=0/, '$1dl=1')
           .replace(/([?&])st=[^&]+/, '')
       : videoUrl
-    const src = activeStart !== null ? `${direct}#t=${activeStart}` : direct
     return (
       <div className="sticky top-0 z-10 bg-[var(--color-cream)] pt-1 pb-3">
         {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-        <video key={src} src={src} controls autoPlay={activeStart !== null}
-          className="w-full rounded-xl bg-black shadow-md" style={{ maxHeight: 340 }} />
+        <video
+          src={direct}
+          controls
+          className="w-full rounded-xl bg-black shadow-md"
+          style={{ maxHeight: 340 }}
+          onLoadedMetadata={e => {
+            const vid = e.currentTarget
+            if (activeStart !== null) {
+              vid.currentTime = activeStart
+              void vid.play()
+            }
+          }}
+          ref={el => {
+            // If already loaded and seek target changes, seek immediately
+            if (el && el.readyState >= 1 && activeStart !== null) {
+              el.currentTime = activeStart
+              void el.play()
+            }
+          }}
+        />
+        {activeStart !== null && (
+          <p className="text-[10px] text-[var(--color-purple-gray)] mt-1 text-center">
+            Playing from {secondsToMmss(activeStart)}
+          </p>
+        )}
       </div>
     )
   }
