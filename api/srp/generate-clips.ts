@@ -43,11 +43,12 @@ If the speaker said "um" or "you know" or repeated themselves, that stays in the
 After selecting a quote, re-read it against the transcript character by character. If even one word is different, fix it.
 
 CLIP LENGTH — HARD CONSTRAINT:
-Every clip MUST be between 25 and 90 seconds long. No exceptions.
-Target the 35-50 second sweet spot.
-Calculate duration using the transcript timestamps. End timestamp minus start timestamp must fall within 25 and 90 seconds.
+Every clip MUST be between 30 and 90 seconds long. No exceptions.
+STRONGLY PREFER 30-50 seconds. This is the sweet spot for Reels performance.
+50-90 seconds is acceptable only when the moment genuinely requires it — do not pad or stretch to fill time.
+Calculate duration using the transcript timestamps. End timestamp minus start timestamp must fall within 30 and 90 seconds.
 If a compelling moment runs shorter than 30 seconds, look for a natural starting point earlier in the transcript where the speaker begins setting up that moment. Include the setup.
-If a compelling moment runs longer than 70 seconds, find a natural breaking point where one complete thought ends before the next begins. Trim to the strongest complete thought.
+If a compelling moment runs longer than 50 seconds, find a natural breaking point where one complete thought ends before the next begins. Trim to the strongest complete thought that lands within 30-50 seconds if at all possible.
 Do NOT stretch a clip to meet the minimum by including unrelated content before or after. The entire clip must be one cohesive idea.
 
 TIMESTAMPS:
@@ -195,7 +196,7 @@ The following clips have already been selected and pinned by the coach. Your sug
     : ''
 
   const durationRule = hasTimecodes
-    ? 'DURATION: Every clip MUST be between 25 and 90 seconds. Target 35-50 seconds. Calculate from timestamps.'
+    ? 'DURATION: Every clip MUST be between 30 and 90 seconds. STRONGLY PREFER 30-50 seconds. 50-90 only when the moment truly requires it. Calculate from timestamps.'
     : 'WORD COUNT: IDEAL 110-130 words (≈55-65 sec). ACCEPTABLE 100-140 words. REJECT under 85 or over 150 words.'
 
   const userPrompt = `Analyze this sermon transcript and identify 6-10 compelling teaching moments for short-form video clips, ranked by social media potential (rank 1 = best single clip).
@@ -235,7 +236,7 @@ ${transcript.slice(0, 60000)}`
         return { ...c, duration: parseTimestamp(c.endTime) - parseTimestamp(c.startTime) }
       })
       .filter(c => {
-        if (hasTimecodes) return c.duration >= 25 && c.duration <= 90
+        if (hasTimecodes) return c.duration >= 30 && c.duration <= 90
         return (c.wordCount ?? 0) >= 85 && (c.wordCount ?? 0) <= 150
       })
       // Drop any clips whose quote overlaps with pinned clips

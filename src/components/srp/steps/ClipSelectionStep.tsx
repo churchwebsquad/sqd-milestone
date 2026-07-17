@@ -11,7 +11,7 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import {
   ArrowLeft, ArrowRight, Loader2,
   Check, Pin, PinOff, Play, Pencil, Plus, RefreshCw,
@@ -135,8 +135,28 @@ function StickyVideoPlayer({
   videoUrl:        string
   videoSourceType: string | null | undefined
   activeStart:     number | null
-  playerRef:       React.MutableRefObject<HTMLIFrameElement | null>
+  playerRef:       MutableRefObject<HTMLIFrameElement | null>
 }) {
+  const videoElemRef = useRef<HTMLVideoElement | null>(null)
+
+  // Seek the native <video> element only when activeStart actually changes —
+  // not on every re-render. This prevents the video from restarting whenever
+  // unrelated state updates (like clip selection) cause a re-render.
+  useEffect(() => {
+    const vid = videoElemRef.current
+    if (!vid || activeStart === null) return
+    const doSeek = () => {
+      vid.currentTime = activeStart
+      void vid.play()
+    }
+    if (vid.readyState >= 1) {
+      doSeek()
+    } else {
+      vid.addEventListener('loadedmetadata', doSeek, { once: true })
+      return () => vid.removeEventListener('loadedmetadata', doSeek)
+    }
+  }, [activeStart])
+
   // Detect source type from URL if not stored
   const effectiveSourceType = videoSourceType ?? (
     videoUrl.includes('youtu') ? 'youtube' :
@@ -169,7 +189,7 @@ function StickyVideoPlayer({
     )
   }
 
-  // Dropbox / direct video — seek via currentTime after metadata loads
+  // Dropbox / direct video
   if (effectiveSourceType === 'dropbox' || effectiveSourceType === 'direct') {
     const direct = effectiveSourceType === 'dropbox'
       ? videoUrl
@@ -181,24 +201,11 @@ function StickyVideoPlayer({
       <div className="sticky top-0 z-10 bg-[var(--color-cream)] pt-1 pb-3">
         {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
         <video
+          ref={videoElemRef}
           src={direct}
           controls
           className="w-full rounded-xl bg-black shadow-md"
           style={{ maxHeight: 340 }}
-          onLoadedMetadata={e => {
-            const vid = e.currentTarget
-            if (activeStart !== null) {
-              vid.currentTime = activeStart
-              void vid.play()
-            }
-          }}
-          ref={el => {
-            // If already loaded and seek target changes, seek immediately
-            if (el && el.readyState >= 1 && activeStart !== null) {
-              el.currentTime = activeStart
-              void el.play()
-            }
-          }}
         />
         {activeStart !== null && (
           <p className="text-[10px] text-[var(--color-purple-gray)] mt-1 text-center">
@@ -483,13 +490,12 @@ export function ClipSelectionStep() {
   const togglePick = useCallback((clip: SrpClipSelection) => {
     const idx = clipSelections.findIndex(c => c.quote === clip.quote)
     if (idx >= 0) {
+      // Deselect
       setClipSelections(clipSelections.filter((_, i) => i !== idx))
       return
     }
-    if (clipSelections.length >= reelCount) {
-      setClipSelections([...clipSelections.slice(0, reelCount - 1), assignClipId(clip, reelCount)])
-      return
-    }
+    // Already at the limit — do nothing (user must deselect first)
+    if (clipSelections.length >= reelCount) return
     setClipSelections([...clipSelections, assignClipId(clip, clipSelections.length + 1)])
   }, [clipSelections, reelCount, setClipSelections])
 
