@@ -273,12 +273,12 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     const hasReels = selectedDeliverables.some(isSrpReelDeliverable)
     if (selectedDeliverables.length > 0) {
       steps.push('sermon', 'overview')
-      if (hasReels) steps.push('clips', 'preRenderEdit', 'reelCaptions')
+      if (hasReels) steps.push('clips', 'reelCaptions')
       if (selectedDeliverables.includes('carousel'))     steps.push('carousel')
       if (selectedDeliverables.includes('facebook'))     steps.push('facebook')
       if (selectedDeliverables.includes('photoRecap'))   steps.push('photoRecap')
       if (selectedDeliverables.includes('sundayInvite')) steps.push('sundayInvite')
-      if (hasReels)                                      steps.push('clipProcessing')
+      if (hasReels) steps.push('preRenderReview', 'creativeDirection', 'preRenderEdit', 'clipProcessing')
     }
     steps.push('approved')
     return steps

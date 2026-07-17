@@ -39,6 +39,7 @@ import { DeliverableSelectionStep } from '../components/srp/steps/DeliverableSel
 import { SermonInputStep }          from '../components/srp/steps/SermonInputStep'
 import { TranscriptOverviewStep }   from '../components/srp/steps/TranscriptOverviewStep'
 import { ClipSelectionStep }        from '../components/srp/steps/ClipSelectionStep'
+import { PreRenderReviewStep }      from '../components/srp/steps/PreRenderReviewStep'
 import { PreRenderEditStep }        from '../components/srp/steps/PreRenderEditStep'
 import { ReelCaptionsStep }         from '../components/srp/steps/ReelCaptionsStep'
 import { CarouselStep }             from '../components/srp/steps/CarouselStep'
@@ -57,6 +58,7 @@ const STEP_ICONS: Record<SrpWorkflowStep, SrpSidebarStepperItem['icon']> = {
   overview:          ClipboardList,
   clips:             Scissors,
   creativeDirection: Sliders,
+  preRenderReview:   Film,
   preRenderEdit:     Sliders,
   reelCaptions:      Film,
   carousel:          LayoutGrid,
@@ -74,6 +76,7 @@ const STEP_COMPONENTS: Record<SrpWorkflowStep, () => ReactElement> = {
   overview:          TranscriptOverviewStep,
   clips:             ClipSelectionStep,
   creativeDirection: CreativeDirectionStep,
+  preRenderReview:   PreRenderReviewStep,
   preRenderEdit:     PreRenderEditStep,
   reelCaptions:      ReelCaptionsStep,
   carousel:          CarouselStep,

@@ -2489,6 +2489,7 @@ export type SrpWorkflowStep =
   | 'overview'
   | 'clips'
   | 'creativeDirection'
+  | 'preRenderReview'
   | 'preRenderEdit'
   | 'reelCaptions'
   | 'carousel'
