@@ -544,7 +544,7 @@ export function ClipSelectionStep() {
     setManualStart(''); setManualEnd(''); setShowManual(false)
   }, [manualStart, manualEnd, transcriptWords, clipSuggestions, setClipSuggestions])
 
-  const continueReady = clipSelections.length === reelCount && reelCount > 0
+  const continueReady = clipSelections.length >= 1
 
   // ── Render ───────────────────────────────────────────────────────────────
 
