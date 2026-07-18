@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw,
-  ChevronDown, ChevronUp, BookOpen, Clock,
+  ChevronDown, ChevronUp, BookOpen, Clock, CheckCircle2,
 } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
@@ -80,6 +80,7 @@ export function ReelCaptionsStep() {
     selectedDeliverables,
     clipSelections,
     updateClipSocialCaption,
+    updateClipCaptionApproved,
     keyInsights,
     reelGuidance, setReelGuidance,
     visibleSteps,
@@ -89,7 +90,7 @@ export function ReelCaptionsStep() {
   const stepNum   = visibleSteps.indexOf('reelCaptions') + 1
   const reelCount = selectedDeliverables.filter(isSrpReelDeliverable).length
   const picks     = clipSelections.slice(0, reelCount || SRP_MAX_REELS)
-  const allCaptioned = picks.length > 0 && picks.every(c => (c.social_caption ?? '').trim().length > 0)
+  const allApproved = picks.length > 0 && picks.every(c => c.caption_approved === true)
 
   const [prevCaptions, setPrevCaptions] = useState<(string | null)[]>([])
 
@@ -131,7 +132,13 @@ export function ReelCaptionsStep() {
           index={i}
           clip={clip}
           caption={clip.social_caption ?? ''}
-          onCaptionChange={v => updateClipSocialCaption(clip.clip_id!, v || null)}
+          approved={clip.caption_approved === true}
+          onCaptionChange={v => {
+            updateClipSocialCaption(clip.clip_id!, v || null)
+            if (clip.caption_approved) updateClipCaptionApproved(clip.clip_id!, false)
+          }}
+          onApprove={() => updateClipCaptionApproved(clip.clip_id!, true)}
+          onUnapprove={() => updateClipCaptionApproved(clip.clip_id!, false)}
           guidance={reelGuidance[i] ?? ''}
           onGuidanceChange={v => setReelGuidance({ ...reelGuidance, [i]: v })}
           prevCaption={prevCaptions[i] ?? null}
@@ -145,7 +152,7 @@ export function ReelCaptionsStep() {
         <SrpButton variant="ghost" onClick={goToPrevStep} leadingIcon={<ArrowLeft size={14} />}>
           Back
         </SrpButton>
-        <SrpButton disabled={!allCaptioned} onClick={goToNextStep} trailingIcon={<ArrowRight size={14} />}>
+        <SrpButton disabled={!allApproved} onClick={goToNextStep} trailingIcon={<ArrowRight size={14} />}>
           Continue
         </SrpButton>
       </div>
@@ -156,14 +163,17 @@ export function ReelCaptionsStep() {
 // ── Per-clip panel ────────────────────────────────────────────────────────────
 
 function ReelPanel({
-  index, clip, caption, onCaptionChange,
+  index, clip, caption, approved, onCaptionChange, onApprove, onUnapprove,
   guidance, onGuidanceChange,
   prevCaption, brandVoice, keyInsights, accountContext,
 }: {
   index: number
   clip: SrpClipSelection
   caption: string
+  approved: boolean
   onCaptionChange: (v: string) => void
+  onApprove: () => void
+  onUnapprove: () => void
   guidance: string
   onGuidanceChange: (v: string) => void
   prevCaption: string | null
@@ -289,9 +299,32 @@ function ReelPanel({
             value={caption}
             onChange={e => onCaptionChange(e.target.value)}
             rows={5}
-            className="w-full rounded-lg border border-[var(--color-lavender)] bg-white p-3 text-[13px] text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)] focus:ring-2 focus:ring-[var(--color-lavender)] resize-y"
+            disabled={approved}
+            className="w-full rounded-lg border border-[var(--color-lavender)] bg-white p-3 text-[13px] text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)] focus:ring-2 focus:ring-[var(--color-lavender)] resize-y disabled:opacity-60 disabled:cursor-not-allowed"
           />
           <BrandVoiceTagsBadges tags={tags} />
+
+          {approved ? (
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <div className="flex items-center gap-1.5 text-emerald-600">
+                <CheckCircle2 size={15} />
+                <span className="text-[12px] font-semibold">Caption approved</span>
+              </div>
+              <button
+                type="button"
+                onClick={onUnapprove}
+                className="text-[11px] text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] underline underline-offset-2 transition-colors"
+              >
+                Retry / change
+              </button>
+            </div>
+          ) : (
+            <div className="pt-1">
+              <SrpButton size="sm" onClick={onApprove} leadingIcon={<CheckCircle2 size={12} />}>
+                Approve caption
+              </SrpButton>
+            </div>
+          )}
         </div>
       )}
 

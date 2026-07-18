@@ -98,6 +98,7 @@ interface SrpWorkflowState {
 
   // Approved deliverable text
   updateClipSocialCaption: (clipId: string, caption: string | null) => void
+  updateClipCaptionApproved: (clipId: string, approved: boolean) => void
   facebookPost: string | null
   setFacebookPost: (v: string | null) => void
   sundayInvite: string | null
@@ -265,6 +266,10 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
 
   const updateClipSocialCaption = useCallback((clipId: string, caption: string | null) => {
     setClipSelections(prev => prev.map(c => c.clip_id === clipId ? { ...c, social_caption: caption } : c))
+  }, [])
+
+  const updateClipCaptionApproved = useCallback((clipId: string, approved: boolean) => {
+    setClipSelections(prev => prev.map(c => c.clip_id === clipId ? { ...c, caption_approved: approved } : c))
   }, [])
 
   // ── visibleSteps: conditional on selectedDeliverables ───────────────
@@ -566,6 +571,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     clipSuggestions, setClipSuggestions,
     clipSelections, setClipSelections,
     updateClipSocialCaption,
+    updateClipCaptionApproved,
     facebookPost, setFacebookPost,
     sundayInvite, setSundayInvite,
     photoRecapCaption, setPhotoRecapCaption,

@@ -2581,6 +2581,8 @@ export interface SrpClipSelection {
   transcript_segments?: { start: number; end: number; text: string }[]
   /** Instagram/Facebook caption for this reel's social post. */
   social_caption?: string | null
+  /** True once the coach explicitly approves the caption. */
+  caption_approved?: boolean
   /** Populated by the clipcutter callback. */
   video_url?: string | null
   srt_url?: string | null
