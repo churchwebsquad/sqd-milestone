@@ -71,11 +71,13 @@ export function PhotoRecapStep() {
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
-  const [options, setOptions]       = useState<CaptionOption[]>(() => autoDrafts?.photoRecap ?? [])
+  const [options, setOptions]         = useState<CaptionOption[]>(() => autoDrafts?.photoRecap ?? [])
   const [selectedIdx, setSelectedIdx] = useState<number | null>(photoRecapInput?.selectedIdx ?? null)
-  const [tags, setTags]             = useState<string[]>([])
-  const [generating, setGenerating] = useState(false)
-  const [error, setError]           = useState<string | null>(null)
+  const [tags, setTags]               = useState<string[]>([])
+  const [generating, setGenerating]   = useState(false)
+  const [error, setError]             = useState<string | null>(null)
+  const [fetchStatus, setFetchStatus] = useState<'idle' | 'loading' | 'found' | 'blank' | 'no-task'>('idle')
+  const [rawLookingBack, setRawLookingBack] = useState<string>('')
 
   const stepNum     = visibleSteps.indexOf('photoRecap') + 1
   const promptType  = photoRecapInput?.promptType ?? 'highlights'
@@ -84,20 +86,28 @@ export function PhotoRecapStep() {
 
   // Auto-pull "LOOKING BACK" from the ClickUp task description on first load
   useEffect(() => {
-    if (!clickupTaskId) return
-    if (lookingBack) return  // already populated — don't overwrite
+    if (!clickupTaskId) {
+      setFetchStatus('no-task')
+      return
+    }
+    if (fetchStatus !== 'idle') return  // already ran
+    setFetchStatus('loading')
     ;(async () => {
       try {
         const r = await fetch(`/api/clickup/task-detail?taskId=${clickupTaskId}`)
-        if (!r.ok) return
+        if (!r.ok) { setFetchStatus('blank'); return }
         const data = await r.json() as { description?: string }
         const desc = data.description ?? ''
         const extracted = parseLookingBack(desc)
+        setRawLookingBack(extracted)
         if (extracted) {
-          setPhotoRecapInput({ ...photoRecapInput, lookingBack: extracted })
+          setFetchStatus('found')
+          if (!lookingBack) setPhotoRecapInput({ ...photoRecapInput, lookingBack: extracted })
+        } else {
+          setFetchStatus('blank')
         }
       } catch {
-        // non-fatal — coach can type manually
+        setFetchStatus('blank')
       }
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -184,8 +194,27 @@ export function PhotoRecapStep() {
           <label className="block text-[11px] uppercase tracking-widest font-bold text-[var(--color-deep-plum)]">
             Looking back — what happened this weekend?
           </label>
+
+          {/* ClickUp fetch status */}
+          {fetchStatus === 'loading' && (
+            <p className="text-[11px] text-[var(--color-purple-gray)] flex items-center gap-1.5">
+              <Loader2 size={11} className="animate-spin" /> Checking ClickUp for Looking Back notes...
+            </p>
+          )}
+          {fetchStatus === 'found' && rawLookingBack && (
+            <div className="rounded-lg border border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] px-3 py-2 space-y-0.5">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-primary-purple)]">From ClickUp — Looking Back</p>
+              <p className="text-[12px] text-[var(--color-deep-plum)] whitespace-pre-wrap leading-relaxed">{rawLookingBack}</p>
+            </div>
+          )}
+          {(fetchStatus === 'blank' || fetchStatus === 'no-task') && (
+            <p className="text-[11px] text-[var(--color-purple-gray)]">
+              {fetchStatus === 'blank' ? 'Looking Back was blank in this ClickUp task.' : 'No ClickUp task linked.'} Add highlights below.
+            </p>
+          )}
+
           <p className="text-[11px] text-[var(--color-purple-gray)]">
-            Paste the partner's notes from the ClickUp task. Baptisms, salvations, big moments, how the room felt — the more specific, the better the captions.
+            Add or edit below. The more specific, the better the captions.
           </p>
           <textarea
             value={lookingBack}
