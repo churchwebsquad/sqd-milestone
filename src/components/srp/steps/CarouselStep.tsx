@@ -267,9 +267,18 @@ export function CarouselStep() {
       {/* Edit picked option — show if slides are loaded from context OR from a fresh pick */}
       {(editedSlides.length > 0) && (
         <section className="rounded-xl border border-[var(--color-lavender)] bg-white p-4 space-y-3">
-          <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
-            Slides (editable)
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
+              Slides (editable)
+            </p>
+            <button
+              type="button"
+              onClick={() => { setSelectedIdx(null); setEditedSlides([]) }}
+              className="text-[11px] text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] underline underline-offset-2 transition-colors"
+            >
+              ← Back to options
+            </button>
+          </div>
           {editedSlides.map((text, i) => (
             <div key={i} className="space-y-1.5">
               <div className="flex items-center justify-between">
