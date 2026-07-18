@@ -383,7 +383,15 @@ export function SermonInputStep() {
         </SrpButton>
         <SrpButton
           disabled={!transcriptReady}
-          onClick={goToNextStep}
+          onClick={() => {
+            // Fire background generation for all deliverables — don't await, don't block
+            void fetch('/api/srp/auto-generate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ session_id: sessionId }),
+            })
+            goToNextStep()
+          }}
           trailingIcon={<ArrowRight size={14} />}
         >
           Continue

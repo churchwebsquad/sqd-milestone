@@ -60,7 +60,7 @@ export default async function handler(req: any, res: any) {
   const { data: session, error: sessionErr } = await sb
     .schema('srp_pipeline')
     .from('sessions')
-    .select('transcript, church_name, sermon_title, series_title, brand_voice_guidelines, auto_drafts, clickup_task_id')
+    .select('transcript, transcript_words, church_name, sermon_title, series_title, brand_voice_guidelines, auto_drafts, selected_deliverables')
     .eq('session_id', sessionId)
     .single()
 
@@ -79,6 +79,8 @@ export default async function handler(req: any, res: any) {
   const seriesName   = (session.series_title as string) ?? ''
   const brandVoice   = (session.brand_voice_guidelines as string) ?? ''
   const accountCtx   = [churchName && `Church: ${churchName}`, seriesName && `Series: ${seriesName}`].filter(Boolean).join('\n')
+  const deliverables: string[] = Array.isArray(session.selected_deliverables) ? session.selected_deliverables : []
+  const hasReels     = deliverables.some(d => /^reel\d+$/.test(d))
 
   const generated: Record<string, string> = {}
 
@@ -94,28 +96,53 @@ export default async function handler(req: any, res: any) {
 
   if (overview) generated.overview = 'ok'
 
-  // ── Step 2: All content in parallel ─────────────────────────────────────
+  // ── Step 2: All selected deliverables in parallel ────────────────────────
   const commonBody = { transcript, brandVoice, accountContext: accountCtx, keyInsights }
 
-  const [carouselRes, facebookRes, photoRecapRes, sundayInviteRes] = await Promise.all([
-    callGenerate(baseUrl, 'generate-carousel',      commonBody),
-    callGenerate(baseUrl, 'generate-facebook-post', commonBody),
-    callGenerate(baseUrl, 'generate-photo-recap',   { ...commonBody, promptType: 'highlights' }),
-    callGenerate(baseUrl, 'generate-sunday-invite', commonBody),
-  ])
+  const tasks: Promise<any>[] = []
+  const taskKeys: string[] = []
 
-  if (carouselRes)    generated.carousel    = 'ok'
-  if (facebookRes)    generated.facebook    = 'ok'
-  if (photoRecapRes)  generated.photoRecap  = 'ok'
-  if (sundayInviteRes) generated.sundayInvite = 'ok'
+  if (hasReels) {
+    tasks.push(callGenerate(baseUrl, 'generate-clips', {
+      transcript,
+      transcriptWords: session.transcript_words ?? [],
+      brandVoice,
+      accountContext: accountCtx,
+      keyInsights,
+    }))
+    taskKeys.push('clips')
+  }
+  if (deliverables.includes('carousel')) {
+    tasks.push(callGenerate(baseUrl, 'generate-carousel', commonBody))
+    taskKeys.push('carousel')
+  }
+  if (deliverables.includes('facebook')) {
+    tasks.push(callGenerate(baseUrl, 'generate-facebook-post', commonBody))
+    taskKeys.push('facebook')
+  }
+  if (deliverables.includes('photoRecap')) {
+    tasks.push(callGenerate(baseUrl, 'generate-photo-recap', { ...commonBody, promptType: 'highlights' }))
+    taskKeys.push('photoRecap')
+  }
+  if (deliverables.includes('sundayInvite')) {
+    tasks.push(callGenerate(baseUrl, 'generate-sunday-invite', commonBody))
+    taskKeys.push('sundayInvite')
+  }
+
+  const results = await Promise.all(tasks)
+  const resultMap: Record<string, any> = {}
+  taskKeys.forEach((key, i) => { resultMap[key] = results[i] })
+
+  taskKeys.forEach(key => { if (resultMap[key]) generated[key] = 'ok' })
 
   // ── Step 3: Persist to session ───────────────────────────────────────────
   const autoDrafts = {
-    ...(overview       ? { overview }                                         : {}),
-    ...(carouselRes    ? { carousel:    carouselRes.concepts ?? [] }          : {}),
-    ...(facebookRes    ? { facebook:    facebookRes.posts    ?? [] }          : {}),
-    ...(photoRecapRes  ? { photoRecap:  photoRecapRes.captions ?? [] }        : {}),
-    ...(sundayInviteRes ? { sundayInvite: sundayInviteRes.invites ?? [] }     : {}),
+    ...(overview                  ? { overview }                                                      : {}),
+    ...(resultMap.clips           ? { clips:       resultMap.clips.clips ?? [] }                      : {}),
+    ...(resultMap.carousel        ? { carousel:    resultMap.carousel.options ?? [] }                 : {}),
+    ...(resultMap.facebook        ? { facebook:    resultMap.facebook.posts ?? [] }                   : {}),
+    ...(resultMap.photoRecap      ? { photoRecap:  resultMap.photoRecap.captions ?? [] }              : {}),
+    ...(resultMap.sundayInvite    ? { sundayInvite: resultMap.sundayInvite.invites ?? [] }            : {}),
   }
 
   const updatePayload: Record<string, any> = { auto_drafts: autoDrafts }

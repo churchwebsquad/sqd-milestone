@@ -13,7 +13,7 @@
  * carousel_caption.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw, Check, Quote, CheckCircle2, Trash2, Plus } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
@@ -123,11 +123,6 @@ export function CarouselStep() {
     setCarouselSlides(next.map((text, j) => ({ slide_number: j + 1, text })))
   }
 
-  // Auto-generate slides on first visit only — never when already approved
-  useEffect(() => {
-    if (!slidesApproved && options.length === 0 && transcript) void handleGenerateSlides()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const handleGenerateCaption = useCallback(async () => {
     if (editedSlides.length === 0) return

@@ -259,7 +259,6 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
   // Refs
   const isLoadingRef = useRef<boolean>(true)   // skip autosave during load
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const autoGeneratingRef = useRef<boolean>(false)
 
   // ── Convenience setters ─────────────────────────────────────────────
   const setCurrentStep = useCallback((s: SrpWorkflowStep) => setCurrentStepRaw(s), [])
@@ -421,24 +420,9 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     void refresh()
   }, [refresh])
 
-  // Fire auto-generation when transcript becomes ready and drafts not yet generated
-  useEffect(() => {
-    if (isResuming) return
-    if (!transcript || transcript.trim().length < 200) return
-    if (autoDrafts !== null) return            // already generated
-    if (autoGeneratingRef.current) return
-    autoGeneratingRef.current = true
-    ;(async () => {
-      try {
-        await fetch('/api/srp/auto-generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: sessionId }),
-        })
-        await refresh()
-      } catch { /* non-fatal — coach can generate manually */ }
-    })()
-  }, [isResuming, transcript, autoDrafts, sessionId, refresh])
+  // Auto-generation is triggered explicitly from SermonInputStep's Continue button,
+  // not automatically here. The autoGeneratingRef is kept to avoid double-fires
+  // if the context remounts while a fetch is in flight.
 
   // Auto-load brand voice from church intel if not already set
   useEffect(() => {

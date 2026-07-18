@@ -403,8 +403,17 @@ export function ClipSelectionStep() {
     clipSelections, setClipSelections,
     videoUrl, videoSourceType,
     visibleSteps,
+    autoDrafts,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
+
+  // Seed from autoDrafts on first load if no suggestions yet
+  useEffect(() => {
+    if (clipSuggestions.length === 0 && autoDrafts?.clips?.length) {
+      setClipSuggestions(autoDrafts.clips)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const playerRef  = useRef<HTMLIFrameElement | null>(null)
   const [activeStartSec, setActiveStartSec] = useState<number | null>(null)
@@ -481,9 +490,9 @@ export function ClipSelectionStep() {
   }, [transcript, brandVoice, account, sermonSubmission, hasTimecodes,
       clipSuggestions, pinnedIds, guidance, keyInsights, setClipSuggestions])
 
-  // Auto-generate if no suggestions yet
+  // Auto-generate only if no suggestions and no autoDraft clips (i.e. background generation hasn't run yet)
   useEffect(() => {
-    if (clipSuggestions.length === 0 && transcript && transcript.length > 200 && !generating) {
+    if (clipSuggestions.length === 0 && !autoDrafts?.clips?.length && transcript && transcript.length > 200 && !generating) {
       void handleGenerate()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
