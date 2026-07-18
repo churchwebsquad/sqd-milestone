@@ -85,13 +85,9 @@ Always attribute sermon quotes clearly (e.g. "— Pastor [Name]") or weave attri
 
 Layout 5 — Single Image with Text (1 slide)
 This is not a carousel. It is one standalone graphic — a single slide designed to stop the scroll on its own. No setup, no swipe needed. It lives or dies by what's on that one frame.
-Choose ONE of the following — whichever hits hardest from this particular sermon:
-- A sermon quote that is surprising, challenging, or deeply resonant. Something that feels like a firm hand on the shoulder.
-- A Bible verse used in the sermon that is striking enough to stand alone without any commentary.
-Do not combine both. Pick the single strongest option.
+Use a direct quote from the sermon — something the pastor actually said that is surprising, challenging, or deeply resonant. A line that feels like a firm hand on the shoulder. Do NOT use a Bible verse here; the quote must come from the pastor's own words.
 The text must be short enough to read in 2 seconds. If it needs explanation, it's the wrong choice.
-Attribute sermon quotes clearly (e.g. "— Pastor [Name]").
-When using a Bible verse, include the translation (e.g. "Romans 8:28 ESV").`
+Attribute the quote clearly (e.g. "— Pastor [Name]").`
 
 const DEFAULT_CAPTION_PROMPT = `You are a social media copywriter for churches. Write concise, Instagram-friendly captions to accompany carousel posts.
 
