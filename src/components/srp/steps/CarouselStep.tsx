@@ -106,8 +106,8 @@ export function CarouselStep() {
   const approveSlides = () => {
     setSlidesApproved(true)
     setCarouselInput({ ...carouselInput, slidesApproved: true })
-    // Auto-generate caption if one doesn't exist yet
-    if (!carouselCaption) void handleGenerateCaption()
+    // Auto-generate caption only if one doesn't exist and caption isn't already approved
+    if (!carouselCaption && !captionApproved) void handleGenerateCaption()
   }
 
   const approveCaption = () => {
@@ -123,9 +123,9 @@ export function CarouselStep() {
     setCarouselSlides(next.map((text, j) => ({ slide_number: j + 1, text })))
   }
 
-  // Auto-generate slides on first visit if no options exist yet
+  // Auto-generate slides on first visit only — never when already approved
   useEffect(() => {
-    if (options.length === 0 && transcript) void handleGenerateSlides()
+    if (!slidesApproved && options.length === 0 && transcript) void handleGenerateSlides()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
