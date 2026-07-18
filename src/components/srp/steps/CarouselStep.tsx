@@ -182,13 +182,13 @@ export function CarouselStep() {
         <div className="rounded-lg border border-wm-danger/30 bg-wm-danger-bg px-4 py-3 text-[12px] text-wm-danger">{error}</div>
       )}
 
-      {/* Options grid */}
+      {/* Options — stacked cards with horizontal slide preview row */}
       {options.length > 0 && (
         <section className="space-y-3">
           <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
             Options
           </p>
-          <ul className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <ul className="space-y-3">
             {options.map((opt, i) => {
               const picked = i === selectedIdx
               return (
@@ -197,34 +197,41 @@ export function CarouselStep() {
                     type="button"
                     onClick={() => pickOption(i)}
                     className={[
-                      'w-full text-left rounded-xl border p-3 transition-colors h-full',
+                      'w-full text-left rounded-xl border p-4 transition-colors',
                       picked
                         ? 'border-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)]'
                         : 'border-[var(--color-lavender)] bg-white hover:bg-[var(--color-lavender-tint)]/40',
                     ].join(' ')}
                   >
-                    <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center justify-between gap-2 mb-3">
                       <span className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
                         Option {i + 1} · {opt.slides.length} slides
                       </span>
                       {picked && (
                         <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-bold text-[var(--color-primary-purple)]">
-                          <Check size={11} /> picked
+                          <Check size={11} /> Picked
                         </span>
                       )}
                     </div>
-                    <ol className="space-y-1.5 text-[11px] text-[var(--color-deep-plum)]">
+
+                    {/* Horizontal slide preview boxes */}
+                    <div className="flex gap-2 overflow-x-auto pb-2">
                       {opt.slides.map((s, j) => (
-                        <li key={j} className="flex gap-1.5">
-                          <span className="shrink-0 font-mono text-[10px] text-[var(--color-purple-gray)] mt-0.5">{j + 1}.</span>
-                          <span className="min-w-0 line-clamp-3">{s}</span>
-                        </li>
+                        <div
+                          key={j}
+                          className="shrink-0 w-[130px] aspect-square rounded-lg border border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] p-2.5 flex items-center justify-center text-center"
+                        >
+                          <p className="text-[10px] leading-snug text-[var(--color-deep-plum)]">{s}</p>
+                        </div>
                       ))}
-                    </ol>
-                    <div className="mt-3 pt-2 border-t border-[var(--color-lavender)] space-y-1.5">
-                      <CitationsList items={opt.citations} />
-                      <BrandVoiceTagsBadges tags={opt.brandVoiceTags} />
                     </div>
+
+                    {(opt.citations?.length > 0 || opt.brandVoiceTags?.length > 0) && (
+                      <div className="mt-3 pt-2 border-t border-[var(--color-lavender)] space-y-1.5">
+                        <CitationsList items={opt.citations} />
+                        <BrandVoiceTagsBadges tags={opt.brandVoiceTags} />
+                      </div>
+                    )}
                   </button>
                 </li>
               )
