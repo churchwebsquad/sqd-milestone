@@ -186,7 +186,8 @@ export default async function handler(req: any, res: any) {
   const brandVoice     = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
   const accountContext = (req.body?.accountContext ?? {}) as Record<string, any>
   const userGuidance   = typeof req.body?.userGuidance === 'string' ? req.body.userGuidance : ''
-  const type           = req.body?.type === 'caption' ? 'caption' : 'slides'
+  const rawType        = req.body?.type
+  const type           = rawType === 'caption' ? 'caption' : rawType === 'refine' ? 'refine' : 'slides'
   const slides         = Array.isArray(req.body?.slides) ? req.body.slides as string[] : []
   const keyInsights:   string[] = Array.isArray(req.body?.keyInsights) ? req.body.keyInsights : []
 
@@ -195,6 +196,9 @@ export default async function handler(req: any, res: any) {
   }
   if (type === 'caption' && slides.length === 0) {
     return res.status(400).json({ error: 'slides required when type=caption' })
+  }
+  if (type === 'refine' && slides.length === 0) {
+    return res.status(400).json({ error: 'slides required when type=refine' })
   }
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
@@ -233,6 +237,53 @@ export default async function handler(req: any, res: any) {
       if (e instanceof GatewayRateLimitError)  return res.status(429).json({ error: 'Rate limit exceeded.' })
       if (e instanceof GatewayTransientError)  return res.status(502).json({ error: e.message })
       return res.status(502).json({ error: e instanceof Error ? e.message : 'Caption generation failed' })
+    }
+  }
+
+  // -------- Refine mode --------
+  if (type === 'refine') {
+    const basePrompt = (await resolvePrompt(sb, 'carousel_slides')) ?? DEFAULT_SLIDES_PROMPT
+    const systemPrompt = [basePrompt, ctx, BRAND_VOICE_TAGS_BLOCK].filter(Boolean).join('\n\n')
+    const userPrompt =
+      `You have a set of Instagram carousel slides that need to be refined based on coach feedback.\n\n` +
+      `CURRENT SLIDES:\n${slides.map((s, i) => `Slide ${i + 1}: ${s}`).join('\n')}\n\n` +
+      `COACH INSTRUCTION: "${userGuidance}"\n\n` +
+      `Apply the instruction faithfully. You may reorder, split, merge, add, or remove slides as instructed. ` +
+      `Return only the revised slides — no explanation needed. ` +
+      `Keep the voice and style of the current slides unless the instruction says otherwise.` +
+      (transcript ? `\n\nOriginal transcript (for pulling new quotes if needed):\n${transcript.slice(0, 20000)}` : '')
+
+    const REFINE_SCHEMA: ToolSchema = {
+      type: 'object',
+      properties: {
+        slides:         { type: 'array', items: { type: 'string' }, description: 'The revised slide texts in order.' },
+        citations:      { type: 'array', items: { type: 'string' }, description: 'Verbatim transcript quotes used.' },
+        brandVoiceTags: { type: 'array', items: { type: 'string' }, description: 'Brand voice tags.' },
+      },
+      required: ['slides', 'citations', 'brandVoiceTags'],
+      additionalProperties: false,
+    }
+
+    try {
+      const result = await callGateway<{ slides: string[]; citations: string[]; brandVoiceTags: string[] }>({
+        model:    'anthropic/claude-sonnet-4-6',
+        system:   systemPrompt,
+        user:     userPrompt,
+        toolName: 'return_refined_slides',
+        toolDescription: 'Return the refined carousel slides after applying the coach instruction.',
+        toolSchema: REFINE_SCHEMA,
+        maxTokens: 2000,
+      })
+      return res.status(200).json({
+        slides:         result.args.slides ?? [],
+        citations:      result.args.citations ?? [],
+        brandVoiceTags: result.args.brandVoiceTags ?? [],
+        usage: { input_tokens: result.usage.inputTokens, output_tokens: result.usage.outputTokens },
+      })
+    } catch (e) {
+      if (e instanceof GatewayRateLimitError)  return res.status(429).json({ error: 'Rate limit exceeded.' })
+      if (e instanceof GatewayTransientError)  return res.status(502).json({ error: e.message })
+      return res.status(502).json({ error: e instanceof Error ? e.message : 'Refine failed' })
     }
   }
 

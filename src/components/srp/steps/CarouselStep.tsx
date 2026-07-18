@@ -59,6 +59,8 @@ export function CarouselStep() {
   )
   const [generatingSlides, setGeneratingSlides] = useState(false)
   const [generatingCaption, setGeneratingCaption] = useState(false)
+  const [refineInstruction, setRefineInstruction] = useState('')
+  const [refining, setRefining] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const stepNum = visibleSteps.indexOf('carousel') + 1
@@ -138,6 +140,28 @@ export function CarouselStep() {
       setGeneratingCaption(false)
     }
   }, [editedSlides, brandVoice, account, sermonSubmission, captionGuidance, setCarouselCaption])
+
+  const handleRefine = useCallback(async () => {
+    if (!refineInstruction.trim() || editedSlides.length === 0) return
+    setRefining(true); setError(null)
+    try {
+      const r = await callSrpApi<{ slides: string[]; citations: string[]; brandVoiceTags: string[] }>('generate-carousel', {
+        type: 'refine',
+        slides: editedSlides,
+        transcript,
+        brandVoice,
+        accountContext: buildAccountContext(account, sermonSubmission),
+        userGuidance: refineInstruction,
+      })
+      setEditedSlides(r.slides)
+      setTags(r.brandVoiceTags ?? [])
+      setRefineInstruction('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'refine failed')
+    } finally {
+      setRefining(false)
+    }
+  }, [refineInstruction, editedSlides, transcript, brandVoice, account, sermonSubmission])
 
   const canContinue = (carouselSlides?.length ?? 0) > 0 && (carouselCaption?.trim().length ?? 0) > 0
   return (
@@ -279,6 +303,31 @@ export function CarouselStep() {
           >
             <Plus size={13} /> Add slide
           </button>
+
+          {/* AI refine */}
+          <div className="rounded-lg border border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] p-3 space-y-2">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
+              Refine with AI
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={refineInstruction}
+                onChange={e => setRefineInstruction(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !refining) void handleRefine() }}
+                placeholder="e.g. make it 4 slides, split slide 2, rewrite the hook"
+                className="flex-1 rounded-lg border border-[var(--color-lavender)] bg-white px-3 py-1.5 text-[12px] text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] focus:ring-2 focus:ring-[var(--color-lavender)]"
+              />
+              <SrpButton
+                size="sm"
+                onClick={() => void handleRefine()}
+                disabled={refining || !refineInstruction.trim()}
+                leadingIcon={refining ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+              >
+                {refining ? 'Refining…' : 'Refine'}
+              </SrpButton>
+            </div>
+          </div>
 
           <BrandVoiceTagsBadges tags={tags} />
           <div className="pt-2 flex items-center gap-3">
