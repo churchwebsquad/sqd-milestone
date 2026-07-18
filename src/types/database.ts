@@ -2619,6 +2619,7 @@ export interface SrpCarouselInput {
   selectedCitations?: string[]
   selectedTags?: string[]
   slidesApproved?: boolean
+  captionApproved?: boolean
 }
 export interface SrpPhotoRecapInput {
   promptType?: 'highlights' | 'teaching'
