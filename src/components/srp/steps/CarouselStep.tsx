@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw, Check, Quote, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw, Check, Quote, CheckCircle2, Trash2, Plus } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import { BrandVoiceTagsBadges } from '../_shared/BrandVoiceTagsBadges'
@@ -248,9 +248,21 @@ export function CarouselStep() {
           </p>
           {editedSlides.map((text, i) => (
             <div key={i} className="space-y-1.5">
-              <label className="block text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
-                Slide {i + 1}
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="block text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
+                  Slide {i + 1}
+                </label>
+                {editedSlides.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setEditedSlides(prev => prev.filter((_, idx) => idx !== i))}
+                    className="text-[var(--color-purple-gray)] hover:text-wm-danger transition-colors"
+                    aria-label="Remove slide"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
               <textarea
                 value={text}
                 onChange={e => updateSlide(i, e.target.value)}
@@ -259,6 +271,15 @@ export function CarouselStep() {
               />
             </div>
           ))}
+
+          <button
+            type="button"
+            onClick={() => setEditedSlides(prev => [...prev, ''])}
+            className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--color-primary-purple)] hover:text-[var(--color-deep-plum)] transition-colors"
+          >
+            <Plus size={13} /> Add slide
+          </button>
+
           <BrandVoiceTagsBadges tags={tags} />
           <div className="pt-2 flex items-center gap-3">
             {slidesApproved ? (
