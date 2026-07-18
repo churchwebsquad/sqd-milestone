@@ -93,10 +93,7 @@ export function PhotoRecapStep() {
         const r = await fetch(`/api/clickup/task-detail?taskId=${clickupTaskId}`)
         if (!r.ok) { setFetchStatus('blank'); return }
         const data = await r.json() as { description?: string }
-        console.log('[PhotoRecap] taskId:', clickupTaskId)
-        console.log('[PhotoRecap] description:', data.description)
         const extracted = parseLookingBack(data.description ?? '')
-        console.log('[PhotoRecap] extracted:', extracted)
         setRawLookingBack(extracted)
         if (extracted) {
           setFetchStatus('found')
