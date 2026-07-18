@@ -115,6 +115,12 @@ export function SundayInviteStep() {
     }
   }, [transcript, brandVoice, account, sermonSubmission, lookingAhead, guidance, keyInsights])
 
+  // Auto-generate on first visit if no options exist yet
+  useEffect(() => {
+    if (options.length === 0 && transcript) void handleGenerate()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const pickOption = (idx: number) => {
     setSelectedIdx(idx)
     const opt = options[idx]

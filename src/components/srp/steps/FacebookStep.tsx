@@ -6,7 +6,7 @@
  * saves to sessions.facebook_post.
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw, Check } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
@@ -62,6 +62,12 @@ export function FacebookStep() {
       setGenerating(false)
     }
   }, [transcript, brandVoice, account, sermonSubmission, guidance])
+
+  // Auto-generate on first visit if no options exist yet
+  useEffect(() => {
+    if (options.length === 0 && transcript) void handleGenerate()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const pickOption = (idx: number) => {
     setSelectedIdx(idx)
