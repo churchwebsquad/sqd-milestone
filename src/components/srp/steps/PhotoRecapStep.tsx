@@ -26,27 +26,15 @@ interface CaptionOption {
 interface OptionsResponse { captions: CaptionOption[] }
 
 function parseLookingBack(description: string): string {
-  const lines = description.split('\n')
-  let capturing = false
-  const result: string[] = []
-  for (const line of lines) {
-    const trimmed = line.trim()
-    // Match "Looking Back" with or without a colon, with optional inline content
-    const headerMatch = trimmed.match(/^LOOKING BACK\s*:?\s*(.*)/i)
-    if (headerMatch && !capturing) {
-      capturing = true
-      const inline = headerMatch[1].trim()
-      // Skip ClickUp template filler prompts; include real partner content
-      if (inline && !/we'?d love to hear/i.test(inline)) result.push(inline)
-      continue
-    }
-    if (capturing) {
-      if (/^[A-Z][A-Z\s]{3,}$/.test(trimmed) && trimmed === trimmed.toUpperCase()) break
-      if (/^looking ahead\s*:?/i.test(trimmed)) break
-      result.push(line)
-    }
-  }
-  return result.join('\n').trim()
+  const parts = description.split(/Looking Back\s*:?\s*/i)
+  if (parts.length < 2) return ''
+  const after = parts[1]
+  const stop = after.search(/\n\s*(?:Looking Ahead|Get the Photos|Creative Direction|General Info|Administrative)/i)
+  const content = stop !== -1 ? after.slice(0, stop) : after
+  return content.split('\n')
+    .filter(l => !/love to hear/i.test(l))
+    .join('\n')
+    .trim()
 }
 
 const PROMPT_TYPES = [
