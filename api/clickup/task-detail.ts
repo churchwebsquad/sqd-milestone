@@ -26,7 +26,7 @@ export default async function handler(req: any, res: any) {
       .flatMap((cl: any) => (cl.items ?? []).map((item: any) => item.name ?? ''))
       .join('\n')
 
-    res.setHeader('Cache-Control', 's-maxage=60')
+    res.setHeader('Cache-Control', 'no-store')
     return res.status(200).json({
       id:          data.id,
       name:        data.name ?? '',
