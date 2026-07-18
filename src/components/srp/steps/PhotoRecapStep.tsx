@@ -31,9 +31,18 @@ function parseLookingBack(description: string): string {
   const result: string[] = []
   for (const line of lines) {
     const trimmed = line.trim()
-    if (/^LOOKING BACK\s*$/i.test(trimmed)) { capturing = true; continue }
+    // Match "Looking Back" with or without a colon, with optional inline content
+    const headerMatch = trimmed.match(/^LOOKING BACK\s*:?\s*(.*)/i)
+    if (headerMatch && !capturing) {
+      capturing = true
+      const inline = headerMatch[1].trim()
+      // Skip ClickUp template filler prompts; include real partner content
+      if (inline && !/we'?d love to hear/i.test(inline)) result.push(inline)
+      continue
+    }
     if (capturing) {
       if (/^[A-Z][A-Z\s]{3,}$/.test(trimmed) && trimmed === trimmed.toUpperCase()) break
+      if (/^looking ahead\s*:?/i.test(trimmed)) break
       result.push(line)
     }
   }

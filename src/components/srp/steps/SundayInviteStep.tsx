@@ -48,7 +48,15 @@ function parseSection(description: string, header: string): string {
   const result: string[] = []
   for (const line of lines) {
     const trimmed = line.trim()
-    if (new RegExp(`^${header}\\s*$`, 'i').test(trimmed)) { capturing = true; continue }
+    // Match header with or without a colon, with optional inline content
+    const headerMatch = trimmed.match(new RegExp(`^${header}\\s*:?\\s*(.*)`, 'i'))
+    if (headerMatch && !capturing) {
+      capturing = true
+      const inline = headerMatch[1].trim()
+      // Skip ClickUp template filler prompts; include real partner content
+      if (inline && !/is there anything|we'?d love to hear/i.test(inline)) result.push(inline)
+      continue
+    }
     if (capturing) {
       if (/^[A-Z][A-Z\s]{3,}$/.test(trimmed) && trimmed === trimmed.toUpperCase()) break
       if (/^external\s+link\s+for\s+sermon\s+notes/i.test(trimmed)) break
