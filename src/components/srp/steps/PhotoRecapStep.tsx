@@ -10,7 +10,7 @@
  * Coach picks one, approves it, edits if needed, or refines with AI guidance.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw, Check, Camera, BookOpen, Pencil } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
@@ -75,6 +75,7 @@ export function PhotoRecapStep() {
   const [error, setError]                 = useState<string | null>(null)
   const [fetchStatus, setFetchStatus]     = useState<'idle' | 'loading' | 'found' | 'blank' | 'no-task'>('idle')
   const [rawLookingBack, setRawLookingBack] = useState<string>('')
+  const fetchStarted = useRef(false)
 
   const stepNum    = visibleSteps.indexOf('photoRecap') + 1
   const promptType = photoRecapInput?.promptType ?? 'highlights'
@@ -83,11 +84,9 @@ export function PhotoRecapStep() {
 
   // Auto-pull "LOOKING BACK" from the ClickUp task description on first load
   useEffect(() => {
-    if (!clickupTaskId) {
-      setFetchStatus('no-task')
-      return
-    }
-    if (fetchStatus !== 'idle') return
+    if (!clickupTaskId) return  // wait for session to load
+    if (fetchStarted.current) return
+    fetchStarted.current = true
     setFetchStatus('loading')
     ;(async () => {
       try {
@@ -226,9 +225,9 @@ export function PhotoRecapStep() {
                 <p className="text-[12px] text-[var(--color-deep-plum)] whitespace-pre-wrap leading-relaxed">{rawLookingBack}</p>
               </div>
             )}
-            {(fetchStatus === 'blank' || fetchStatus === 'no-task') && (
+            {fetchStatus === 'blank' && (
               <p className="text-[11px] text-[var(--color-purple-gray)]">
-                {fetchStatus === 'blank' ? 'Looking Back was blank in this ClickUp task.' : 'No ClickUp task linked.'} Add highlights below.
+                Looking Back was blank in this ClickUp task. Add highlights below.
               </p>
             )}
 
