@@ -27,18 +27,23 @@ interface CaptionResponse {
 // ── Previous week loader ──────────────────────────────────────────────────────
 
 async function loadPrevWeekCaptions(member: number, currentSessionId: string): Promise<(string | null)[]> {
+  // Look at the most recent OTHER session for this church that has at least one caption.
+  // Don't gate on status='completed' — coaches rarely mark sessions complete.
   const { data } = await (srpPipeline as any)
     .from('sessions')
     .select('clip_selections, session_id')
     .eq('member', member)
-    .eq('status', 'completed')
     .neq('session_id', currentSessionId)
+    .not('clickup_task_id', 'is', null) // only task sessions (not holding sessions)
     .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (!data) return []
-  const clips: SrpClipSelection[] = Array.isArray(data.clip_selections) ? data.clip_selections : []
-  return clips.map(c => c.social_caption ?? null)
+    .limit(10) // grab a few to find one with captions
+  if (!data || !Array.isArray(data)) return []
+  for (const row of data) {
+    const clips: SrpClipSelection[] = Array.isArray(row.clip_selections) ? row.clip_selections : []
+    const captions = clips.map(c => c.social_caption ?? null)
+    if (captions.some(c => c)) return captions
+  }
+  return []
 }
 
 // ── Brand voice reference panel ───────────────────────────────────────────────

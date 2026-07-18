@@ -22,7 +22,6 @@ import {
   BRAND_VOICE_TAGS_BLOCK,
   GatewayRateLimitError,
   GatewayTransientError,
-  MODEL_TRANSCRIPTION,
 } from './_lib/aiGateway.js'
 
 export const maxDuration = 45
@@ -106,7 +105,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     const result = await callGateway<ReelCaptionArgs>({
-      model:  MODEL_TRANSCRIPTION, // gemini-2.5-flash — reliable tool_choice, matches original app
+      model:  'anthropic/claude-haiku-4-5', // Haiku: fast, cheap, reliably respects forced tool_choice
       system: systemPrompt,
       user:   userPrompt,
       toolName: 'return_caption',
