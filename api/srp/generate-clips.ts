@@ -210,6 +210,7 @@ ${transcript.slice(0, 60000)}`
 
   try {
     const result = await callGateway<{ clips: ClipOutput[] }>({
+      model:  'anthropic/claude-sonnet-4-6',
       system: systemPrompt,
       user:   userPrompt,
       toolName: 'suggest_clips',

@@ -136,6 +136,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     const result = await callGateway<{ invites: any[] }>({
+      model:  'anthropic/claude-haiku-4-5',
       system: systemPrompt,
       user:   userPrompt,
       toolName: 'suggest_invites',

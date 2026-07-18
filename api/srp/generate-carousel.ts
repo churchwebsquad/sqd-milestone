@@ -217,12 +217,12 @@ export default async function handler(req: any, res: any) {
 
     try {
       const result = await callGateway<{ caption: string; brandVoiceTags: string[] }>({
-        system: systemPrompt,
-        user:   userPrompt,
+        model:    'anthropic/claude-sonnet-4-6',
+        system:   systemPrompt,
+        user:     userPrompt,
         toolName: 'return_caption',
         toolDescription: 'Return the carousel caption and the brand voice tags that shaped it.',
         toolSchema: CAPTION_TOOL_SCHEMA,
-        maxTokens: 600,
       })
       return res.status(200).json({
         caption:        result.args.caption,
@@ -255,8 +255,9 @@ export default async function handler(req: any, res: any) {
 
   try {
     const result = await callGateway<{ options: any[] }>({
-      system: systemPrompt,
-      user:   userPrompt,
+      model:    'anthropic/claude-sonnet-4-6',
+      system:   systemPrompt,
+      user:     userPrompt,
       toolName: 'suggest_carousels',
       toolDescription: 'Return 4 Instagram carousel options with slides[], citations[], caption, and brand-voice tags.',
       toolSchema: SLIDES_TOOL_SCHEMA,
