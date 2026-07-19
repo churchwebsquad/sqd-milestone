@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Search, Brain, Sparkles, ArrowUpDown, Plus, X, Loader2, Save, AlertCircle, Zap, FileText, AlertTriangle } from 'lucide-react'
+import { Search, Brain, Sparkles, ArrowUpDown, Plus, X, Loader2, Save, AlertCircle, Zap, FileText, AlertTriangle, RefreshCw } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import type { StrategySocialProProfile } from '../../types/database'
@@ -230,6 +230,8 @@ export default function SocialDashboardPage() {
   const [loading, setLoading]     = useState(true)
   const [search, setSearch]       = useState('')
   const [sort, setSort]           = useState<SortMode>('srp')
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null)
   const [addingMember, setAddingMember] = useState<number | null>(null)
 
   useEffect(() => {
@@ -396,6 +398,25 @@ export default function SocialDashboardPage() {
     void load()
   }, [])
 
+  const handleCacheRefresh = useCallback(async () => {
+    setRefreshing(true)
+    setRefreshMsg(null)
+    try {
+      const { error } = await (supabase as any).functions.invoke('srp-hub-cache-refresh')
+      if (error) {
+        setRefreshMsg(`Error: ${error.message ?? 'unknown'}`)
+      } else {
+        setRefreshMsg('Cache refreshed — reloading…')
+        // Re-run the full load to pick up the new cache data
+        window.location.reload()
+      }
+    } catch (e) {
+      setRefreshMsg(`Error: ${e instanceof Error ? e.message : 'unknown'}`)
+    } finally {
+      setRefreshing(false)
+    }
+  }, [])
+
   // Derive this-week membership from srpMap directly (dueDate or createdAt falls in current week).
   // This is more reliable than the srp_tasks_this_week cache which can be stale.
   const weekStart = useMemo(() => getWeekStart(new Date()), [])
@@ -559,9 +580,22 @@ export default function SocialDashboardPage() {
 
       {/* Stats bar */}
       <div className="bg-white border border-[#CFC9F8] rounded-2xl p-5 mb-6">
-        <div className="flex items-baseline gap-2 mb-4">
-          <span className="text-2xl font-bold text-[#341756]">{thisWeekMemberSet.size}</span>
-          <span className="text-sm text-gray-500">SRPs this week</span>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-bold text-[#341756]">{thisWeekMemberSet.size}</span>
+            <span className="text-sm text-gray-500">SRPs this week</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {refreshMsg && <span className="text-xs text-[#6B6180]">{refreshMsg}</span>}
+            <button
+              onClick={() => void handleCacheRefresh()}
+              disabled={refreshing}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#EDE9FC] text-[#513DE5] rounded-full text-xs font-semibold hover:bg-[#CFC9F8] transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
+              {refreshing ? 'Refreshing…' : 'Refresh cache'}
+            </button>
+          </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {Object.entries(STATUS_LABELS).map(([key, label]) => (
