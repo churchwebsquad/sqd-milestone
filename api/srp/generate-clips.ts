@@ -161,13 +161,14 @@ export default async function handler(req: any, res: any) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !serviceRoleKey) return res.status(500).json({ error: 'Missing Supabase env vars' })
 
-  const transcript     = typeof req.body?.transcript    === 'string'   ? req.body.transcript    : ''
-  const brandVoice     = typeof req.body?.brandVoice     === 'string'   ? req.body.brandVoice     : ''
-  const accountContext = (req.body?.accountContext ?? {}) as Record<string, any>
-  const hasTimecodes   = req.body?.hasTimecodes !== false
+  const transcript       = typeof req.body?.transcript    === 'string'   ? req.body.transcript    : ''
+  const brandVoice       = typeof req.body?.brandVoice     === 'string'   ? req.body.brandVoice     : ''
+  const accountContext   = (req.body?.accountContext ?? {}) as Record<string, any>
+  const deliverableIntel = typeof req.body?.deliverableIntel === 'string' ? req.body.deliverableIntel.trim() : ''
+  const hasTimecodes     = req.body?.hasTimecodes !== false
   // Quotes of already-pinned clips so the AI knows to avoid them
-  const pinnedQuotes:  string[] = Array.isArray(req.body?.pinnedQuotes)  ? req.body.pinnedQuotes  : []
-  const keyInsights:   string[] = Array.isArray(req.body?.keyInsights)   ? req.body.keyInsights   : []
+  const pinnedQuotes:    string[] = Array.isArray(req.body?.pinnedQuotes)  ? req.body.pinnedQuotes  : []
+  const keyInsights:     string[] = Array.isArray(req.body?.keyInsights)   ? req.body.keyInsights   : []
 
   if (!transcript || transcript.trim().length < 200) {
     return res.status(400).json({ error: 'transcript too short (minimum ~200 chars)' })
@@ -198,11 +199,15 @@ The following clips have already been selected and pinned by the coach. Your sug
     ? 'DURATION: Every clip MUST be between 30 and 90 seconds. STRONGLY PREFER 30-50 seconds. 50-90 only when the moment truly requires it. Calculate from timestamps.'
     : 'WORD COUNT: IDEAL 110-130 words (≈55-65 sec). ACCEPTABLE 100-140 words. REJECT under 85 or over 150 words.'
 
+  const intelSection = deliverableIntel
+    ? `\n\nChurch-specific guidance for this deliverable:\n${deliverableIntel}`
+    : ''
+
   const userPrompt = `Analyze this sermon transcript and identify 6-10 compelling teaching moments for short-form video clips, ranked by social media potential (rank 1 = best single clip).
 
 ${durationRule}
 
-THE QUOTE IS NON-NEGOTIABLE: Copy it WORD FOR WORD from the transcript. Every filler word, every pause, exactly as spoken. The video editor must match it to the audio.${insightsSection}${pinnedSection}
+THE QUOTE IS NON-NEGOTIABLE: Copy it WORD FOR WORD from the transcript. Every filler word, every pause, exactly as spoken. The video editor must match it to the audio.${intelSection}${insightsSection}${pinnedSection}
 
 Transcript:
 ${transcript}`

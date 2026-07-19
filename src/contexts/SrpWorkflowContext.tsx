@@ -24,6 +24,7 @@ import {
   srpPipeline,
   updateSession,
 } from '../lib/srpSessions'
+import type { ChurchIntelProfile } from '../types/database'
 import {
   SRP_MAX_REELS,
   SRP_REEL_DELIVERABLES,
@@ -131,6 +132,10 @@ interface SrpWorkflowState {
   // Brand voice (lives in srp_pipeline.clip_templates per CLAUDE.md)
   brandVoice: string
   setBrandVoice: (v: string) => void
+
+  // Full church intel profile
+  intelProfile: ChurchIntelProfile | null
+  setIntelProfile: (p: ChurchIntelProfile | null) => void
 
   // Per-step input bundles
   reelGuidance: SrpReelGuidanceMap
@@ -245,6 +250,9 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
 
   // Brand voice
   const [brandVoice, setBrandVoice] = useState<string>('')
+
+  // Full church intel profile
+  const [intelProfile, setIntelProfile] = useState<ChurchIntelProfile | null>(null)
 
   // Per-step input bundles
   const [reelGuidance, setReelGuidance] = useState<SrpReelGuidanceMap>({})
@@ -446,10 +454,10 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
   // not automatically here. The autoGeneratingRef is kept to avoid double-fires
   // if the context remounts while a fetch is in flight.
 
-  // Auto-load brand voice from church intel if not already set
+  // Auto-load brand voice and intel profile from church intel if not already set
   useEffect(() => {
     if (isResuming) return              // wait until session is fully loaded
-    if (brandVoice) return              // already has a voice — don't overwrite
+    if (intelProfile) return            // already loaded — don't re-fetch
     const memberNum = account?.member
     if (!memberNum) return
     ;(async () => {
@@ -460,10 +468,11 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
         .eq('status', 'live')
         .maybeSingle()
       if (!data?.intel_profile) return
+      setIntelProfile(data.intel_profile as ChurchIntelProfile)
       const formatted = formatIntelBrandVoice(data.intel_profile)
       if (formatted) setBrandVoice(formatted)
     })()
-  }, [isResuming, brandVoice, account?.member])
+  }, [isResuming, intelProfile, account?.member])
 
   // Auto-load outro logo URL from clip_templates
   useEffect(() => {
@@ -590,6 +599,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     clickupTaskId, setClickupTaskId,
     srpTaskIdOverride, setSrpTaskIdOverride,
     brandVoice, setBrandVoice,
+    intelProfile, setIntelProfile,
     reelGuidance, setReelGuidance,
     sundayInviteInput, setSundayInviteInput,
     facebookInput, setFacebookInput,

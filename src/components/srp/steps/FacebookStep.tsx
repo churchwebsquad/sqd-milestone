@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw, Check, Pencil } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
+import { IntelGuidancePanel } from '../_shared/IntelGuidancePanel'
 import { BrandVoiceTagsBadges } from '../_shared/BrandVoiceTagsBadges'
 import { CitationsList } from '../_shared/CitationsList'
 import { callSrpApi } from '../../../lib/srpApi'
@@ -30,6 +31,7 @@ export function FacebookStep() {
     facebookPost, setFacebookPost,
     facebookInput, setFacebookInput,
     autoDrafts,
+    intelProfile,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
@@ -124,6 +126,8 @@ export function FacebookStep() {
         <h2 className="text-[22px] font-semibold text-[var(--color-deep-plum)] mt-0.5">{STEP_LABELS.facebook}</h2>
         <p className="text-[13px] text-[var(--color-purple-gray)] mt-1">{STEP_DESCRIPTIONS.facebook}</p>
       </header>
+
+      <IntelGuidancePanel title="Facebook Text Post" data={intelProfile?.facebook_text_post as Record<string, unknown> | null | undefined} />
 
       {/* Regenerate all options — only available before approval */}
       {!approved && (

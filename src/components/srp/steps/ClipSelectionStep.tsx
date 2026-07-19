@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
+import { IntelGuidancePanel } from '../_shared/IntelGuidancePanel'
 import { callSrpApi } from '../../../lib/srpApi'
 import { STEP_LABELS, STEP_DESCRIPTIONS } from '../../../lib/srpSessions'
 import { isSrpReelDeliverable, type SrpClipSelection } from '../../../types/database'
@@ -404,6 +405,7 @@ export function ClipSelectionStep() {
     videoUrl, videoSourceType,
     visibleSteps,
     autoDrafts,
+    intelProfile,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
@@ -595,6 +597,8 @@ export function ClipSelectionStep() {
           {STEP_DESCRIPTIONS.clips} · Pick {reelCount} clip{reelCount === 1 ? '' : 's'}.
         </p>
       </header>
+
+      <IntelGuidancePanel title="Sermon Recap Videos" data={intelProfile?.sermon_recap_videos as Record<string, unknown> | null | undefined} />
 
       {/* Controls bar */}
       <div className="rounded-xl border border-[var(--color-lavender)] bg-white p-3 space-y-2">

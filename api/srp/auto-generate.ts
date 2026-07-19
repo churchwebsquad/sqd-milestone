@@ -60,7 +60,7 @@ export default async function handler(req: any, res: any) {
   const { data: session, error: sessionErr } = await sb
     .schema('srp_pipeline')
     .from('sessions')
-    .select('transcript, transcript_words, church_name, sermon_title, series_title, brand_voice_guidelines, auto_drafts, selected_deliverables')
+    .select('transcript, transcript_words, church_name, sermon_title, series_title, brand_voice_guidelines, auto_drafts, selected_deliverables, member')
     .eq('session_id', sessionId)
     .single()
 
@@ -85,6 +85,37 @@ export default async function handler(req: any, res: any) {
 
   const generated: Record<string, string> = {}
 
+  // Fetch church intel for deliverable-specific guidance
+  let intelProfile: Record<string, any> | null = null
+  const memberNum = typeof session.member === 'number' ? session.member : Number(session.member)
+  if (Number.isFinite(memberNum) && memberNum > 0) {
+    const { data: intelData } = await sb
+      .from('strategy_church_intel')
+      .select('intel_profile')
+      .eq('member', memberNum)
+      .eq('status', 'live')
+      .maybeSingle()
+    if (intelData?.intel_profile) intelProfile = intelData.intel_profile as Record<string, any>
+  }
+
+  function formatIntelSection(section: Record<string, any> | null | undefined): string {
+    if (!section) return ''
+    const lines: string[] = []
+    for (const [key, val] of Object.entries(section)) {
+      if (!val) continue
+      const label = key.replace(/_/g, ' ')
+      if (typeof val === 'string') lines.push(`${label}: ${val}`)
+      else if (Array.isArray(val)) lines.push(`${label}: ${val.join(', ')}`)
+      else if (typeof val === 'object') {
+        const o = val as Record<string, any>
+        if (o.pattern) lines.push(`${label} pattern: ${o.pattern}`)
+        if (Array.isArray(o.observed_examples)) lines.push(`${label} examples: ${o.observed_examples.join(', ')}`)
+        if (o.recommendation) lines.push(`${label} recommendation: ${o.recommendation}`)
+      }
+    }
+    return lines.join('\n')
+  }
+
   // ── Step 1: Overview (skip if already present) ───────────────────────────
   let overview    = existingDrafts?.overview ?? null
   let keyInsights: string[] = Array.isArray(existingDrafts?.overview?.keyInsights) ? existingDrafts.overview.keyInsights : []
@@ -99,35 +130,62 @@ export default async function handler(req: any, res: any) {
   if (overview) generated.overview = 'ok'
 
   // ── Step 2: Only generate deliverables that are missing ──────────────────
-  const commonBody = { transcript, brandVoice, accountContext: accountCtx, keyInsights }
+  const brandVoiceText = brandVoice || (intelProfile?.brand_voice ? formatIntelSection(intelProfile.brand_voice) : '')
+  const whatPerformsWell = formatIntelSection(intelProfile?.what_performs_well)
+  const commonBody = {
+    transcript,
+    brandVoice: brandVoiceText,
+    accountContext: accountCtx,
+    keyInsights,
+    ...(whatPerformsWell ? { performanceContext: whatPerformsWell } : {}),
+  }
 
   const tasks: Promise<any>[] = []
   const taskKeys: string[] = []
 
   if (hasReels && !existingDrafts?.clips) {
+    const clipIntel = formatIntelSection(intelProfile?.sermon_recap_videos)
     tasks.push(callGenerate(baseUrl, 'generate-clips', {
       transcript,
       transcriptWords: session.transcript_words ?? [],
-      brandVoice,
+      brandVoice: brandVoiceText,
       accountContext: accountCtx,
       keyInsights,
+      ...(clipIntel ? { deliverableIntel: clipIntel } : {}),
     }))
     taskKeys.push('clips')
   }
   if (deliverables.includes('carousel') && !existingDrafts?.carousel) {
-    tasks.push(callGenerate(baseUrl, 'generate-carousel', commonBody))
+    const carouselIntel = formatIntelSection(intelProfile?.carousel_post)
+    tasks.push(callGenerate(baseUrl, 'generate-carousel', {
+      ...commonBody,
+      ...(carouselIntel ? { deliverableIntel: carouselIntel } : {}),
+    }))
     taskKeys.push('carousel')
   }
   if (deliverables.includes('facebook') && !existingDrafts?.facebook) {
-    tasks.push(callGenerate(baseUrl, 'generate-facebook-post', commonBody))
+    const facebookIntel = formatIntelSection(intelProfile?.facebook_text_post)
+    tasks.push(callGenerate(baseUrl, 'generate-facebook-post', {
+      ...commonBody,
+      ...(facebookIntel ? { deliverableIntel: facebookIntel } : {}),
+    }))
     taskKeys.push('facebook')
   }
   if (deliverables.includes('photoRecap') && !existingDrafts?.photoRecap) {
-    tasks.push(callGenerate(baseUrl, 'generate-photo-recap', { ...commonBody, promptType: 'highlights' }))
+    const photoIntel = formatIntelSection(intelProfile?.photo_recap_post)
+    tasks.push(callGenerate(baseUrl, 'generate-photo-recap', {
+      ...commonBody,
+      promptType: 'highlights',
+      ...(photoIntel ? { deliverableIntel: photoIntel } : {}),
+    }))
     taskKeys.push('photoRecap')
   }
   if (deliverables.includes('sundayInvite') && !existingDrafts?.sundayInvite) {
-    tasks.push(callGenerate(baseUrl, 'generate-sunday-invite', commonBody))
+    const inviteIntel = formatIntelSection(intelProfile?.sunday_invite_post)
+    tasks.push(callGenerate(baseUrl, 'generate-sunday-invite', {
+      ...commonBody,
+      ...(inviteIntel ? { deliverableIntel: inviteIntel } : {}),
+    }))
     taskKeys.push('sundayInvite')
   }
 

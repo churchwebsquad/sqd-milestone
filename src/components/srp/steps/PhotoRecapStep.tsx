@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw, Check, Camera, BookOpen, Pencil } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
+import { IntelGuidancePanel } from '../_shared/IntelGuidancePanel'
 import { BrandVoiceTagsBadges } from '../_shared/BrandVoiceTagsBadges'
 import { callSrpApi } from '../../../lib/srpApi'
 import { STEP_LABELS, STEP_DESCRIPTIONS } from '../../../lib/srpSessions'
@@ -60,6 +61,7 @@ export function PhotoRecapStep() {
     photoRecapCaption, setPhotoRecapCaption,
     photoRecapInput, setPhotoRecapInput,
     autoDrafts,
+    intelProfile,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
@@ -180,6 +182,8 @@ export function PhotoRecapStep() {
         <h2 className="text-[22px] font-semibold text-[var(--color-deep-plum)] mt-0.5">{STEP_LABELS.photoRecap}</h2>
         <p className="text-[13px] text-[var(--color-purple-gray)] mt-1">{STEP_DESCRIPTIONS.photoRecap}</p>
       </header>
+
+      <IntelGuidancePanel title="Photo Recap" data={intelProfile?.photo_recap_post as Record<string, unknown> | null | undefined} />
 
       {/* Prompt type toggle */}
       <section className="grid grid-cols-1 sm:grid-cols-2 gap-2">

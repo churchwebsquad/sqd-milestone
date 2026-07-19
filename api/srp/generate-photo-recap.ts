@@ -141,13 +141,14 @@ export default async function handler(req: any, res: any) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !serviceRoleKey) return res.status(500).json({ error: 'Missing Supabase env vars' })
 
-  const transcript     = typeof req.body?.transcript === 'string' ? req.body.transcript : ''
-  const brandVoice     = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
-  const accountContext = (req.body?.accountContext ?? {}) as Record<string, any>
-  const userGuidance   = typeof req.body?.userGuidance === 'string' ? req.body.userGuidance : ''
-  const lookingBack    = typeof req.body?.lookingBack === 'string' ? req.body.lookingBack : ''
-  const promptType     = req.body?.promptType === 'teaching' ? 'teaching' : 'highlights'
-  const keyInsights:   string[] = Array.isArray(req.body?.keyInsights) ? req.body.keyInsights : []
+  const transcript       = typeof req.body?.transcript === 'string' ? req.body.transcript : ''
+  const brandVoice       = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
+  const accountContext   = (req.body?.accountContext ?? {}) as Record<string, any>
+  const userGuidance     = typeof req.body?.userGuidance === 'string' ? req.body.userGuidance : ''
+  const lookingBack      = typeof req.body?.lookingBack === 'string' ? req.body.lookingBack : ''
+  const deliverableIntel = typeof req.body?.deliverableIntel === 'string' ? req.body.deliverableIntel.trim() : ''
+  const promptType       = req.body?.promptType === 'teaching' ? 'teaching' : 'highlights'
+  const keyInsights:     string[] = Array.isArray(req.body?.keyInsights) ? req.body.keyInsights : []
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
@@ -176,6 +177,7 @@ export default async function handler(req: any, res: any) {
 
   const userPrompt =
     `Generate 3-5 photo recap caption options for this weekend's service.\n` +
+    (deliverableIntel ? `\nChurch-specific guidance for this deliverable:\n${deliverableIntel}\n` : '') +
     lookingBackSection +
     insightsSection +
     (transcript ? `\n\nSermon transcript (use for message context where relevant):\n${transcript.slice(0, 20000)}` : '') +

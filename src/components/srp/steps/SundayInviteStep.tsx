@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw, Check, Heart, Zap, Calendar, Telescope, Pencil } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
+import { IntelGuidancePanel } from '../_shared/IntelGuidancePanel'
 import { BrandVoiceTagsBadges } from '../_shared/BrandVoiceTagsBadges'
 import { CitationsList } from '../_shared/CitationsList'
 import { callSrpApi } from '../../../lib/srpApi'
@@ -62,6 +63,7 @@ export function SundayInviteStep() {
     sundayInvite, setSundayInvite,
     sundayInviteInput, setSundayInviteInput,
     autoDrafts,
+    intelProfile,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
@@ -174,6 +176,8 @@ export function SundayInviteStep() {
         <h2 className="text-[22px] font-semibold text-[var(--color-deep-plum)] mt-0.5">{STEP_LABELS.sundayInvite}</h2>
         <p className="text-[13px] text-[var(--color-purple-gray)] mt-1">{STEP_DESCRIPTIONS.sundayInvite}</p>
       </header>
+
+      <IntelGuidancePanel title="Sunday Invite" data={intelProfile?.sunday_invite_post as Record<string, unknown> | null | undefined} />
 
       {/* Context inputs + regenerate — only available before approval */}
       {!approved && (

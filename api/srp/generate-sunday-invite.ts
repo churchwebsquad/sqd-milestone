@@ -97,12 +97,13 @@ export default async function handler(req: any, res: any) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !serviceRoleKey) return res.status(500).json({ error: 'Missing Supabase env vars' })
 
-  const transcript     = typeof req.body?.transcript === 'string' ? req.body.transcript : ''
-  const brandVoice     = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
-  const accountContext = (req.body?.accountContext ?? {}) as Record<string, any>
-  const userGuidance   = typeof req.body?.userGuidance === 'string' ? req.body.userGuidance : ''
-  const lookingAhead   = typeof req.body?.lookingAhead === 'string' ? req.body.lookingAhead : ''
-  const keyInsights:   string[] = Array.isArray(req.body?.keyInsights) ? req.body.keyInsights : []
+  const transcript       = typeof req.body?.transcript === 'string' ? req.body.transcript : ''
+  const brandVoice       = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
+  const accountContext   = (req.body?.accountContext ?? {}) as Record<string, any>
+  const userGuidance     = typeof req.body?.userGuidance === 'string' ? req.body.userGuidance : ''
+  const lookingAhead     = typeof req.body?.lookingAhead === 'string' ? req.body.lookingAhead : ''
+  const deliverableIntel = typeof req.body?.deliverableIntel === 'string' ? req.body.deliverableIntel.trim() : ''
+  const keyInsights:     string[] = Array.isArray(req.body?.keyInsights) ? req.body.keyInsights : []
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
@@ -127,6 +128,7 @@ export default async function handler(req: any, res: any) {
   const userPrompt =
     `Write 2-4 Sunday invite posts following the angles in the system prompt.\n\n` +
     `Only write Post 3 if sermon details are provided below. Only write Post 4 if "Looking Ahead" context provides a real upcoming event.\n\n` +
+    (deliverableIntel ? `\nChurch-specific guidance for this deliverable:\n${deliverableIntel}\n\n` : '') +
     (transcript
       ? `Sermon transcript:\n${transcript.slice(0, 6000)}`
       : 'No transcript provided — write Posts 1 and 2 only.') +

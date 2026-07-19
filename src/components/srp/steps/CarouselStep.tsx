@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw, Check, Quote, CheckCircle2, Trash2, Plus } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
+import { IntelGuidancePanel } from '../_shared/IntelGuidancePanel'
 import { BrandVoiceTagsBadges } from '../_shared/BrandVoiceTagsBadges'
 import { CitationsList } from '../_shared/CitationsList'
 import { callSrpApi } from '../../../lib/srpApi'
@@ -40,6 +41,7 @@ export function CarouselStep() {
     carouselCaption, setCarouselCaption,
     carouselInput, setCarouselInput,
     autoDrafts,
+    intelProfile,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
@@ -184,6 +186,8 @@ export function CarouselStep() {
           {STEP_DESCRIPTIONS.carousel} · Generate 5 options (including a single-slide graphic), pick one, edit slides, then caption.
         </p>
       </header>
+
+      <IntelGuidancePanel title="Carousel Post" data={intelProfile?.carousel_post as Record<string, unknown> | null | undefined} />
 
       {/* Generate slides */}
       <section className="rounded-xl border border-[var(--color-lavender)] bg-white p-4 space-y-3">

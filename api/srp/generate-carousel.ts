@@ -178,14 +178,15 @@ export default async function handler(req: any, res: any) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !serviceRoleKey) return res.status(500).json({ error: 'Missing Supabase env vars' })
 
-  const transcript     = typeof req.body?.transcript === 'string' ? req.body.transcript : ''
-  const brandVoice     = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
-  const accountContext = (req.body?.accountContext ?? {}) as Record<string, any>
-  const userGuidance   = typeof req.body?.userGuidance === 'string' ? req.body.userGuidance : ''
-  const rawType        = req.body?.type
-  const type           = rawType === 'caption' ? 'caption' : rawType === 'refine' ? 'refine' : 'slides'
-  const slides         = Array.isArray(req.body?.slides) ? req.body.slides as string[] : []
-  const keyInsights:   string[] = Array.isArray(req.body?.keyInsights) ? req.body.keyInsights : []
+  const transcript       = typeof req.body?.transcript === 'string' ? req.body.transcript : ''
+  const brandVoice       = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
+  const accountContext   = (req.body?.accountContext ?? {}) as Record<string, any>
+  const userGuidance     = typeof req.body?.userGuidance === 'string' ? req.body.userGuidance : ''
+  const deliverableIntel = typeof req.body?.deliverableIntel === 'string' ? req.body.deliverableIntel.trim() : ''
+  const rawType          = req.body?.type
+  const type             = rawType === 'caption' ? 'caption' : rawType === 'refine' ? 'refine' : 'slides'
+  const slides           = Array.isArray(req.body?.slides) ? req.body.slides as string[] : []
+  const keyInsights:     string[] = Array.isArray(req.body?.keyInsights) ? req.body.keyInsights : []
 
   if (type === 'slides' && (!transcript || transcript.trim().length < 200)) {
     return res.status(400).json({ error: 'transcript required (min ~200 chars)' })
@@ -296,6 +297,7 @@ export default async function handler(req: any, res: any) {
     `Layouts 1-4 must each pull from a DIFFERENT angle, quote, or theme. No reused quotes across carousels.\n` +
     `Layout 5 is a single-slide graphic — choose the single strongest quote or verse from the sermon.\n\n` +
     `For each concept include a "citations" field listing ALL verbatim quotes from the transcript that the carousel draws from.\n\n` +
+    (deliverableIntel ? `\nChurch-specific guidance for this deliverable:\n${deliverableIntel}\n\n` : '') +
     `Transcript:\n${transcript.slice(0, 30000)}` +
     insightsSection +
     (userGuidance ? `\n\nSPECIAL DIRECTION: "${userGuidance}"` : '')

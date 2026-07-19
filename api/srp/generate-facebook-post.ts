@@ -92,11 +92,12 @@ export default async function handler(req: any, res: any) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !serviceRoleKey) return res.status(500).json({ error: 'Missing Supabase env vars' })
 
-  const transcript     = typeof req.body?.transcript === 'string' ? req.body.transcript : ''
-  const brandVoice     = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
-  const accountContext = (req.body?.accountContext ?? {}) as Record<string, any>
-  const userGuidance   = typeof req.body?.userGuidance === 'string' ? req.body.userGuidance : ''
-  const keyInsights:   string[] = Array.isArray(req.body?.keyInsights) ? req.body.keyInsights : []
+  const transcript       = typeof req.body?.transcript === 'string' ? req.body.transcript : ''
+  const brandVoice       = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
+  const accountContext   = (req.body?.accountContext ?? {}) as Record<string, any>
+  const userGuidance     = typeof req.body?.userGuidance === 'string' ? req.body.userGuidance : ''
+  const deliverableIntel = typeof req.body?.deliverableIntel === 'string' ? req.body.deliverableIntel.trim() : ''
+  const keyInsights:     string[] = Array.isArray(req.body?.keyInsights) ? req.body.keyInsights : []
   if (!transcript || transcript.trim().length < 200) {
     return res.status(400).json({ error: 'transcript required (min ~200 chars)' })
   }
@@ -120,6 +121,7 @@ export default async function handler(req: any, res: any) {
   const userPrompt =
     `Write exactly 4 Facebook text post options from this sermon transcript, one for each angle described in the system prompt.\n\n` +
     `For each post, provide a "citations" field listing ALL verbatim transcript quotes the post draws from.\n\n` +
+    (deliverableIntel ? `\nChurch-specific guidance for this deliverable:\n${deliverableIntel}\n` : '') +
     `Transcript:\n${transcript.slice(0, 30000)}` +
     insightsSection +
     (userGuidance ? `\n\nSPECIAL DIRECTION: "${userGuidance}"` : '')
