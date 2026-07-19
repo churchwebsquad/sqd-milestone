@@ -18,6 +18,7 @@ import IntelAuditToolPage from './pages/IntelAuditToolPage'
 import SrpDashboardPage from './pages/SrpDashboardPage'
 import SrpWorkflowPage from './pages/SrpWorkflowPage'
 import SrpPromptSettingsPage from './pages/SrpPromptSettingsPage'
+import SrpStatusPage from './pages/SrpStatusPage'
 import SocialIntelPage from './pages/SocialIntelPage'
 import SocialDashboardPage from './pages/social/SocialDashboardPage'
 import SocialChurchPage from './pages/social/SocialChurchPage'
@@ -185,6 +186,7 @@ export default function App() {
             <Route path="/social/:memberId" element={<SocialChurchPage />} />
             {/* SRP Generator — kept at its own route so existing links work */}
             <Route path="/social/srp" element={<SrpDashboardPage />} />
+            <Route path="/social/srp/status" element={<SrpStatusPage />} />
             <Route path="/social/srp/:sessionId" element={<SrpWorkflowPage />} />
             <Route path="/social/srp/prompts" element={<SrpPromptSettingsPage />} />
             <Route path="/social/intel" element={<IntelAuditToolPage />} />
