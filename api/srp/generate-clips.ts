@@ -206,7 +206,7 @@ ${durationRule}
 THE QUOTE IS NON-NEGOTIABLE: Copy it WORD FOR WORD from the transcript. Every filler word, every pause, exactly as spoken. The video editor must match it to the audio.${insightsSection}${pinnedSection}
 
 Transcript:
-${transcript.slice(0, 60000)}`
+${transcript.slice(0, 40000)}`
 
   try {
     const result = await callGateway<{ clips: ClipOutput[] }>({

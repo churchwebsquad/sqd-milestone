@@ -458,6 +458,8 @@ export function ClipSelectionStep() {
     const pinnedQuotes = clipSuggestions
       .filter(c => c.clip_id && pinnedIds.has(c.clip_id) && c.quote)
       .map(c => c.quote!)
+    const controller = new AbortController()
+    const timeoutId  = setTimeout(() => controller.abort(), 90_000)
     try {
       const r = await callSrpApi<GenerateClipsResponse>('generate-clips', {
         transcript,
@@ -467,7 +469,7 @@ export function ClipSelectionStep() {
         pinnedQuotes,
         guidance: guidance.trim() || undefined,
         keyInsights: keyInsights.length ? keyInsights : undefined,
-      })
+      }, { signal: controller.signal })
       // Re-anchor AI timestamps to actual word-level positions
       const anchored = (r.clips ?? []).map(c => {
         const fix = reanchorClip(transcriptWords, c)
@@ -483,8 +485,13 @@ export function ClipSelectionStep() {
       setClipSelections(clipSelectionsRef.current.filter((c: SrpClipSelection) => validQuotes.has(c.quote)))
     } catch (e) {
       const err = e as Error & { errorCode?: string }
-      setGenError(err.errorCode ? `${err.errorCode}: ${err.message}` : err.message)
+      if (err.name === 'AbortError') {
+        setGenError('Clip generation timed out. The transcript may be very long — try again or use Manual Entry.')
+      } else {
+        setGenError(err.errorCode ? `${err.errorCode}: ${err.message}` : err.message)
+      }
     } finally {
+      clearTimeout(timeoutId)
       setGenerating(false)
     }
   }, [transcript, brandVoice, account, sermonSubmission, hasTimecodes,
