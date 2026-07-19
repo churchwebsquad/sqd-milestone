@@ -184,6 +184,8 @@ async function fetchSrpTasks(squadApiKey: string) {
     taskId:    t.id,
     taskName:  t.name,
     status:    t.status,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    dueDate:   (t as any).dueDate ?? null,
     createdAt: t.date_created,
     updatedAt: t.updatedAt,
     url:       t.url,
@@ -195,9 +197,9 @@ async function fetchSrpTasks(squadApiKey: string) {
 // ── ClickUp v2 direct: fetch timestamps for all sms-sermon-recap tasks ────────
 // Squad API strips date_created/date_updated so we call ClickUp v2 directly
 // for the last 90 days and return a map of taskId → { date_created, date_updated }.
-async function fetchTaskTimestamps(clickupToken: string): Promise<Map<string, { date_created: string; updatedAt: string }>> {
+async function fetchTaskTimestamps(clickupToken: string): Promise<Map<string, { date_created: string; updatedAt: string; dueDate: string }>> {
   const since90 = Date.now() - 90 * 24 * 60 * 60 * 1000;
-  const result = new Map<string, { date_created: string; updatedAt: string }>();
+  const result = new Map<string, { date_created: string; updatedAt: string; dueDate: string }>();
   let page = 0;
 
   while (true) {
@@ -217,7 +219,7 @@ async function fetchTaskTimestamps(clickupToken: string): Promise<Map<string, { 
     if (!res) break;
 
     const payload = await res.json();
-    const rows: Array<{ id?: string; date_created?: string | number; date_updated?: string | number }> =
+    const rows: Array<{ id?: string; date_created?: string | number; date_updated?: string | number; due_date?: string | number | null }> =
       Array.isArray(payload?.tasks) ? payload.tasks : [];
     if (rows.length === 0) break;
 
@@ -225,9 +227,11 @@ async function fetchTaskTimestamps(clickupToken: string): Promise<Map<string, { 
       if (!t.id) continue;
       const createdMs = Number(t.date_created ?? 0);
       const updatedMs = Number(t.date_updated ?? 0);
+      const dueMs     = Number(t.due_date ?? 0);
       result.set(t.id, {
         date_created: createdMs ? new Date(createdMs).toISOString() : "",
         updatedAt:    updatedMs ? new Date(updatedMs).toISOString() : "",
+        dueDate:      dueMs     ? new Date(dueMs).toISOString()     : "",
       });
     }
 
@@ -406,12 +410,14 @@ Deno.serve(async (req: Request) => {
         : Promise.resolve(new Map<string, { date_created: string; updatedAt: string }>()),
     ]);
 
-    // Merge real timestamps from ClickUp v2 into allTasks (Squad API strips them)
+    // Merge real timestamps + due_date from ClickUp v2 into allTasks (Squad API strips them)
     for (const t of srpData.allTasks) {
       const ts = timestamps.get(t.id);
       if (ts) {
         if (ts.date_created) t.date_created = ts.date_created;
         if (ts.updatedAt)    t.updatedAt    = ts.updatedAt;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if (ts.dueDate)      (t as any).dueDate = ts.dueDate;
       }
     }
     // Also patch the per-member summary tasks
@@ -420,6 +426,7 @@ Deno.serve(async (req: Request) => {
       if (ts) {
         if (ts.date_created) t.createdAt = ts.date_created;
         if (ts.updatedAt)    t.updatedAt = ts.updatedAt;
+        if (ts.dueDate)      t.dueDate   = ts.dueDate;
       }
     }
     await Promise.all([
