@@ -25,7 +25,7 @@ export default async function handler(req: any, res: any) {
   const { data, error } = await sb
     .schema('srp_pipeline')
     .from('sessions')
-    .select('session_id, church_name, sermon_title, created_at, updated_at, transcript, auto_drafts, selected_deliverables, current_step')
+    .select('session_id, church_name, sermon_title, created_at, updated_at, transcript, auto_drafts, selected_deliverables, current_step, video_url')
     .gte('created_at', since)
     .order('created_at', { ascending: false })
 
@@ -48,18 +48,22 @@ export default async function handler(req: any, res: any) {
     const generated = drafts ? Object.keys(drafts) : []
     const missing   = needed.filter(k => !generated.includes(k))
 
+    const hasTranscript = Boolean(s.transcript && s.transcript.length > 200)
+
     return {
-      session_id:    s.session_id,
-      church_name:   s.church_name ?? '(unnamed)',
-      sermon_title:  s.sermon_title ?? '',
-      created_at:    s.created_at,
-      current_step:  s.current_step,
-      has_transcript: Boolean(s.transcript && s.transcript.length > 200),
+      session_id:      s.session_id,
+      church_name:     s.church_name ?? '(unnamed)',
+      sermon_title:    s.sermon_title ?? '',
+      created_at:      s.created_at,
+      current_step:    s.current_step,
+      video_url:       s.video_url ?? null,
+      has_video_url:   Boolean(s.video_url),
+      has_transcript:  hasTranscript,
       has_auto_drafts: Boolean(drafts),
       deliverables,
       generated,
       missing,
-      ready: Boolean(drafts) && missing.length === 0,
+      ready: hasTranscript && Boolean(drafts) && missing.length === 0,
     }
   })
 
