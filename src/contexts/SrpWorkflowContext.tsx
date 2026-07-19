@@ -426,7 +426,6 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
   useEffect(() => {
     if (!sessionId) return
     const channel = (supabase as any)
-      .schema('srp_pipeline')
       .channel(`auto-drafts-${sessionId}`)
       .on(
         'postgres_changes',
