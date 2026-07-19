@@ -36,3 +36,4 @@ tmp-srp-reference/
 .vercel
 .env*
 .claude/settings.local.json
+.claude/worktrees/
