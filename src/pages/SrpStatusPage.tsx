@@ -31,7 +31,6 @@ const DELIVERABLE_LABELS: Record<string, string> = {
 export default function SrpStatusPage() {
   const [rows, setRows]       = useState<SessionStatus[]>([])
   const [loading, setLoading] = useState(true)
-  const [days, setDays]       = useState(7)
 
   const [urlInputs, setUrlInputs]     = useState<Record<string, string>>({})
   const [urlStatus, setUrlStatus]     = useState<Record<string, string>>({})
@@ -41,13 +40,13 @@ export default function SrpStatusPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await fetch(`/api/srp/session-status?days=${days}`)
+      const r = await fetch('/api/srp/session-status')
       const data = await r.json()
       setRows(data.rows ?? [])
     } finally {
       setLoading(false)
     }
-  }, [days])
+  }, [])
 
   useEffect(() => { void load() }, [load])
 
@@ -115,18 +114,9 @@ export default function SrpStatusPage() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs uppercase tracking-widest text-[#513DE5] font-semibold mb-1">SRP Admin</p>
-            <h1 className="text-2xl font-serif text-[#341756]">Auto-Generate Status</h1>
+            <h1 className="text-2xl font-serif text-[#341756]">This Week's SRPs</h1>
           </div>
           <div className="flex items-center gap-3">
-            <select
-              value={days}
-              onChange={e => setDays(Number(e.target.value))}
-              className="text-sm border border-[#CFC9F8] rounded-lg px-3 py-2 bg-white text-[#341756]"
-            >
-              <option value={3}>Last 3 days</option>
-              <option value={7}>Last 7 days</option>
-              <option value={14}>Last 14 days</option>
-            </select>
             <button
               onClick={load}
               disabled={loading}
@@ -162,7 +152,7 @@ export default function SrpStatusPage() {
           </div>
         ) : rows.length === 0 ? (
           <div className="bg-white border border-[#CFC9F8] rounded-xl p-10 text-center text-[#6B6180]">
-            No sessions in the last {days} days.
+            No sessions this week yet.
           </div>
         ) : (
           <div className="space-y-3">

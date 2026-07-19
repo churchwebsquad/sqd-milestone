@@ -16,11 +16,14 @@ export default async function handler(req: any, res: any) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !serviceRoleKey) return res.status(500).json({ error: 'Missing Supabase env vars' })
 
-  const days = Math.min(parseInt(String(req.query.days ?? '7'), 10) || 7, 30)
-
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+  // Week starts Friday (matching the Social Hub)
+  const now = new Date()
+  now.setHours(0, 0, 0, 0)
+  const daysSinceFri = now.getDay() === 5 ? 0 : now.getDay() === 6 ? 1 : now.getDay() + 2
+  now.setDate(now.getDate() - daysSinceFri)
+  const since = now.toISOString()
 
   const { data, error } = await sb
     .schema('srp_pipeline')
