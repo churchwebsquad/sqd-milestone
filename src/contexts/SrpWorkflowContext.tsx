@@ -420,6 +420,29 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     void refresh()
   }, [refresh])
 
+  // Watch for auto_drafts being written by the background auto-generate job.
+  // The job fires after transcript arrives; the user may already be on a later
+  // step by the time it completes, so we need realtime to push the update.
+  useEffect(() => {
+    if (!sessionId) return
+    const channel = (supabase as any)
+      .schema('srp_pipeline')
+      .channel(`auto-drafts-${sessionId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'srp_pipeline', table: 'sessions', filter: `session_id=eq.${sessionId}` },
+        (payload: any) => {
+          const row = payload.new
+          if (row?.auto_drafts) setAutoDrafts(row.auto_drafts)
+          if (Array.isArray(row?.key_insights) && row.key_insights.length > 0) {
+            setKeyInsights(row.key_insights)
+          }
+        },
+      )
+      .subscribe()
+    return () => { void (supabase as any).removeChannel(channel) }
+  }, [sessionId])
+
   // Auto-generation is triggered explicitly from SermonInputStep's Continue button,
   // not automatically here. The autoGeneratingRef is kept to avoid double-fires
   // if the context remounts while a fetch is in flight.

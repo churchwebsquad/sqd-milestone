@@ -67,6 +67,10 @@ export function SundayInviteStep() {
   } = useSrpWorkflow()
 
   const [options, setOptions]               = useState<InviteOption[]>(() => autoDrafts?.sundayInvite ?? [])
+
+  useEffect(() => {
+    if (autoDrafts?.sundayInvite?.length && !options.length) setOptions(autoDrafts.sundayInvite)
+  }, [autoDrafts?.sundayInvite]) // eslint-disable-line react-hooks/exhaustive-deps
   const [selectedIdx, setSelectedIdx]       = useState<number | null>(sundayInviteInput?.selectedIdx ?? null)
   const [tags, setTags]                     = useState<string[]>(sundayInviteInput?.selectedTags ?? [])
   const [approved, setApproved]             = useState(false)

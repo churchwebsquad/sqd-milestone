@@ -6,7 +6,7 @@
  * Regenerating all options is available until approval.
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw, Check, Pencil } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
@@ -35,6 +35,13 @@ export function FacebookStep() {
   } = useSrpWorkflow()
 
   const [options, setOptions]         = useState<FacebookOption[]>(() => autoDrafts?.facebook ?? [])
+
+  // Hydrate from autoDrafts if auto-generate completes after this step mounts
+  useEffect(() => {
+    if (autoDrafts?.facebook?.length && !options.length) {
+      setOptions(autoDrafts.facebook)
+    }
+  }, [autoDrafts?.facebook]) // eslint-disable-line react-hooks/exhaustive-deps
   const [selectedIdx, setSelectedIdx] = useState<number | null>(facebookInput?.selectedIdx ?? null)
   const [tags, setTags]               = useState<string[]>(facebookInput?.selectedTags ?? [])
   const [approved, setApproved]       = useState(false)

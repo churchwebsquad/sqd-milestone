@@ -13,7 +13,7 @@
  * carousel_caption.
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, Sparkles, RefreshCw, Check, Quote, CheckCircle2, Trash2, Plus } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
@@ -45,6 +45,10 @@ export function CarouselStep() {
   } = useSrpWorkflow()
 
   const [options, setOptions] = useState<CarouselOption[]>(() => autoDrafts?.carousel ?? [])
+
+  useEffect(() => {
+    if (autoDrafts?.carousel?.length && !options.length) setOptions(autoDrafts.carousel)
+  }, [autoDrafts?.carousel]) // eslint-disable-line react-hooks/exhaustive-deps
   const [selectedIdx, setSelectedIdx] = useState<number | null>(
     carouselInput?.selectedIdx ?? null,
   )

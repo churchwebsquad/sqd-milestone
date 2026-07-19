@@ -65,6 +65,10 @@ export function PhotoRecapStep() {
   } = useSrpWorkflow()
 
   const [options, setOptions]             = useState<CaptionOption[]>(() => autoDrafts?.photoRecap ?? [])
+
+  useEffect(() => {
+    if (autoDrafts?.photoRecap?.length && !options.length) setOptions(autoDrafts.photoRecap)
+  }, [autoDrafts?.photoRecap]) // eslint-disable-line react-hooks/exhaustive-deps
   const [selectedIdx, setSelectedIdx]     = useState<number | null>(photoRecapInput?.selectedIdx ?? null)
   const [tags, setTags]                   = useState<string[]>(photoRecapInput?.selectedTags ?? [])
   const [approved, setApproved]           = useState(false)
