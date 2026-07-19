@@ -330,14 +330,26 @@ export default function SocialDashboardPage() {
       const sm = new Map<number, SrpMeta>()
       for (const row of srpData.tasks) sm.set(row.member, row)
       setSrpMap(sm)
-      // Filter by due date (primary) or task name date (fallback).
-      // Squad API doesn't return updatedAt timestamps reliably.
+      // Build this-week task list from both the cache and the live ClickUp data.
+      // The cache only captures tasks submitted through the form; the live endpoint
+      // covers all sms-sermon-recap tasks including Clipcutter background sessions.
       const ws = getWeekStart(new Date())
-      setThisWeekTasks((srpWeekData.tasks ?? []).filter(t => {
-        if (t.dueDate) return isThisWeek(t.dueDate, ws)
+      const weekTaskMap = new Map<number, SrpMeta>()
+      // Start with cache (has dueDate)
+      for (const t of (srpWeekData.tasks ?? [])) {
+        const inWeek = t.dueDate ? isThisWeek(t.dueDate, ws) : (() => {
+          const d = parseDateFromTaskName(t.taskName ?? '')
+          return d ? isThisWeek(d.toISOString(), ws) : false
+        })()
+        if (inWeek) weekTaskMap.set(t.member, t)
+      }
+      // Supplement with live allTasks (parse date from task name)
+      for (const t of (srpData.allTasks ?? [])) {
+        if (weekTaskMap.has(t.member)) continue
         const d = parseDateFromTaskName(t.taskName ?? '')
-        return d ? isThisWeek(d.toISOString(), ws) : false
-      }))
+        if (d && isThisWeek(d.toISOString(), ws)) weekTaskMap.set(t.member, t)
+      }
+      setThisWeekTasks(Array.from(weekTaskMap.values()))
 
       // Surface ClickUp-only churches not yet in either DB table — deduplicated
       const allMemberSet = new Set(allChurches.map(c => c.member))
