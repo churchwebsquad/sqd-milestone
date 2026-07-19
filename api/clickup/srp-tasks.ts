@@ -38,7 +38,7 @@ export default async function handler(req: any, res: any) {
     const data = await response.json()
 
     // Parse member number from task name — format: "{member} - {rest}"
-    const allTasks: { member: number; id: string; name: string; status: string; date_created: string; assignees: string[]; url: string; updatedAt: string }[] = []
+    const allTasks: { member: number; id: string; name: string; status: string; date_created: string; due_date: string | null; assignees: string[]; url: string; updatedAt: string }[] = []
 
     for (const task of (data.tasks ?? []) as any[]) {
       const match = String(task.name ?? '').match(/^(\d+)\s*-/)
@@ -50,6 +50,7 @@ export default async function handler(req: any, res: any) {
         name:         task.name,
         status:       task.status?.status ?? '',
         date_created: task.date_created ?? '',
+        due_date:     task.due_date ? new Date(Number(task.due_date)).toISOString() : null,
         assignees:    (task.assignees ?? []).map((a: any) => a.username ?? a.email ?? ''),
         url:          task.url ?? '',
         updatedAt:    new Date(Number(task.date_updated ?? 0)).toISOString(),
@@ -68,6 +69,7 @@ export default async function handler(req: any, res: any) {
       taskId:    t.id,
       taskName:  t.name,
       status:    t.status,
+      dueDate:   t.due_date,
       createdAt: new Date(Number(t.date_created || 0)).toISOString(),
       updatedAt: t.updatedAt,
     }))

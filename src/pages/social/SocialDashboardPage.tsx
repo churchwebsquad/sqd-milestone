@@ -343,11 +343,10 @@ export default function SocialDashboardPage() {
         })()
         if (inWeek) weekTaskMap.set(t.member, t)
       }
-      // Supplement with live allTasks (parse date from task name)
+      // Supplement with live allTasks — use due_date from ClickUp directly
       for (const t of (srpData.allTasks ?? [])) {
         if (weekTaskMap.has(t.member)) continue
-        const d = parseDateFromTaskName(t.taskName ?? '')
-        if (d && isThisWeek(d.toISOString(), ws)) weekTaskMap.set(t.member, t)
+        if (t.dueDate && isThisWeek(t.dueDate, ws)) weekTaskMap.set(t.member, t)
       }
       setThisWeekTasks(Array.from(weekTaskMap.values()))
 
