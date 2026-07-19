@@ -18,12 +18,9 @@ export default async function handler(req: any, res: any) {
 
   const sb = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
 
-  // Week starts Friday (matching the Social Hub)
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
-  const daysSinceFri = now.getDay() === 5 ? 0 : now.getDay() === 6 ? 1 : now.getDay() + 2
-  now.setDate(now.getDate() - daysSinceFri)
-  const since = now.toISOString()
+  // Show sessions from the last 10 days (covers full Fri-Thu week + a few days buffer for
+  // sessions created Thursday before the Fri week boundary)
+  const since = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString()
 
   const { data, error } = await sb
     .schema('srp_pipeline')

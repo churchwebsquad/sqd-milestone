@@ -314,7 +314,7 @@ export default function SocialDashboardPage() {
         }
       }
 
-      // If cache is empty, fall back to live ClickUp fetch
+      // If cache is empty, fall back to live ClickUp fetch for srpMap
       if (srpData.tasks.length === 0) {
         try {
           const live = await fetch('/api/clickup/srp-tasks').then(r => r.ok ? r.json() : null)
@@ -330,12 +330,13 @@ export default function SocialDashboardPage() {
       const sm = new Map<number, SrpMeta>()
       for (const row of srpData.tasks) sm.set(row.member, row)
       setSrpMap(sm)
-      // Build this-week task list from both the cache and the live ClickUp data.
-      // The cache only captures tasks submitted through the form; the live endpoint
-      // covers all sms-sermon-recap tasks including Clipcutter background sessions.
+
+      // Build this-week task list. Always fetch live allTasks because:
+      // - The cache may be stale or may not include allTasks with dueDate
+      // - The live endpoint has a 5-min in-memory cache so warm hits are fast
       const ws = getWeekStart(new Date())
       const weekTaskMap = new Map<number, SrpMeta>()
-      // Start with cache (has dueDate)
+      // Seed from the week cache first
       for (const t of (srpWeekData.tasks ?? [])) {
         const inWeek = t.dueDate ? isThisWeek(t.dueDate, ws) : (() => {
           const d = parseDateFromTaskName(t.taskName ?? '')
@@ -343,11 +344,14 @@ export default function SocialDashboardPage() {
         })()
         if (inWeek) weekTaskMap.set(t.member, t)
       }
-      // Supplement with live allTasks — use due_date from ClickUp directly
-      for (const t of (srpData.allTasks ?? [])) {
-        if (weekTaskMap.has(t.member)) continue
-        if (t.dueDate && isThisWeek(t.dueDate, ws)) weekTaskMap.set(t.member, t)
-      }
+      // Always supplement with live allTasks filtered by due_date
+      try {
+        const liveAll = await fetch('/api/clickup/srp-tasks').then(r => r.ok ? r.json() : null)
+        for (const t of (liveAll?.allTasks ?? [])) {
+          if (weekTaskMap.has(t.member)) continue
+          if (t.dueDate && isThisWeek(t.dueDate, ws)) weekTaskMap.set(t.member, t)
+        }
+      } catch { /* non-fatal */ }
       setThisWeekTasks(Array.from(weekTaskMap.values()))
 
       // Surface ClickUp-only churches not yet in either DB table — deduplicated
