@@ -560,7 +560,7 @@ export default function SocialDashboardPage() {
       {/* Stats bar */}
       <div className="bg-white border border-[#CFC9F8] rounded-2xl p-5 mb-6">
         <div className="flex items-baseline gap-2 mb-4">
-          <span className="text-2xl font-bold text-[#341756]">{thisWeekTasks.length}</span>
+          <span className="text-2xl font-bold text-[#341756]">{thisWeekMemberSet.size}</span>
           <span className="text-sm text-gray-500">SRPs this week</span>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
