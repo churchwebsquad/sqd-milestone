@@ -154,13 +154,19 @@ export function SermonInputStep() {
   // Subscribe to the active transcript_jobs row.
   const { job, connected: jobConnected } = useTranscriptJob(transcriptJobId)
 
-  // When the job lands completed, refresh the session row so the
-  // transcript autosaves down to the local context.
+  // When the job lands completed, refresh the session row and fire
+  // background generation for all deliverables. The auto-generate
+  // endpoint is idempotent — it skips if auto_drafts already exist.
   useEffect(() => {
     if (job?.status === 'completed' && job.transcript) {
       void refresh()
+      void fetch('/api/srp/auto-generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId }),
+      })
     }
-  }, [job?.status, job?.transcript, refresh])
+  }, [job?.status, job?.transcript, refresh, sessionId])
 
   const stepNum = visibleSteps.indexOf('sermon') + 1
 
