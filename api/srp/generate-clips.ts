@@ -26,12 +26,11 @@ import { createClient } from '@supabase/supabase-js'
 
 export const maxDuration = 90
 
-const SYSTEM_PROMPT = `You are a sermon content analyst. Your job is to identify the most compelling, self-contained teaching moments from sermon transcripts and package them as short-form video clips (Reels/Shorts).
+const SYSTEM_PROMPT = `You are a sermon content analyst. Your job is to identify the most compelling, self-contained moments from church service transcripts and package them as short-form video clips (Reels/Shorts).
 
 WHAT YOU ARE ANALYZING:
-ONLY the sermon speaker's teaching. Nothing else.
-SKIP all worship lyrics, song lyrics, prayer interludes, announcements, transitions, greetings, housekeeping, offering talks, and any content that is not the speaker delivering the sermon message.
-If you are unsure whether a section is part of the sermon teaching, skip it. When in doubt, leave it out.
+Primarily the sermon speaker's teaching. You may also include worship moments if they are particularly powerful or emotionally resonant (lyrics sung with conviction, a worship bridge that lands hard, a moment of corporate singing that would move someone watching on social media).
+SKIP announcements, housekeeping, offering talks, transitions, and any administrative content that would feel random out of context.
 
 VOICE GUIDE:
 If a voice guide has been provided, use it to inform which types of moments you prioritize — not to rewrite anything. The voice guide shapes your editorial judgment (what feels on-brand, what the church would want to highlight), but it must never alter the transcript text itself.
@@ -79,7 +78,7 @@ Identify 6-10 clips per sermon, ranked by social media potential.
 Rank 1 is the clip you'd post if you could only post one.
 If the sermon doesn't have 6 strong candidates, generate fewer. Four great clips beat eight mediocre ones.`
 
-const CATEGORY_ENUM = ['Profound Ideas', 'Practical Application', 'Challenges', 'Encouragement', 'Life of Jesus'] as const
+const CATEGORY_ENUM = ['Profound Ideas', 'Practical Application', 'Challenges', 'Encouragement', 'Life of Jesus', 'Worship Moment'] as const
 
 interface ClipOutput {
   clip_title:       string
@@ -206,11 +205,11 @@ ${durationRule}
 THE QUOTE IS NON-NEGOTIABLE: Copy it WORD FOR WORD from the transcript. Every filler word, every pause, exactly as spoken. The video editor must match it to the audio.${insightsSection}${pinnedSection}
 
 Transcript:
-${transcript.slice(0, 40000)}`
+${transcript}`
 
   try {
     const result = await callGateway<{ clips: ClipOutput[] }>({
-      model:  'anthropic/claude-sonnet-4-6',
+      model:  'anthropic/claude-haiku-4-5',
       system: systemPrompt,
       user:   userPrompt,
       toolName: 'suggest_clips',
