@@ -155,11 +155,16 @@ export default async function handler(req: any, res: any) {
   const updatePayload: Record<string, any> = { auto_drafts: autoDrafts }
   if (keyInsights.length > 0) updatePayload.key_insights = keyInsights
 
-  await sb
+  const { error: updateErr } = await sb
     .schema('srp_pipeline')
     .from('sessions')
     .update(updatePayload)
     .eq('session_id', sessionId)
+
+  if (updateErr) {
+    console.error('[auto-generate] DB update failed:', updateErr.message)
+    return res.status(500).json({ error: `DB write failed: ${updateErr.message}`, generated })
+  }
 
   return res.status(200).json({ ok: true, generated })
 }

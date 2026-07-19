@@ -88,8 +88,10 @@ export default function SrpStatusPage() {
       const data = await r.json()
       if (data.skipped) {
         setGenResults(prev => ({ ...prev, [sessionId]: 'already done' }))
+        await load()
       } else if (data.ok) {
-        setGenResults(prev => ({ ...prev, [sessionId]: `done: ${Object.keys(data.generated ?? {}).join(', ')}` }))
+        const keys = Object.keys(data.generated ?? {})
+        setGenResults(prev => ({ ...prev, [sessionId]: keys.length ? `done: ${keys.join(', ')}` : 'done (nothing new)' }))
         await load()
       } else {
         setGenResults(prev => ({ ...prev, [sessionId]: `error: ${data.error ?? 'unknown'}` }))
