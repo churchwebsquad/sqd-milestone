@@ -16,7 +16,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 
-export const maxDuration = 60
+export const maxDuration = 90
 
 function buildBaseUrl(req: any): string {
   const proto = (req.headers['x-forwarded-proto'] as string) || 'https'
@@ -68,9 +68,10 @@ export default async function handler(req: any, res: any) {
   if (!session.transcript || session.transcript.trim().length < 200) {
     return res.status(400).json({ error: 'No transcript on session' })
   }
-  if (session.auto_drafts) {
-    return res.status(200).json({ ok: true, skipped: true, reason: 'auto_drafts already present' })
-  }
+
+  // If auto_drafts exists, check whether any expected keys are missing.
+  // If everything is present, skip. If keys are missing, continue and fill them in.
+  const existingDrafts = (session.auto_drafts ?? null) as Record<string, any> | null
 
   const baseUrl      = buildBaseUrl(req)
   const transcript   = session.transcript as string
@@ -84,25 +85,26 @@ export default async function handler(req: any, res: any) {
 
   const generated: Record<string, string> = {}
 
-  // ── Step 1: Overview (needed for keyInsights) ────────────────────────────
-  const overviewRes = await callGenerate(baseUrl, 'generate-overview', {
-    transcript,
-    churchName,
-    sermonTitle,
-    seriesName,
-  })
-  const overview    = overviewRes?.overview ?? null
-  const keyInsights: string[] = Array.isArray(overview?.keyInsights) ? overview.keyInsights : []
+  // ── Step 1: Overview (skip if already present) ───────────────────────────
+  let overview    = existingDrafts?.overview ?? null
+  let keyInsights: string[] = Array.isArray(existingDrafts?.overview?.keyInsights) ? existingDrafts.overview.keyInsights : []
 
+  if (!overview) {
+    const overviewRes = await callGenerate(baseUrl, 'generate-overview', {
+      transcript, churchName, sermonTitle, seriesName,
+    })
+    overview    = overviewRes?.overview ?? null
+    keyInsights = Array.isArray(overview?.keyInsights) ? overview.keyInsights : []
+  }
   if (overview) generated.overview = 'ok'
 
-  // ── Step 2: All selected deliverables in parallel ────────────────────────
+  // ── Step 2: Only generate deliverables that are missing ──────────────────
   const commonBody = { transcript, brandVoice, accountContext: accountCtx, keyInsights }
 
   const tasks: Promise<any>[] = []
   const taskKeys: string[] = []
 
-  if (hasReels) {
+  if (hasReels && !existingDrafts?.clips) {
     tasks.push(callGenerate(baseUrl, 'generate-clips', {
       transcript,
       transcriptWords: session.transcript_words ?? [],
@@ -112,37 +114,42 @@ export default async function handler(req: any, res: any) {
     }))
     taskKeys.push('clips')
   }
-  if (deliverables.includes('carousel')) {
+  if (deliverables.includes('carousel') && !existingDrafts?.carousel) {
     tasks.push(callGenerate(baseUrl, 'generate-carousel', commonBody))
     taskKeys.push('carousel')
   }
-  if (deliverables.includes('facebook')) {
+  if (deliverables.includes('facebook') && !existingDrafts?.facebook) {
     tasks.push(callGenerate(baseUrl, 'generate-facebook-post', commonBody))
     taskKeys.push('facebook')
   }
-  if (deliverables.includes('photoRecap')) {
+  if (deliverables.includes('photoRecap') && !existingDrafts?.photoRecap) {
     tasks.push(callGenerate(baseUrl, 'generate-photo-recap', { ...commonBody, promptType: 'highlights' }))
     taskKeys.push('photoRecap')
   }
-  if (deliverables.includes('sundayInvite')) {
+  if (deliverables.includes('sundayInvite') && !existingDrafts?.sundayInvite) {
     tasks.push(callGenerate(baseUrl, 'generate-sunday-invite', commonBody))
     taskKeys.push('sundayInvite')
+  }
+
+  // If nothing is missing, we're done
+  if (tasks.length === 0) {
+    return res.status(200).json({ ok: true, skipped: true, reason: 'all deliverables already present' })
   }
 
   const results = await Promise.all(tasks)
   const resultMap: Record<string, any> = {}
   taskKeys.forEach((key, i) => { resultMap[key] = results[i] })
-
   taskKeys.forEach(key => { if (resultMap[key]) generated[key] = 'ok' })
 
-  // ── Step 3: Persist to session ───────────────────────────────────────────
+  // ── Step 3: Merge new results into existing drafts and persist ───────────
   const autoDrafts = {
-    ...(overview                  ? { overview }                                                      : {}),
-    ...(resultMap.clips           ? { clips:       resultMap.clips.clips ?? [] }                      : {}),
-    ...(resultMap.carousel        ? { carousel:    resultMap.carousel.options ?? [] }                 : {}),
-    ...(resultMap.facebook        ? { facebook:    resultMap.facebook.posts ?? [] }                   : {}),
-    ...(resultMap.photoRecap      ? { photoRecap:  resultMap.photoRecap.captions ?? [] }              : {}),
-    ...(resultMap.sundayInvite    ? { sundayInvite: resultMap.sundayInvite.invites ?? [] }            : {}),
+    ...existingDrafts,
+    ...(overview                  ? { overview }                                  : {}),
+    ...(resultMap.clips           ? { clips:        resultMap.clips.clips ?? [] } : {}),
+    ...(resultMap.carousel        ? { carousel:     resultMap.carousel.options ?? [] } : {}),
+    ...(resultMap.facebook        ? { facebook:     resultMap.facebook.posts ?? [] } : {}),
+    ...(resultMap.photoRecap      ? { photoRecap:   resultMap.photoRecap.captions ?? [] } : {}),
+    ...(resultMap.sundayInvite    ? { sundayInvite: resultMap.sundayInvite.invites ?? [] } : {}),
   }
 
   const updatePayload: Record<string, any> = { auto_drafts: autoDrafts }
