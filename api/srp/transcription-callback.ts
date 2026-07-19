@@ -83,7 +83,9 @@ export default async function handler(req: any, res: any) {
     .eq('id', jobId)
   if (updateErr) return res.status(500).json({ error: `Failed to update job: ${updateErr.message}` })
 
-  // On completion, mirror transcript + words onto the parent session.
+  // On completion, mirror transcript + words onto the parent session,
+  // then fire auto-generate in the background so content is ready before
+  // anyone opens the workflow.
   if (status === 'completed' && job.session_id) {
     const sessionUpdate: Record<string, unknown> = {}
     if (req.body?.transcript !== undefined) sessionUpdate.transcript       = req.body.transcript
@@ -96,6 +98,14 @@ export default async function handler(req: any, res: any) {
         .eq('session_id', job.session_id)
       if (sessErr) console.error(`[transcription-callback] failed to mirror onto sessions: ${sessErr.message}`)
     }
+
+    // Fire auto-generate without awaiting — this callback must return quickly.
+    const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'
+    fetch(`${baseUrl}/api/srp/auto-generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: job.session_id }),
+    }).catch(e => console.warn('[transcription-callback] auto-generate fire failed:', e instanceof Error ? e.message : e))
   }
 
   return res.status(200).json({ ok: true, job_id: jobId, status })
