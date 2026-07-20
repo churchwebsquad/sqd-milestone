@@ -244,11 +244,13 @@ function ClipCard({
   const [editEnd, setEditEnd]       = useState(clip.endTime ?? '')
   const catColor = CATEGORY_COLORS[clip.category ?? ''] ?? 'bg-[var(--color-lavender-tint)] text-[var(--color-deep-plum)]'
 
-  const duration = useMemo(() => {
+  const durationSec = useMemo(() => {
     if (!clip.startTime || !clip.endTime) return null
     const d = mmssToSeconds(clip.endTime) - mmssToSeconds(clip.startTime)
-    return d > 0 ? `${d}s` : null
+    return d > 0 ? d : null
   }, [clip.startTime, clip.endTime])
+
+  const duration = durationSec != null ? `${durationSec}s` : null
 
   const handleSaveEdit = () => {
     const newQuote = sliceQuoteFromWords(transcriptWords, editStart, editEnd) || clip.quote || ''

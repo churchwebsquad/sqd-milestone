@@ -41,14 +41,13 @@ Do NOT paraphrase. Do NOT summarize. Do NOT clean up grammar. Do NOT remove fill
 If the speaker said "um" or "you know" or repeated themselves, that stays in the quote. The video editor needs the exact words to match the audio.
 After selecting a quote, re-read it against the transcript character by character. If even one word is different, fix it.
 
-CLIP LENGTH — HARD CONSTRAINT:
-Every clip MUST be between 25 and 90 seconds long. No exceptions.
-STRONGLY PREFER 30-50 seconds. This is the sweet spot for Reels performance.
-50-90 seconds is acceptable only when the moment genuinely requires it — do not pad or stretch to fill time.
-Calculate duration using the transcript timestamps. End timestamp minus start timestamp must fall within 25 and 90 seconds.
-If a compelling moment runs shorter than 30 seconds, look for a natural starting point earlier in the transcript where the speaker begins setting up that moment. Include the setup.
-If a compelling moment runs longer than 50 seconds, find a natural breaking point where one complete thought ends before the next begins. Trim to the strongest complete thought that lands within 30-50 seconds if at all possible.
-Do NOT stretch a clip to meet the minimum by including unrelated content before or after. The entire clip must be one cohesive idea.
+CLIP LENGTH — HARD CONSTRAINT, NO EXCEPTIONS:
+Every clip MUST be between 25 and 90 seconds. A clip under 25 seconds will be REJECTED and is useless. Do not suggest it.
+Target 30-60 seconds. This is the sweet spot for Reels performance.
+YOU MUST CALCULATE DURATION BEFORE SUBMITTING EACH CLIP. Subtract startTime from endTime. If the result is less than 25 seconds, DO NOT include that clip. Find a longer moment instead.
+A punchy one-liner that lasts 6 seconds is not a clip. A quote that ends in 12 seconds is not a clip. Only include moments where the speaker develops a complete thought over at least 25 seconds.
+If a moment you like is too short, expand the selection: include the setup before it, or the application after it, until the clip is at least 25 seconds. The added context must be thematically connected.
+There is no situation where a clip under 25 seconds is acceptable. Not for "punchy" content. Not for quotable moments. Not for any reason. 25 seconds minimum, always.
 
 TIMESTAMPS:
 Start and end timestamps MUST correspond exactly to where the quoted text begins and ends in the transcript.
@@ -196,7 +195,7 @@ The following clips have already been selected and pinned by the coach. Your sug
     : ''
 
   const durationRule = hasTimecodes
-    ? 'DURATION: Every clip MUST be between 25 and 90 seconds. STRONGLY PREFER 30-60 seconds. Under 25 seconds is never acceptable. Calculate from timestamps.'
+    ? 'DURATION: Calculate endTime minus startTime before including any clip. If the result is under 25 seconds, do not include it — expand the selection or skip it. Every clip must be 25-90 seconds. No exceptions.'
     : 'WORD COUNT: IDEAL 110-130 words (≈55-65 sec). ACCEPTABLE 100-140 words. REJECT under 85 or over 150 words.'
 
   const intelSection = deliverableIntel
