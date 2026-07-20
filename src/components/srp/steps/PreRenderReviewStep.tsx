@@ -400,9 +400,13 @@ function ClipPanel({ idx, clip, words, videoUrl, onChange }: ClipPanelProps) {
   const duration  = clipEnd - clipStart
 
   // Seed segments from saved data or derived words (lazy initializer runs once).
+  // Only use saved segments if at least some have non-empty text — otherwise the
+  // saved data is stale (written before the word-key bug was fixed) and we should
+  // re-derive from the raw word timestamps.
   const [segments, setSegs] = useState<Segment[]>(() => {
-    if (clip.transcript_segments && clip.transcript_segments.length > 0) {
-      return clip.transcript_segments.map(s => ({ ...s, id: crypto.randomUUID() }))
+    const saved = clip.transcript_segments
+    if (saved && saved.length > 0 && saved.some(s => s.text.trim().length > 0)) {
+      return saved.map(s => ({ ...s, id: crypto.randomUUID() }))
     }
     return buildSegmentsFromWords(words, clipStart, clipEnd)
   })
