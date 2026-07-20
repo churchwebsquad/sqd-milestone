@@ -18,6 +18,155 @@ import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import type { SrpClipSelection } from '../../../types/database'
 
+// ── Smart video player ────────────────────────────────────────────────────────
+
+type VideoType = 'youtube' | 'vimeo' | 'direct' | 'unknown'
+
+function detectVideoType(url: string): VideoType {
+  if (!url) return 'unknown'
+  if (/youtube\.com|youtu\.be/.test(url)) return 'youtube'
+  if (/vimeo\.com/.test(url)) return 'vimeo'
+  if (/\.(mp4|webm|mov|m4v|m3u8)(\?|$)/i.test(url)) return 'direct'
+  return 'unknown'
+}
+
+function getYouTubeId(url: string): string | null {
+  const m = url.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/)
+  return m ? m[1] : null
+}
+
+function getVimeoId(url: string): string | null {
+  const m = url.match(/vimeo\.com\/(?:video\/)?(\d+)/)
+  return m ? m[1] : null
+}
+
+declare global {
+  interface Window {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    YT: any
+    onYouTubeIframeAPIReady: () => void
+  }
+}
+
+interface SmartVideoPlayerProps {
+  url: string
+  seekRef: React.MutableRefObject<((t: number) => void) | null>
+}
+
+function SmartVideoPlayer({ url, seekRef }: SmartVideoPlayerProps) {
+  const videoRef    = useRef<HTMLVideoElement>(null)
+  const iframeRef   = useRef<HTMLIFrameElement>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ytPlayerRef = useRef<any>(null)
+  const type        = detectVideoType(url)
+
+  // Wire direct-video seek
+  useEffect(() => {
+    if (type !== 'direct' && type !== 'unknown') return
+    seekRef.current = (t: number) => {
+      if (!videoRef.current) return
+      videoRef.current.currentTime = t
+      videoRef.current.play().catch(() => {/* user gesture required */})
+    }
+  }, [type, seekRef])
+
+  // Wire YouTube seek via iframe API
+  useEffect(() => {
+    if (type !== 'youtube') return
+    const videoId = getYouTubeId(url)
+    if (!videoId) return
+
+    function initPlayer() {
+      if (!iframeRef.current) return
+      ytPlayerRef.current = new window.YT.Player(iframeRef.current, {
+        events: {
+          onReady: () => {
+            seekRef.current = (t: number) => {
+              ytPlayerRef.current?.seekTo(t, true)
+              ytPlayerRef.current?.playVideo()
+            }
+          },
+        },
+      })
+    }
+
+    if (window.YT?.Player) {
+      initPlayer()
+    } else {
+      // Load the API once
+      if (!document.getElementById('yt-api-script')) {
+        const script = document.createElement('script')
+        script.id  = 'yt-api-script'
+        script.src = 'https://www.youtube.com/iframe_api'
+        document.head.appendChild(script)
+      }
+      window.onYouTubeIframeAPIReady = initPlayer
+    }
+    return () => { ytPlayerRef.current = null }
+  }, [type, url, seekRef])
+
+  // Wire Vimeo seek via postMessage
+  useEffect(() => {
+    if (type !== 'vimeo') return
+    seekRef.current = (t: number) => {
+      iframeRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ method: 'setCurrentTime', value: t }),
+        '*',
+      )
+      iframeRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ method: 'play' }),
+        '*',
+      )
+    }
+  }, [type, seekRef])
+
+  if (!url) {
+    return (
+      <div className="aspect-video rounded-lg bg-[var(--color-lavender-tint)] flex items-center justify-center">
+        <p className="text-[12px] text-[var(--color-purple-gray)]">No video for this session</p>
+      </div>
+    )
+  }
+
+  if (type === 'youtube') {
+    const videoId = getYouTubeId(url)
+    if (!videoId) return <p className="text-[12px] text-red-500">Could not parse YouTube URL</p>
+    return (
+      <iframe
+        ref={iframeRef}
+        src={`https://www.youtube.com/embed/${videoId}?enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`}
+        className="w-full rounded-lg aspect-video bg-black"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
+      />
+    )
+  }
+
+  if (type === 'vimeo') {
+    const videoId = getVimeoId(url)
+    if (!videoId) return <p className="text-[12px] text-red-500">Could not parse Vimeo URL</p>
+    return (
+      <iframe
+        ref={iframeRef}
+        src={`https://player.vimeo.com/video/${videoId}?api=1`}
+        className="w-full rounded-lg aspect-video bg-black"
+        allow="autoplay; fullscreen; picture-in-picture"
+        allowFullScreen
+      />
+    )
+  }
+
+  return (
+    <video
+      ref={videoRef}
+      src={url}
+      controls
+      playsInline
+      className="w-full rounded-lg bg-black aspect-video"
+    />
+  )
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Segment {
@@ -243,8 +392,8 @@ interface ClipPanelProps {
 }
 
 function ClipPanel({ idx, clip, words, videoUrl, onChange }: ClipPanelProps) {
-  const [open, setOpen]     = useState(true)
-  const videoRef            = useRef<HTMLVideoElement>(null)
+  const [open, setOpen] = useState(true)
+  const seekRef         = useRef<((t: number) => void) | null>(null)
 
   const clipStart = useMemo(() => parseTime(clip.startTime), [clip.startTime])
   const clipEnd   = useMemo(() => parseTime(clip.endTime),   [clip.endTime])
@@ -258,13 +407,6 @@ function ClipPanel({ idx, clip, words, videoUrl, onChange }: ClipPanelProps) {
     return buildSegmentsFromWords(words, clipStart, clipEnd)
   })
 
-  // Seek video when panel opens.
-  useEffect(() => {
-    if (open && videoRef.current && clipStart > 0) {
-      videoRef.current.currentTime = clipStart
-    }
-  }, [open, clipStart])
-
   // Save segments back to the clip whenever they change.
   const saveSegments = useCallback((next: Segment[]) => {
     setSegs(next)
@@ -275,9 +417,9 @@ function ClipPanel({ idx, clip, words, videoUrl, onChange }: ClipPanelProps) {
   }, [clip, onChange])
 
   const seekTo = useCallback((t: number) => {
-    if (!videoRef.current) return
-    videoRef.current.currentTime = t
-    videoRef.current.play().catch(() => {/* user gesture required */})
+    if (seekRef.current) {
+      seekRef.current(t)
+    }
   }, [])
 
   function updateSeg(i: number, updated: Segment) {
@@ -338,28 +480,11 @@ function ClipPanel({ idx, clip, words, videoUrl, onChange }: ClipPanelProps) {
 
             {/* Left: video */}
             <div className="p-4 border-b lg:border-b-0 lg:border-r border-[var(--color-lavender)] bg-[var(--color-cream)] flex flex-col gap-2">
-              {videoUrl ? (
-                <>
-                  <video
-                    ref={videoRef}
-                    src={videoUrl}
-                    controls
-                    playsInline
-                    className="w-full rounded-lg bg-black aspect-video"
-                    onLoadedMetadata={() => {
-                      if (videoRef.current && clipStart > 0) {
-                        videoRef.current.currentTime = clipStart
-                      }
-                    }}
-                  />
-                  <p className="text-[10px] text-[var(--color-purple-gray)] text-center">
-                    Click <strong>▶ Seek</strong> on a segment to jump to that moment
-                  </p>
-                </>
-              ) : (
-                <div className="aspect-video rounded-lg bg-[var(--color-lavender-tint)] flex items-center justify-center">
-                  <p className="text-[12px] text-[var(--color-purple-gray)]">No video for this session</p>
-                </div>
+              <SmartVideoPlayer url={videoUrl ?? ''} seekRef={seekRef} />
+              {videoUrl && (
+                <p className="text-[10px] text-[var(--color-purple-gray)] text-center">
+                  Click <strong>▶ Seek</strong> on a segment to jump to that moment
+                </p>
               )}
             </div>
 
@@ -441,10 +566,14 @@ export function PreRenderReviewStep() {
     if (!Array.isArray(transcriptWords)) return []
     return (transcriptWords as unknown[]).map((w: unknown) => {
       const obj = w as Record<string, unknown>
+      // Transcription callback stores `word`; fall back to `text` for any alternate format
+      const wordText = typeof obj.word === 'string' ? obj.word
+        : typeof obj.text === 'string' ? obj.text
+        : String(obj.word ?? obj.text ?? '')
       return {
         start: parseTime(obj.start),
         end:   parseTime(obj.end),
-        text:  typeof obj.text === 'string' ? obj.text : String(obj.text ?? ''),
+        text:  wordText,
       }
     })
   }, [transcriptWords])
