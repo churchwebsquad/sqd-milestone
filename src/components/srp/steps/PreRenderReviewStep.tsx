@@ -110,11 +110,10 @@ function SmartVideoPlayer({ url, sourceType, clipStart, seekRef, onTimeUpdate }:
       if (destroyed) return
       ytRef.current = new window.YT.Player(playerIdRef.current, {
         videoId,
-        playerVars: { start: Math.floor(clipStart), autoplay: 1, rel: 0, modestbranding: 1 },
+        playerVars: { start: Math.floor(clipStart), autoplay: 0, rel: 0, modestbranding: 1 },
         events: {
-          onReady: (e: { target: { seekTo: (t: number, a: boolean) => void; playVideo: () => void } }) => {
+          onReady: (e: { target: { seekTo: (t: number, a: boolean) => void } }) => {
             e.target.seekTo(clipStart, true)
-            e.target.playVideo()
           },
         },
       })
