@@ -240,51 +240,6 @@ function buildSegmentsFromWords(
   return lines
 }
 
-// ── Timestamp input ───────────────────────────────────────────────────────────
-
-function TimeInput({
-  value,
-  onChange,
-  label,
-}: {
-  value:    number
-  onChange: (secs: number) => void
-  label:    string
-}) {
-  const [draft, setDraft] = useState(toMMSS(value))
-  const [error, setError] = useState(false)
-
-  useEffect(() => { setDraft(toMMSS(value)) }, [value])
-
-  function commit() {
-    const parsed = parseMMSS(draft)
-    if (isNaN(parsed)) { setError(true); return }
-    setError(false)
-    onChange(parsed)
-  }
-
-  return (
-    <div className="flex flex-col gap-0.5">
-      <label className="text-[9px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
-        {label}
-      </label>
-      <input
-        type="text"
-        value={draft}
-        onChange={e => { setDraft(e.target.value); setError(false) }}
-        onBlur={commit}
-        onKeyDown={e => e.key === 'Enter' && commit()}
-        placeholder="0:00"
-        className={[
-          'w-16 rounded border px-2 py-1 text-[11px] font-mono text-[var(--color-deep-plum)] focus:outline-none',
-          error
-            ? 'border-red-400 bg-red-50'
-            : 'border-[var(--color-lavender)] bg-white focus:border-[var(--color-primary-purple)]',
-        ].join(' ')}
-      />
-    </div>
-  )
-}
 
 // ── Single segment row ────────────────────────────────────────────────────────
 
@@ -306,73 +261,56 @@ function SegmentRow({ idx, seg, onSeek, onChange, onDelete, onAdd }: SegmentRowP
   }
 
   return (
-    <li className="group relative rounded-lg border border-[var(--color-lavender)] bg-white hover:border-[var(--color-primary-purple)]/40 transition-colors">
-      <div className="flex items-start gap-2 p-3">
-        {/* Drag handle (visual only) */}
-        <GripVertical size={13} className="mt-1 shrink-0 text-[var(--color-lavender)] group-hover:text-[var(--color-purple-gray)] transition-colors cursor-grab" />
-
-        {/* Index */}
-        <span className="mt-1 shrink-0 w-5 text-center text-[10px] font-bold text-[var(--color-purple-gray)]">
+    <li className="group rounded-lg border border-[var(--color-lavender)] bg-white hover:border-[var(--color-primary-purple)]/50 transition-colors">
+      {/* Top row: index + timestamps + seek + actions */}
+      <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
+        <GripVertical size={13} className="shrink-0 text-[var(--color-lavender)] group-hover:text-[var(--color-purple-gray)] transition-colors cursor-grab" />
+        <span className="shrink-0 w-5 text-center text-[10px] font-bold text-[var(--color-purple-gray)]">
           {idx + 1}
         </span>
-
-        {/* Timestamps */}
-        <div className="flex items-end gap-2 shrink-0">
-          <TimeInput
-            label="Start"
-            value={seg.start}
-            onChange={v => onChange({ ...seg, start: v })}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <input
+            type="text"
+            value={toMMSS(seg.start)}
+            onChange={e => { const v = parseMMSS(e.target.value); if (!isNaN(v)) onChange({ ...seg, start: v }) }}
+            className="w-14 rounded border border-[var(--color-lavender)] bg-white px-2 py-1 text-[12px] font-mono text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)] text-center"
           />
-          <span className="mb-1.5 text-[10px] text-[var(--color-purple-gray)]">→</span>
-          <TimeInput
-            label="End"
-            value={seg.end}
-            onChange={v => onChange({ ...seg, end: v })}
-          />
-          <button
-            type="button"
-            onClick={() => onSeek(seg.start)}
-            title="Seek video to this timestamp"
-            className="mb-1 shrink-0 text-[10px] font-semibold text-[var(--color-primary-purple)] hover:underline whitespace-nowrap"
-          >
-            ▶ Seek
-          </button>
-        </div>
-
-        {/* Text */}
-        <div className="flex-1 min-w-0">
-          <label className="block text-[9px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] mb-0.5">
-            Text
-          </label>
-          <textarea
-            value={textDraft}
-            onChange={e => setTextDraft(e.target.value)}
-            onBlur={commitText}
-            rows={2}
-            placeholder="Transcript text…"
-            className="w-full rounded border border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] px-2 py-1.5 text-[12px] text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] resize-none"
+          <span className="text-[10px] text-[var(--color-purple-gray)]">→</span>
+          <input
+            type="text"
+            value={toMMSS(seg.end)}
+            onChange={e => { const v = parseMMSS(e.target.value); if (!isNaN(v)) onChange({ ...seg, end: v }) }}
+            className="w-14 rounded border border-[var(--color-lavender)] bg-white px-2 py-1 text-[12px] font-mono text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)] text-center"
           />
         </div>
-
-        {/* Actions */}
-        <div className="flex flex-col gap-1 shrink-0 mt-4">
-          <button
-            type="button"
-            onClick={onDelete}
-            title="Delete segment"
-            className="p-1.5 rounded text-[var(--color-purple-gray)] hover:text-red-500 hover:bg-red-50 transition-colors"
-          >
-            <Trash2 size={13} />
+        <button
+          type="button"
+          onClick={() => onSeek(seg.start)}
+          className="shrink-0 text-[10px] font-semibold text-[var(--color-primary-purple)] hover:underline whitespace-nowrap"
+        >
+          ▶ Seek
+        </button>
+        <div className="ml-auto flex items-center gap-0.5 shrink-0">
+          <button type="button" onClick={onDelete} title="Delete segment"
+            className="p-1.5 rounded text-[var(--color-purple-gray)] hover:text-red-500 hover:bg-red-50 transition-colors">
+            <Trash2 size={12} />
           </button>
-          <button
-            type="button"
-            onClick={onAdd}
-            title="Add segment after this one"
-            className="p-1.5 rounded text-[var(--color-purple-gray)] hover:text-[var(--color-primary-purple)] hover:bg-[var(--color-lavender-tint)] transition-colors"
-          >
-            <Plus size={13} />
+          <button type="button" onClick={onAdd} title="Add segment after"
+            className="p-1.5 rounded text-[var(--color-purple-gray)] hover:text-[var(--color-primary-purple)] hover:bg-[var(--color-lavender-tint)] transition-colors">
+            <Plus size={12} />
           </button>
         </div>
+      </div>
+      {/* Text row — full width, no label clutter */}
+      <div className="px-3 pb-2.5">
+        <textarea
+          value={textDraft}
+          onChange={e => setTextDraft(e.target.value)}
+          onBlur={commitText}
+          rows={2}
+          placeholder="Transcript text…"
+          className="w-full rounded border border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] px-3 py-2 text-[13px] leading-snug text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] resize-none"
+        />
       </div>
     </li>
   )
@@ -478,75 +416,67 @@ function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPan
 
       {open && (
         <div className="border-t border-[var(--color-lavender)]">
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-0">
+          {/* Video — sticky so it stays visible while scrolling segments */}
+          <div className="sticky top-0 z-10 bg-[var(--color-cream)] border-b border-[var(--color-lavender)] p-3">
+            <SmartVideoPlayer url={videoUrl ?? ''} sourceType={sourceType} clipStart={clipStart} seekRef={seekRef} />
+          </div>
 
-            {/* Left: video */}
-            <div className="p-4 border-b lg:border-b-0 lg:border-r border-[var(--color-lavender)] bg-[var(--color-cream)] flex flex-col gap-2">
-              <SmartVideoPlayer url={videoUrl ?? ''} sourceType={sourceType} clipStart={clipStart} seekRef={seekRef} />
-              {videoUrl && (
-                <p className="text-[10px] text-[var(--color-purple-gray)] text-center">
-                  Click <strong>▶ Seek</strong> on a segment to jump to that moment
-                </p>
-              )}
+          {/* Segments — scrollable below the video */}
+          <div className="p-4 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
+                Transcript segments
+              </p>
+              <button
+                type="button"
+                onClick={addSegAtStart}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--color-primary-purple)] hover:underline"
+              >
+                <Plus size={12} /> Add segment
+              </button>
             </div>
 
-            {/* Right: editable transcript */}
-            <div className="p-4 flex flex-col gap-3 max-h-[560px] overflow-y-auto">
-              <div className="flex items-center justify-between">
-                <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
-                  Transcript segments
+            {segments.length === 0 ? (
+              <div className="rounded-lg border-2 border-dashed border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] py-8 text-center space-y-2">
+                <p className="text-[12px] text-[var(--color-purple-gray)]">
+                  {clip.startTime
+                    ? 'No transcript segments found for this clip range.'
+                    : "This clip has no timestamps — segments can't be auto-derived."}
                 </p>
                 <button
                   type="button"
                   onClick={addSegAtStart}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--color-primary-purple)] hover:underline"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--color-primary-purple)] text-white text-[11px] font-semibold hover:bg-[var(--color-deep-plum)] transition-colors"
                 >
-                  <Plus size={12} /> Add segment
+                  <Plus size={12} /> Add first segment manually
                 </button>
               </div>
+            ) : (
+              <ol className="space-y-2">
+                {segments.map((seg, i) => (
+                  <SegmentRow
+                    key={seg.id}
+                    idx={i}
+                    seg={seg}
+                    total={segments.length}
+                    onSeek={seekTo}
+                    onChange={updated => updateSeg(i, updated)}
+                    onDelete={() => deleteSeg(i)}
+                    onAdd={() => addSegAfter(i)}
+                  />
+                ))}
+              </ol>
+            )}
 
-              {segments.length === 0 ? (
-                <div className="rounded-lg border-2 border-dashed border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] py-8 text-center space-y-2">
-                  <p className="text-[12px] text-[var(--color-purple-gray)]">
-                    {clip.startTime
-                      ? 'No transcript segments found for this clip range.'
-                      : 'This clip has no timestamps — segments can\'t be auto-derived.'}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={addSegAtStart}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--color-primary-purple)] text-white text-[11px] font-semibold hover:bg-[var(--color-deep-plum)] transition-colors"
-                  >
-                    <Plus size={12} /> Add first segment manually
-                  </button>
-                </div>
-              ) : (
-                <ol className="space-y-2">
-                  {segments.map((seg, i) => (
-                    <SegmentRow
-                      key={seg.id}
-                      idx={i}
-                      seg={seg}
-                      total={segments.length}
-                      onSeek={seekTo}
-                      onChange={updated => updateSeg(i, updated)}
-                      onDelete={() => deleteSeg(i)}
-                      onAdd={() => addSegAfter(i)}
-                    />
-                  ))}
-                </ol>
-              )}
-
-              {segments.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => addSegAfter(segments.length - 1)}
-                  className="inline-flex items-center gap-1.5 self-start text-[11px] font-semibold text-[var(--color-primary-purple)] hover:underline"
-                >
-                  <Plus size={12} /> Add segment at end
-                </button>
-              )}
-            </div>
+            {segments.length > 0 && (
+              <button
+                type="button"
+                onClick={() => addSegAfter(segments.length - 1)}
+                className="inline-flex items-center gap-1.5 self-start text-[11px] font-semibold text-[var(--color-primary-purple)] hover:underline"
+              >
+                <Plus size={12} /> Add segment at end
+              </button>
+            )}
           </div>
         </div>
       )}
