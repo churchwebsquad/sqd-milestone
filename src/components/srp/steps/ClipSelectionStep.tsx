@@ -92,15 +92,24 @@ function reanchorClip(
   const startWord = words[bestIdx]
   const startSec = typeof startWord.start === 'number' ? startWord.start : mmssToSeconds(startWord.start ?? '')
 
-  // Find the last word of the quote starting from bestIdx
+  // Preserve the original duration as a fallback — the end-word search can
+  // pick up a common word too early, collapsing a 45s clip to 7s.
+  const originalDuration = mmssToSeconds(clip.endTime ?? '') - mmssToSeconds(clip.startTime ?? '')
+  let endSec = startSec + originalDuration
+
+  // Search for the last word of the quote in a window around where it should be
   const endSearchFrom = bestIdx + quoteWords.length - 8
   const endSearchTo   = bestIdx + quoteWords.length + 8
-  let endSec = startSec + (mmssToSeconds(clip.endTime ?? '') - mmssToSeconds(clip.startTime ?? ''))
+  let foundEndSec: number | null = null
   for (let i = Math.max(bestIdx, endSearchFrom); i < Math.min(words.length, endSearchTo); i++) {
     if (normalize(words[i]?.word ?? words[i]?.text ?? '') === lastNeedle) {
       const t = typeof words[i].start === 'number' ? words[i].start : mmssToSeconds(words[i].start ?? '')
-      endSec = t
+      foundEndSec = t
     }
+  }
+  // Only accept the found end if it results in a duration >= 20s (avoids common-word false matches)
+  if (foundEndSec !== null && foundEndSec - startSec >= 20) {
+    endSec = foundEndSec
   }
 
   return { startTime: secondsToMmss(Math.round(startSec)), endTime: secondsToMmss(Math.round(endSec)) }
