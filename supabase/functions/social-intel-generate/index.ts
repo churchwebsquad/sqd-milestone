@@ -258,14 +258,14 @@ Deno.serve(async (req) => {
   // ── Targeted section refresh (fast path) ─────────────────────────────────
   if (section === "whats_happening_now") {
     const supabase = createClient(supabaseUrl!, supabaseKey!);
-    const { data: progressData } = await supabase
-      .from("strategy_account_progress")
-      .select("church_name, church_website")
-      .eq("member", memberId)
-      .maybeSingle();
-    if (!progressData) return json({ error: `No church found for member ${memberId}` }, 404);
-    const churchName = (progressData as Record<string, unknown>).church_name as string ?? "";
-    const websiteUrl = (progressData as Record<string, unknown>).church_website as string ?? "";
+    const [{ data: progressData }, { data: proData }] = await Promise.all([
+      supabase.from("strategy_account_progress").select("church_name, church_website").eq("member", memberId).maybeSingle(),
+      supabase.from("strategy_social_pro_profiles").select("church_name, website").eq("member", memberId).maybeSingle(),
+    ]);
+    const churchRow = progressData ?? proData;
+    if (!churchRow) return json({ error: `No church found for member ${memberId}` }, 404);
+    const churchName = (churchRow as Record<string, unknown>).church_name as string ?? "";
+    const websiteUrl = ((churchRow as Record<string, unknown>).church_website ?? (churchRow as Record<string, unknown>).website) as string ?? "";
 
     // Scrape website for current series/events
     let crawlMarkdown = "";
@@ -335,6 +335,7 @@ Return ONLY this JSON — no explanation, no markdown fences:
 
   const [
     { data: progressData },
+    { data: proData },
     { data: acctData },
     { data: brandGuideData },
     { data: milestonesData },
@@ -347,6 +348,12 @@ Return ONLY this JSON — no explanation, no markdown fences:
       .limit(1)
       .maybeSingle(),
     supabase
+      .from("strategy_social_pro_profiles")
+      .select("member, church_name, website, css_rep")
+      .eq("member", memberId)
+      .limit(1)
+      .maybeSingle(),
+    supabase
       .from("accounts")
       .select("account, instagram, facebook")
       .eq("account", memberId)
@@ -355,7 +362,7 @@ Return ONLY this JSON — no explanation, no markdown fences:
     supabase
       .from("prf_brand_guides")
       .select("*")
-      .eq("member", memberId)
+      .eq("account", memberId)
       .limit(1)
       .maybeSingle(),
     supabase
@@ -371,11 +378,13 @@ Return ONLY this JSON — no explanation, no markdown fences:
       .is("employee", null),
   ]);
 
-  if (!progressData) return json({ error: `No church found for member ${memberId}` }, 404);
+  // Support non-all-in churches that live in strategy_social_pro_profiles
+  const churchRow = progressData ?? proData;
+  if (!churchRow) return json({ error: `No church found for member ${memberId}` }, 404);
 
-  const rec = progressData as Record<string, unknown>;
+  const rec = churchRow as Record<string, unknown>;
   const churchName = rec.church_name as string ?? "Unknown Church";
-  const websiteUrl = rec.church_website as string ?? "";
+  const websiteUrl = (rec.church_website ?? rec.website) as string ?? "";
   const amName     = rec.css_rep as string ?? "";
   const igFromDb   = (acctData as Record<string, unknown> | null)?.instagram as string ?? "";
   const fbFromDb   = (acctData as Record<string, unknown> | null)?.facebook  as string ?? "";
