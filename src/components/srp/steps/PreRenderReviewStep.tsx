@@ -23,7 +23,8 @@ import type { SrpClipSelection } from '../../../types/database'
 type SourceType = 'youtube' | 'dropbox' | 'vimeo' | 'google_drive' | 'direct' | 'unknown' | null
 
 function getYouTubeId(url: string): string | null {
-  const m = url.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/)
+  // Handles: watch?v=, youtu.be/, embed/, live/, shorts/
+  const m = url.match(/(?:v=|youtu\.be\/|embed\/|live\/|shorts\/)([A-Za-z0-9_-]{11})/)
   return m ? m[1] : null
 }
 
