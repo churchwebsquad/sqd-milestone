@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Loader2, FileText, Link as LinkIcon, AlertCircle, CheckCircle2, Search } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Loader2, FileText, Link as LinkIcon, AlertCircle, CheckCircle2, Search, RefreshCw } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { useTranscriptJob } from '../../../lib/srpRealtime'
 import { SrpButton } from '../_shared/SrpButton'
@@ -43,6 +43,7 @@ export function SermonInputStep() {
     transcriptWords, setTranscriptWords,
     hasTimecodes, setHasTimecodes,
     transcriptJobId, setTranscriptJobId,
+    setClipSuggestions, setClipSelections,
     clickupTaskId,
     visibleSteps,
     goToNextStep, goToPrevStep,
@@ -56,6 +57,8 @@ export function SermonInputStep() {
   const [autoPulling, setAutoPulling] = useState(false)
   const [autoPullSource, setAutoPullSource] = useState<string | null>(null)
   const [autoPullError, setAutoPullError] = useState<string | null>(null)
+  const [confirmingReset, setConfirmingReset] = useState(false)
+  const [resetting, setResetting] = useState(false)
 
   // On mount: if we have a clickupTaskId but no video URL or transcript yet,
   // first check the background pipeline session (fastest path), then fall back to ClickUp.
@@ -203,6 +206,33 @@ export function SermonInputStep() {
     const sample = txt.slice(0, 5000)
     setHasTimecodes(/\b\d{1,2}:\d{2}(:\d{2})?\b/.test(sample))
   }, [pasteDraft, setTranscript, setTranscriptWords, setHasTimecodes])
+
+  const handleResetVideo = useCallback(async () => {
+    setResetting(true)
+    try {
+      await updateSession(sessionId, {
+        video_url: null,
+        video_source_type: null,
+        transcript: null,
+        transcript_words: null,
+        has_timecodes: false,
+        transcript_job_id: null,
+        clip_suggestions: [],
+        clip_selections: [],
+      })
+      setVideoUrl('')
+      setTranscript('')
+      setTranscriptWords(null)
+      setHasTimecodes(false)
+      setTranscriptJobId(null)
+      setClipSuggestions([])
+      setClipSelections([])
+      setConfirmingReset(false)
+      setMode('url')
+    } finally {
+      setResetting(false)
+    }
+  }, [sessionId, setVideoUrl, setTranscript, setTranscriptWords, setHasTimecodes, setTranscriptJobId, setClipSuggestions, setClipSelections])
 
   const transcriptReady = transcript.trim().length >= 200
 
@@ -375,6 +405,42 @@ export function SermonInputStep() {
           {transcriptWords && transcriptWords.length > 0 && (
             <span className="text-[10px] uppercase tracking-widest font-bold">· word-level timing</span>
           )}
+        </div>
+      )}
+
+      {/* Change video URL */}
+      {(videoUrl || transcriptReady) && !confirmingReset && (
+        <button
+          type="button"
+          onClick={() => setConfirmingReset(true)}
+          className="inline-flex items-center gap-1.5 text-[11px] text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] transition-colors"
+        >
+          <RefreshCw size={11} /> Change video URL
+        </button>
+      )}
+      {confirmingReset && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+          <p className="text-[13px] font-semibold text-amber-800">Change video URL?</p>
+          <p className="text-[12px] text-amber-700">
+            This will clear the current transcript and all clip selections so you can start fresh with a new video. This cannot be undone.
+          </p>
+          <div className="flex items-center gap-3">
+            <SrpButton
+              size="sm"
+              onClick={() => void handleResetVideo()}
+              disabled={resetting}
+              leadingIcon={resetting ? <Loader2 size={12} className="animate-spin" /> : undefined}
+            >
+              {resetting ? 'Clearing…' : 'Yes, change video'}
+            </SrpButton>
+            <button
+              type="button"
+              onClick={() => setConfirmingReset(false)}
+              className="text-[12px] text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)]"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
