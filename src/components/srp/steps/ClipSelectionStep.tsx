@@ -565,8 +565,15 @@ export function ClipSelectionStep() {
 
   // ── Manual entry ─────────────────────────────────────────────────────────
 
+  const MIN_CLIP_SECONDS = 25
+
   const handleAddManual = useCallback(() => {
     if (!manualStart || !manualEnd) return
+    const durationSec = mmssToSeconds(manualEnd) - mmssToSeconds(manualStart)
+    if (durationSec < MIN_CLIP_SECONDS) {
+      alert(`Clip must be at least ${MIN_CLIP_SECONDS} seconds long. This one is only ${durationSec}s.`)
+      return
+    }
     const quote = sliceQuoteFromWords(transcriptWords, manualStart, manualEnd)
     const manual: SrpClipSelection = {
       clip_id:          `manual_${Date.now().toString(36)}`,
@@ -574,7 +581,7 @@ export function ClipSelectionStep() {
       endTime:          manualEnd,
       quote:            quote || `${manualStart} – ${manualEnd}`,
       category:         undefined,
-      estimatedSeconds: mmssToSeconds(manualEnd) - mmssToSeconds(manualStart),
+      estimatedSeconds: durationSec,
     } as any
     setClipSuggestions([...clipSuggestions, manual])
     setManualStart(''); setManualEnd(''); setShowManual(false)
