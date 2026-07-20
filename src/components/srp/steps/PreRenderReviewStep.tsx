@@ -20,15 +20,7 @@ import type { SrpClipSelection } from '../../../types/database'
 
 // ── Smart video player ────────────────────────────────────────────────────────
 
-type VideoType = 'youtube' | 'vimeo' | 'direct' | 'unknown'
-
-function detectVideoType(url: string): VideoType {
-  if (!url) return 'unknown'
-  if (/youtube\.com|youtu\.be/.test(url)) return 'youtube'
-  if (/vimeo\.com/.test(url)) return 'vimeo'
-  if (/\.(mp4|webm|mov|m4v|m3u8)(\?|$)/i.test(url)) return 'direct'
-  return 'unknown'
-}
+type SourceType = 'youtube' | 'dropbox' | 'vimeo' | 'google_drive' | 'direct' | 'unknown' | null
 
 function getYouTubeId(url: string): string | null {
   const m = url.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/)
@@ -49,16 +41,23 @@ declare global {
 }
 
 interface SmartVideoPlayerProps {
-  url: string
-  seekRef: React.MutableRefObject<((t: number) => void) | null>
+  url:        string
+  sourceType: SourceType
+  seekRef:    React.MutableRefObject<((t: number) => void) | null>
 }
 
-function SmartVideoPlayer({ url, seekRef }: SmartVideoPlayerProps) {
+function SmartVideoPlayer({ url, sourceType, seekRef }: SmartVideoPlayerProps) {
   const videoRef    = useRef<HTMLVideoElement>(null)
   const iframeRef   = useRef<HTMLIFrameElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ytPlayerRef = useRef<any>(null)
-  const type        = detectVideoType(url)
+
+  // Resolve type — trust stored sourceType, fall back to URL sniffing
+  const type: SourceType = sourceType
+    ?? (/youtube\.com|youtu\.be/.test(url) ? 'youtube'
+      : /vimeo\.com/.test(url) ? 'vimeo'
+      : /\.(mp4|webm|mov|m4v|m3u8)(\?|$)/i.test(url) ? 'direct'
+      : 'unknown')
 
   // Wire direct-video seek
   useEffect(() => {
@@ -66,7 +65,7 @@ function SmartVideoPlayer({ url, seekRef }: SmartVideoPlayerProps) {
     seekRef.current = (t: number) => {
       if (!videoRef.current) return
       videoRef.current.currentTime = t
-      videoRef.current.play().catch(() => {/* user gesture required */})
+      videoRef.current.play().catch(() => {/* blocked without user gesture */})
     }
   }, [type, seekRef])
 
@@ -93,11 +92,10 @@ function SmartVideoPlayer({ url, seekRef }: SmartVideoPlayerProps) {
     if (window.YT?.Player) {
       initPlayer()
     } else {
-      // Load the API once
       if (!document.getElementById('yt-api-script')) {
-        const script = document.createElement('script')
-        script.id  = 'yt-api-script'
-        script.src = 'https://www.youtube.com/iframe_api'
+        const script   = document.createElement('script')
+        script.id      = 'yt-api-script'
+        script.src     = 'https://www.youtube.com/iframe_api'
         document.head.appendChild(script)
       }
       window.onYouTubeIframeAPIReady = initPlayer
@@ -109,14 +107,8 @@ function SmartVideoPlayer({ url, seekRef }: SmartVideoPlayerProps) {
   useEffect(() => {
     if (type !== 'vimeo') return
     seekRef.current = (t: number) => {
-      iframeRef.current?.contentWindow?.postMessage(
-        JSON.stringify({ method: 'setCurrentTime', value: t }),
-        '*',
-      )
-      iframeRef.current?.contentWindow?.postMessage(
-        JSON.stringify({ method: 'play' }),
-        '*',
-      )
+      iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ method: 'setCurrentTime', value: t }), '*')
+      iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ method: 'play' }), '*')
     }
   }, [type, seekRef])
 
@@ -153,6 +145,28 @@ function SmartVideoPlayer({ url, seekRef }: SmartVideoPlayerProps) {
         allow="autoplay; fullscreen; picture-in-picture"
         allowFullScreen
       />
+    )
+  }
+
+  // Dropbox / Google Drive — can't embed, show a link to open externally
+  if (type === 'dropbox' || type === 'google_drive') {
+    return (
+      <div className="aspect-video rounded-lg bg-[var(--color-lavender-tint)] flex flex-col items-center justify-center gap-3 p-4">
+        <p className="text-[12px] font-medium text-[var(--color-deep-plum)] text-center">
+          {type === 'dropbox' ? 'Dropbox' : 'Google Drive'} videos can't be embedded here.
+        </p>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[var(--color-primary-purple)] text-white text-[12px] font-semibold hover:bg-[var(--color-deep-plum)] transition-colors"
+        >
+          Open video in new tab →
+        </a>
+        <p className="text-[10px] text-[var(--color-purple-gray)] text-center">
+          Note timestamps as you watch, then enter them in the segments on the right.
+        </p>
+      </div>
     )
   }
 
@@ -384,14 +398,15 @@ function SegmentRow({ idx, seg, onSeek, onChange, onDelete, onAdd }: SegmentRowP
 // ── Per-clip panel ────────────────────────────────────────────────────────────
 
 interface ClipPanelProps {
-  idx:      number
-  clip:     SrpClipSelection
-  words:    { start: number; end: number; text: string }[]
-  videoUrl: string | null
-  onChange: (updated: SrpClipSelection) => void
+  idx:        number
+  clip:       SrpClipSelection
+  words:      { start: number; end: number; text: string }[]
+  videoUrl:   string | null
+  sourceType: SourceType
+  onChange:   (updated: SrpClipSelection) => void
 }
 
-function ClipPanel({ idx, clip, words, videoUrl, onChange }: ClipPanelProps) {
+function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPanelProps) {
   const [open, setOpen] = useState(true)
   const seekRef         = useRef<((t: number) => void) | null>(null)
 
@@ -484,7 +499,7 @@ function ClipPanel({ idx, clip, words, videoUrl, onChange }: ClipPanelProps) {
 
             {/* Left: video */}
             <div className="p-4 border-b lg:border-b-0 lg:border-r border-[var(--color-lavender)] bg-[var(--color-cream)] flex flex-col gap-2">
-              <SmartVideoPlayer url={videoUrl ?? ''} seekRef={seekRef} />
+              <SmartVideoPlayer url={videoUrl ?? ''} sourceType={sourceType} seekRef={seekRef} />
               {videoUrl && (
                 <p className="text-[10px] text-[var(--color-purple-gray)] text-center">
                   Click <strong>▶ Seek</strong> on a segment to jump to that moment
@@ -563,6 +578,7 @@ export function PreRenderReviewStep() {
     clipSelections, setClipSelections,
     transcriptWords,
     videoUrl,
+    videoSourceType,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
@@ -613,6 +629,7 @@ export function PreRenderReviewStep() {
               clip={clip as SrpClipSelection}
               words={words}
               videoUrl={videoUrl}
+              sourceType={videoSourceType as SourceType}
               onChange={updated => updateClip(idx, updated)}
             />
           ))}
