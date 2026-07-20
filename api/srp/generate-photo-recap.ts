@@ -31,20 +31,20 @@ VOICE:
 Follow the provided voice guide exactly. This is your highest-priority style constraint. Match its tone, vocabulary, sentence structure, and energy level precisely. Do not default to a generic "church marketing" tone. The caption should sound like it was written by someone who was actually in the room, not someone writing a press release about it.
 
 PURPOSE:
-This caption sits alongside photos from the weekend. Its job is to make someone who wasn't there wish they had been, and make someone who was there feel proud they showed up. It's a highlight reel in words — not a summary, not a report, not an announcement.
+This caption sits alongside photos from the weekend. Its job is to make someone who wasn't there wish they had been, and make someone who was there feel proud they showed up. It's a highlight reel in words. Not a summary, not a report, not an announcement.
 
 LENGTH & FORMAT:
 - 3-5 sentences. Long enough to capture the feeling of the weekend, short enough to keep momentum.
-- Avoid em dashes. Use periods, commas, or line breaks instead.
+- NEVER use em dashes (—). Hard rule. Use periods, commas, or line breaks instead.
 - Use line breaks between distinct moments or ideas to create breathing room.
 - Never write in first person. No "I," "me," "my," or "mine." Use "we" and "you" to keep it communal.
 - Do not use the word "energy."
 - Use emojis only if the voice guide does. If the voice guide is silent on emojis, limit to 1-2 max and only where they add warmth, not decoration.
 
 CONTENT RULES:
-- Lead with the most vivid or emotionally resonant moment from the weekend. Not the most important on paper — the most felt.
+- Lead with the most vivid or emotionally resonant moment from the weekend. Not the most important on paper. The most felt.
 - If specific highlights are provided (baptisms, worship moments, child dedications, salvations, special guests, milestones), weave them in naturally. Show what they felt like, not just what they were.
-- If no specific highlights are provided, write about the general feeling of gathering — the atmosphere, the connection, the moments between the big moments.
+- If no specific highlights are provided, write about the general feeling of gathering: the atmosphere, the connection, the moments between the big moments.
 - Avoid vague spiritual language that sounds nice but says nothing. "God moved this weekend" is empty. "There wasn't a dry eye during the baptisms" is specific.
 - Don't recap the sermon. This is about the experience, not the content.
 - Paint small, specific pictures. The sound of the room during worship. The look on someone's face during prayer. Details make it real.
@@ -60,12 +60,12 @@ GENERATE 3-5 CAPTION OPTIONS. Each option should take a different angle:
 - One that leads with a milestone moment (if applicable)
 - One that leads with the atmosphere or worship experience
 - One that leads with community and connection
-- One that's short and punchy — 2 sentences max, just vibes
+- One that's short and punchy: 2 sentences max, just vibes
 - One that's slightly longer and more reflective
 If fewer than 5 angles apply, generate fewer. Three great options beat five mediocre ones. Every caption must feel distinct.
 
 CALLS TO ACTION:
-Every caption should end with a call to action, but vary the format. Options: tag someone who was there, tag someone who should come next week, share a favorite moment in the comments, drop an emoji reaction, share the post to their story, "save this to remember the moment." Keep CTAs natural and warm. At least one caption option should have a softer CTA or none at all — just a statement that's strong enough to inspire engagement on its own.
+Every caption should end with a call to action, but vary the format. Options: tag someone who was there, tag someone who should come next week, share a favorite moment in the comments, drop an emoji reaction, share the post to their story, "save this to remember the moment." Keep CTAs natural and warm. At least one caption option should have a softer CTA or none at all. Just a statement that's strong enough to inspire engagement on its own.
 
 HASHTAGS:
 End each caption with 3-5 hashtags on a separate line. Always include the church's branded hashtag if one has been provided. Mix broad tags with specific ones tied to the weekend's highlights.`
@@ -80,7 +80,7 @@ This caption pairs with photos of the congregation from the weekend. Its job is 
 
 LENGTH & FORMAT:
 - 4-6 sentences. Enough room to touch on the message and land with a next step, but not so long it becomes a blog post.
-- Avoid em dashes. Use periods, commas, or line breaks instead.
+- NEVER use em dashes (—). Hard rule. Use periods, commas, or line breaks instead.
 - Use line breaks to separate the reflection from the call to action.
 - Never write in first person. No "I," "me," "my," or "mine." Use "we" and "you."
 - Do not use the word "energy."
@@ -92,13 +92,13 @@ CONTENT RULES:
 - Ground the message in a single core idea. Trying to cover everything makes the caption feel like cliff notes.
 - Connect the message to the photos. These are pictures of real people in a real room. The caption should feel communal, grounded, human.
 - Avoid vague spiritual language. "God is doing something amazing" says nothing. "This room was full of people choosing to show up even when life is heavy" says everything.
-- If a sermon quote is used, keep it to one short quote max. It must not use first person — if the original quote uses "I," rephrase it or choose a different one.
+- If a sermon quote is used, keep it to one short quote max. It must not use first person. If the original quote uses "I," rephrase it or choose a different one.
 - If the sermon referenced a key Bible verse, you can include it. Weave it in naturally and always include the translation (e.g. "Romans 8:28 ESV").
 
 HOW TO USE THE SERMON TRANSCRIPT:
 - Find the single most resonant idea, not the outline.
 - Look for the moment where the sermon got personal, got quiet, or got real.
-- Pull out any practical next steps or challenges the sermon offered — these become your call to action.
+- Pull out any practical next steps or challenges the sermon offered. These become your call to action.
 
 GENERATE 3-5 CAPTION OPTIONS. Each option should take a different angle:
 - The reflection. Lead with the core message translated into everyday language. Write it like a thought someone would have driving home from church.
@@ -172,7 +172,7 @@ export default async function handler(req: any, res: any) {
 
   // "Looking back" is the primary signal — weight it heavily in the prompt
   const lookingBackSection = lookingBack.trim()
-    ? `\n\nWHAT HAPPENED THIS WEEKEND (use this as your primary source — this is the most important context):\n${lookingBack}`
+    ? `\n\nWHAT HAPPENED THIS WEEKEND (use this as your primary source, this is the most important context):\n${lookingBack}`
     : ''
 
   const userPrompt =

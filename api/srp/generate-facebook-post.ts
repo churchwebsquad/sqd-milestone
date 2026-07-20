@@ -28,7 +28,7 @@ VOICE:
 Follow the provided voice guide exactly. Match its tone, vocabulary, sentence structure, and energy level. The voice guide is your highest-priority style constraint. Every word choice should feel like it came from the same person who wrote that guide. When in doubt, reread the voice guide and mirror what you see.
 
 PERSPECTIVE:
-- Write to the reader, not about the speaker. This is not a recap. The sermon is raw material — not the story being told.
+- Write to the reader, not about the speaker. This is not a recap. The sermon is raw material. It is not the story being told.
 - Do not reference the speaker by name. Rarely is a name needed. The idea is what matters, not who said it.
 - Do not lift personal stories or anecdotes from the sermon and retell them. Those moments belong in the room. The post lives on a different medium with a different purpose.
 - Never write in first person. No "I," "me," "my," or "mine." These posts speak to the reader using "you" or "we."
@@ -38,7 +38,7 @@ LENGTH & FORMAT:
 - Write 2-3 short paragraphs, 2-4 sentences each.
 - Aim for 400-600 characters. Enough to land something real, not so much the reader taps "See more" and keeps scrolling.
 - Use a blank line between paragraphs.
-- Avoid em dashes. Use periods, commas, or line breaks instead.
+- NEVER use em dashes (—). Hard rule. Use periods, commas, or line breaks instead.
 - No emojis unless the voice guide uses them.
 
 CONTENT RULES:

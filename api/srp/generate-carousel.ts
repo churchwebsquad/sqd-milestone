@@ -32,7 +32,7 @@ Follow the provided voice guide exactly. This is your highest-priority style con
 
 GENERAL RULES:
 - Every carousel MUST follow its layout structure exactly. Do not add, remove, or rearrange slides. Pay close attention to the slide count for each layout. They are not all the same. Layout 1: 4 slides. Layout 2: 5 slides. Layout 3: 4 slides. Layout 4: 3 slides. Layout 5: 1 slide.
-- Avoid em dashes. Use periods, commas, or line breaks instead.
+- NEVER use em dashes (—). Hard rule. Use periods, commas, or line breaks instead.
 - Use emojis only if the voice guide does.
 - When quoting Bible verses, always include the translation name (e.g. "Romans 8:28 ESV").
 - Do not use the word "energy." Find a more specific, concrete way to describe the feeling you mean.
@@ -41,9 +41,9 @@ GENERAL RULES:
 - Each slide should be able to stand on its own visually while also building a narrative across the carousel. Someone swiping should feel pulled forward.
 - All four carousels must draw from different parts of the sermon. Do not reuse the same quote, verse, or core idea across multiple layouts.
 
-THE HOOK — THIS IS CRITICAL:
+THE HOOK: THIS IS CRITICAL
 Slide 1 of every carousel is the only slide people see before deciding to swipe or keep scrolling. It carries the entire carousel. If the hook doesn't stop someone mid-scroll and create an itch to swipe, nothing else matters.
-- The hook must create a gap — a question unanswered, a tension unresolved, a statement that demands context. The reader should feel like they're missing something if they don't swipe.
+- The hook must create a gap: a question unanswered, a tension unresolved, a statement that demands context. The reader should feel like they're missing something if they don't swipe.
 - Avoid generic openers like "Let's talk about faith" or "Here's what God wants you to know."
 - Strong hooks: a bold claim people might disagree with, a question that names a private struggle, a surprising reframe of a familiar idea, a short punchy statement that feels incomplete on purpose.
 - Test your hook by asking: "Would I stop scrolling for this?" If the answer isn't an immediate yes, rewrite it.
@@ -54,14 +54,14 @@ CONTENT RULES:
 - Vary the emotional arc across slides. Don't start intense and stay intense. Build, breathe, land.
 - Keep bulleted or checklist items concrete and actionable. "Pray more" is vague. "Set a 5-minute alarm to pray before lunch" is specific.
 
-Layout 1 — Reflective Narrative (4 slides)
-Tone: Conversational and personal. Like someone sharing a real thought out loud. Honest, relatable, grounded. Personal in feel, but written in second person — talk to the reader, not about yourself. Must NOT deviate from the transcript. Use direct quotes and stick to the source material.
+Layout 1: Reflective Narrative (4 slides)
+Tone: Conversational and personal. Like someone sharing a real thought out loud. Honest, relatable, grounded. Personal in feel, but written in second person. Talk to the reader, not about yourself. Must NOT deviate from the transcript. Use direct quotes and stick to the source material.
 Slide 1: 1 sentence hook with 1-3 supporting sentences. Open with a relatable question, tension, or observation that makes someone think "okay, I need to hear the rest of this."
 Slide 2: 2-3 sentences. Develop the thought. Build on the tension or question from slide 1. Go deeper, not wider.
 Slide 3: 2-3 sentences. Shift toward insight or application. What does this look like in real life? Make it tangible.
 Slide 4: 2-3 sentences. Close with a landing thought, challenge, call to action, or bible verse.
 
-Layout 2 — Title + Verse + List + Reflection + Close (5 slides)
+Layout 2: Title + Verse + List + Reflection + Close (5 slides)
 Tone: Instructional. Clear, helpful, grounded. Like a wise friend breaking something down into steps you can actually follow. Not preachy. Not textbook. Just practical and warm.
 Slide 1: A 4-5 word title. Bold, curiosity-driven, scroll-stopping hook. Must create an itch to swipe.
 Slide 2: A Bible verse with translation. Choose a verse that directly supports the title and sets up what's coming. Let the verse breathe on its own without added commentary.
@@ -69,25 +69,25 @@ Slide 3: A bulleted list or checklist with a title. 3-5 items max. Each item sho
 Slide 4: 2-3 sentences. Expand on the list with a brief reflection, using a direct quote if possible. Connect the practical steps to the bigger picture.
 Slide 5: A closing sentence. One strong thought that ties it all together. Leave the reader with something that sticks.
 
-Layout 3 — Verse + Reflection + Close (4 slides)
+Layout 3: Verse + Reflection + Close (4 slides)
 Tone: Poetic. Beautiful, deliberate, unhurried. Let the words breathe. Sentences should feel crafted, not casual.
 Slide 1: A Bible verse with translation. This is your hook. Must have been used in the sermon. Choose something striking enough to stop the scroll on its own without any setup.
-Slide 2: 2-3 sentences. Begin unpacking the verse. Connect it to a feeling or experience the reader knows well. Don't explain the verse academically — make it personal.
+Slide 2: 2-3 sentences. Begin unpacking the verse. Connect it to a feeling or experience the reader knows well. Don't explain the verse academically. Make it personal.
 Slide 3: 2-3 sentences. Go deeper. Challenge the reader gently or reframe the verse in a way they haven't considered.
 Slide 4: A closing statement. Brief, memorable, and final. A sentence someone might screenshot.
 
-Layout 4 — Bold Quotes (3 slides)
+Layout 4: Bold Quotes (3 slides)
 Tone: Strong and straightforward. Clean, confident, no filler. Let the quotes hit without over-explaining them.
 Slide 1: A sermon quote or bold statement that stops the scroll. Choose something surprising, challenging, or deeply resonant. Must make someone stop and swipe.
 Slide 2: NOT a quote. 1-3 sentences that build on the thought from slide 1.
 Slide 3: A final quote, challenge, or statement that leaves something ringing in the reader's mind. The kind of slide people screenshot and send to a friend.
-Always attribute sermon quotes clearly (e.g. "— Pastor [Name]") or weave attribution naturally into the framing. Every quote selected must speak to the reader or make a universal statement. No personal anecdotes or stories from the speaker's life.
+Always attribute sermon quotes clearly (e.g. "- Pastor [Name]") or weave attribution naturally into the framing. Every quote selected must speak to the reader or make a universal statement. No personal anecdotes or stories from the speaker's life.
 
-Layout 5 — Single Image with Text (1 slide)
-This is not a carousel. It is one standalone graphic — a single slide designed to stop the scroll on its own. No setup, no swipe needed. It lives or dies by what's on that one frame.
-Use a direct quote from the sermon — something the pastor actually said that is surprising, challenging, or deeply resonant. A line that feels like a firm hand on the shoulder. Do NOT use a Bible verse here; the quote must come from the pastor's own words.
+Layout 5: Single Image with Text (1 slide)
+This is not a carousel. It is one standalone graphic, a single slide designed to stop the scroll on its own. No setup, no swipe needed. It lives or dies by what's on that one frame.
+Use a direct quote from the sermon: something the pastor actually said that is surprising, challenging, or deeply resonant. A line that feels like a firm hand on the shoulder. Do NOT use a Bible verse here; the quote must come from the pastor's own words.
 The text must be short enough to read in 2 seconds. If it needs explanation, it's the wrong choice.
-Attribute the quote clearly (e.g. "— Pastor [Name]").`
+Attribute the quote clearly (e.g. "- Pastor [Name]").`
 
 const DEFAULT_CAPTION_PROMPT = `You are a social media copywriter for churches. Write concise, Instagram-friendly captions to accompany carousel posts.
 
@@ -95,11 +95,11 @@ VOICE:
 Follow the provided voice guide exactly. This is your highest-priority style constraint. Match its tone, vocabulary, sentence structure, and energy level precisely. Do not default to a generic "church marketing" tone. The caption should sound like it was written by the same person who wrote the voice guide.
 
 PURPOSE:
-The caption supports the carousel, it doesn't repeat it. Someone who reads the carousel slides and then reads the caption should get something new — a different angle, a deeper nudge, or a reason to engage. If the caption just restates what the slides already said, it's wasted space.
+The caption supports the carousel, it doesn't repeat it. Someone who reads the carousel slides and then reads the caption should get something new: a different angle, a deeper nudge, or a reason to engage. If the caption just restates what the slides already said, it's wasted space.
 
 LENGTH & FORMAT:
 - 2-3 sentences max before hashtags.
-- Avoid em dashes. Use periods, commas, or line breaks instead.
+- NEVER use em dashes (—). Hard rule. Use periods, commas, or line breaks instead.
 - Use emojis only if the voice guide does.
 - Front-load the hook. The first line shows above the fold. If it doesn't earn the "more" tap, the rest doesn't matter.
 - Never write in first person. No "I," "me," "my," or "mine." Speak to the reader.
@@ -246,7 +246,7 @@ export default async function handler(req: any, res: any) {
       `CURRENT SLIDES:\n${slides.map((s, i) => `Slide ${i + 1}: ${s}`).join('\n')}\n\n` +
       `COACH INSTRUCTION: "${userGuidance}"\n\n` +
       `Apply the instruction faithfully. You may reorder, split, merge, add, or remove slides as instructed. ` +
-      `Return only the revised slides — no explanation needed. ` +
+      `Return only the revised slides. No explanation needed. ` +
       `Keep the voice and style of the current slides unless the instruction says otherwise.` +
       (transcript ? `\n\nOriginal transcript (for pulling new quotes if needed):\n${transcript.slice(0, 20000)}` : '')
 
@@ -293,9 +293,9 @@ export default async function handler(req: any, res: any) {
     : ''
 
   const userPrompt =
-    `Create exactly 5 Instagram carousel concepts from this sermon transcript — one per layout in the system prompt.\n\n` +
+    `Create exactly 5 Instagram carousel concepts from this sermon transcript, one per layout in the system prompt.\n\n` +
     `Layouts 1-4 must each pull from a DIFFERENT angle, quote, or theme. No reused quotes across carousels.\n` +
-    `Layout 5 is a single-slide graphic — choose the single strongest quote or verse from the sermon.\n\n` +
+    `Layout 5 is a single-slide graphic. Choose the single strongest quote or verse from the sermon.\n\n` +
     `For each concept include a "citations" field listing ALL verbatim quotes from the transcript that the carousel draws from.\n\n` +
     (deliverableIntel ? `\nChurch-specific guidance for this deliverable:\n${deliverableIntel}\n\n` : '') +
     `Transcript:\n${transcript.slice(0, 30000)}` +

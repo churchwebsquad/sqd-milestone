@@ -33,7 +33,7 @@ Follow the provided voice guide exactly. Match its tone, vocabulary, sentence st
 
 LENGTH & FORMAT:
 - 1-3 sentences max before hashtags. Think Instagram-native.
-- Avoid em dashes. Use periods, commas, or line breaks instead.
+- NEVER use em dashes (—). Hard rule. Use periods, commas, or line breaks instead.
 - Use emojis sparingly (1-2 max). Skip them entirely if the voice guide doesn't use them.
 - Front-load the hook. The first line must stop the scroll.
 

@@ -34,18 +34,18 @@ Most Sunday invite posts sound identical every week: "Join us this Sunday! All a
 WHAT TO WRITE:
 Write 2-4 posts. Always write at least 2. Write more only when you have enough material to make each one genuinely distinct. Don't write a post just to fill a slot.
 
-Post 1 — Community angle: Write for the person on the fence. Name something real about the hesitation and dissolve it. Focus on people and belonging, not program. Do not reference the sermon.
+Post 1 (Community angle): Write for the person on the fence. Name something real about the hesitation and dissolve it. Focus on people and belonging, not program. Do not reference the sermon.
 
-Post 2 — Momentum angle: Write for the person who needs a reason to show up this specific Sunday. Forward-leaning, confident, not hype-y. Do not reference the sermon.
+Post 2 (Momentum angle): Write for the person who needs a reason to show up this specific Sunday. Forward-leaning, confident, not hype-y. Do not reference the sermon.
 
-Post 3 — Sermon tease (only write this if a transcript or sermon details are provided): Find the tension in the sermon. The question people are already carrying. Tease it in one phrase and open a loop. Do not summarize. The person should finish reading and think "I want to know how that ends."
+Post 3 (Sermon tease, only write this if a transcript or sermon details are provided): Find the tension in the sermon. The question people are already carrying. Tease it in one phrase and open a loop. Do not summarize. The person should finish reading and think "I want to know how that ends."
 
-Post 4 — What's coming (only write this if "Looking Ahead" context or a real upcoming event is provided that doesn't overlap with Posts 1-3): Build the invite around why being there THIS Sunday specifically matters. If nothing specific is provided, skip this post entirely rather than writing something generic.
+Post 4 (What's coming, only write this if "Looking Ahead" context or a real upcoming event is provided that doesn't overlap with Posts 1-3): Build the invite around why being there THIS Sunday specifically matters. If nothing specific is provided, skip this post entirely rather than writing something generic.
 
 RULES FOR ALL POSTS:
 - 2-4 sentences plus the details block.
 - Never open with "Join us this Sunday." Find a more interesting door in.
-- No em dashes. Use periods, commas, or line breaks instead.
+- NEVER use em dashes (—). Hard rule. Use periods, commas, or line breaks instead.
 - No stacked welcome clichés. One genuine sentiment beats three generic ones.
 - Don't use the word "energy." Find the specific thing you actually mean.
 - No guilt, no pressure, no "you should be here" framing. Invitation, not obligation.
@@ -118,7 +118,7 @@ export default async function handler(req: any, res: any) {
   const systemPrompt = [basePrompt, ctx, BRAND_VOICE_TAGS_BLOCK].filter(Boolean).join('\n\n')
 
   const lookingAheadSection = lookingAhead.trim()
-    ? `\n\nLOOKING AHEAD — UPCOMING EVENTS & CONTEXT (use for Post 4 if relevant):\n${lookingAhead}`
+    ? `\n\nLOOKING AHEAD: UPCOMING EVENTS & CONTEXT (use for Post 4 if relevant):\n${lookingAhead}`
     : ''
 
   const insightsSection = keyInsights.length
@@ -131,7 +131,7 @@ export default async function handler(req: any, res: any) {
     (deliverableIntel ? `\nChurch-specific guidance for this deliverable:\n${deliverableIntel}\n\n` : '') +
     (transcript
       ? `Sermon transcript:\n${transcript.slice(0, 6000)}`
-      : 'No transcript provided — write Posts 1 and 2 only.') +
+      : 'No transcript provided. Write Posts 1 and 2 only.') +
     lookingAheadSection +
     insightsSection +
     (userGuidance ? `\n\nAdditional guidance: "${userGuidance}"` : '')
