@@ -71,14 +71,6 @@ function ExternalLinkBtn({ href, label }: { href: string; label: string }) {
 }
 
 
-function Field({ label, value }: { label: string; value?: string | null }) {
-  return (
-    <div className="mb-3">
-      <p className="text-xs text-gray-400 mb-0.5">{label}</p>
-      {value ? <p className="text-sm text-[#341756]">{value}</p> : <p className="text-sm text-gray-300">—</p>}
-    </div>
-  )
-}
 
 function TaskRow({ task }: { task: CuTask }) {
   const statusColor: Record<string, string> = {
@@ -129,7 +121,7 @@ export default function SocialChurchPage() {
 
   // ── Social links edit state ──────────────────────────────────────────────
   const [editingLinks, setEditingLinks] = useState(false)
-  const [linkDraft, setLinkDraft] = useState({ instagram: '', facebook: '', youtube: '', branded_carousel_task: '', branded_carousel_dropbox_file: '', brand_guide_link: '', notion_dashboard: '' })
+  const [linkDraft, setLinkDraft] = useState({ instagram: '', facebook: '', youtube: '', branded_carousel_task: '', branded_carousel_dropbox_file: '', brand_guide_link: '', notion_dashboard: '', platforms: '', bible_translation: '', photos_link: '', church_website: '' })
   const [linkSaving, setLinkSaving] = useState(false)
 
   // ── Management fields edit state ─────────────────────────────────────────
@@ -339,6 +331,10 @@ export default function SocialChurchPage() {
       branded_carousel_dropbox_file: church?.branded_carousel_dropbox_file ?? '',
       brand_guide_link: brandGuideOnFile ?? '',
       notion_dashboard: church?.notion_dashboard ?? '',
+      platforms: church?.which_social_media_platforms_do_you_want_us_to_post_to_from_all ?? '',
+      bible_translation: church?.preferred_bible_translation || church?.bible_translation || '',
+      photos_link: church?.photos_link ?? '',
+      church_website: church?.church_website ?? '',
     })
     setEditingLinks(true)
   }
@@ -353,6 +349,10 @@ export default function SocialChurchPage() {
       branded_carousel_task: linkDraft.branded_carousel_task.trim() || null,
       branded_carousel_dropbox_file: linkDraft.branded_carousel_dropbox_file.trim() || null,
       notion_dashboard: linkDraft.notion_dashboard.trim() || null,
+      which_social_media_platforms_do_you_want_us_to_post_to_from_all: linkDraft.platforms.trim() || null,
+      preferred_bible_translation: linkDraft.bible_translation.trim() || null,
+      photos_link: linkDraft.photos_link.trim() || null,
+      church_website: linkDraft.church_website.trim() || null,
     }
     const [{ error }, brandErr] = await Promise.all([
       (supabase as any).from('strategy_account_progress').update(updates).eq('member', member),
@@ -361,7 +361,7 @@ export default function SocialChurchPage() {
         : Promise.resolve({ error: null }),
     ])
     if (!error && !brandErr?.error) {
-      setChurch(prev => prev ? { ...prev, ...updates } : prev)
+      setChurch(prev => prev ? { ...prev, ...updates, photos_link: updates.photos_link } : prev)
       if (linkDraft.brand_guide_link.trim()) setBrandGuideOnFile(linkDraft.brand_guide_link.trim())
       setEditingLinks(false)
     } else {
@@ -573,19 +573,48 @@ export default function SocialChurchPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
               {/* Left column */}
               <div>
-                <Field label="Platforms" value={platforms} />
-                <Field label="Bible Translation" value={bibleTranslation} />
+                <div className="mb-3">
+                  <p className="text-xs text-gray-400 mb-0.5">Platforms</p>
+                  {editingLinks ? (
+                    <input value={linkDraft.platforms} onChange={e => setLinkDraft(d => ({ ...d, platforms: e.target.value }))}
+                      placeholder="e.g. Instagram, Facebook"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#513DE5]" />
+                  ) : platforms ? (
+                    <p className="text-sm text-[#341756]">{platforms}</p>
+                  ) : <span className="text-sm text-gray-300">—</span>}
+                </div>
+
+                <div className="mb-3">
+                  <p className="text-xs text-gray-400 mb-0.5">Bible Translation</p>
+                  {editingLinks ? (
+                    <input value={linkDraft.bible_translation} onChange={e => setLinkDraft(d => ({ ...d, bible_translation: e.target.value }))}
+                      placeholder="e.g. NIV, ESV, NLT"
+                      className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#513DE5]" />
+                  ) : bibleTranslation ? (
+                    <p className="text-sm text-[#341756]">{bibleTranslation}</p>
+                  ) : <span className="text-sm text-gray-300">—</span>}
+                </div>
 
                 <div className="mb-3">
                   <p className="text-xs text-gray-400 mb-0.5">Photo Library</p>
-                  {church?.photos_link ? <ExternalLinkBtn href={church.photos_link} label="View Photo Library" /> : <span className="text-sm text-gray-300">—</span>}
+                  {editingLinks ? (
+                    <input value={linkDraft.photos_link} onChange={e => setLinkDraft(d => ({ ...d, photos_link: e.target.value }))}
+                      placeholder="https://..."
+                      className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#513DE5]" />
+                  ) : church?.photos_link ? (
+                    <ExternalLinkBtn href={church.photos_link} label="View Photo Library" />
+                  ) : <span className="text-sm text-gray-300">—</span>}
                 </div>
 
                 <div className="mb-3">
                   <p className="text-xs text-gray-400 mb-0.5">Website</p>
-                  {church?.church_website
-                    ? <ExternalLinkBtn href={church.church_website.startsWith('http') ? church.church_website : `https://${church.church_website}`} label={church.church_website.replace(/^https?:\/\//, '')} />
-                    : <span className="text-sm text-gray-300">—</span>}
+                  {editingLinks ? (
+                    <input value={linkDraft.church_website} onChange={e => setLinkDraft(d => ({ ...d, church_website: e.target.value }))}
+                      placeholder="https://..."
+                      className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#513DE5]" />
+                  ) : church?.church_website ? (
+                    <ExternalLinkBtn href={church.church_website.startsWith('http') ? church.church_website : `https://${church.church_website}`} label={church.church_website.replace(/^https?:\/\//, '')} />
+                  ) : <span className="text-sm text-gray-300">—</span>}
                 </div>
 
                 <div className="mb-3">
