@@ -85,13 +85,14 @@ interface SmartVideoPlayerProps {
   url:          string
   sourceType:   SourceType
   clipStart:    number
+  clipEnd:      number
   seekRef:      React.MutableRefObject<((t: number) => void) | null>
   onTimeUpdate: (t: number) => void
 }
 
 let _playerSeq = 0
 
-function SmartVideoPlayer({ url, sourceType, clipStart, seekRef, onTimeUpdate }: SmartVideoPlayerProps) {
+function SmartVideoPlayer({ url, sourceType, clipStart, clipEnd, seekRef, onTimeUpdate }: SmartVideoPlayerProps) {
   const type       = resolveType(url, sourceType)
   const playerIdRef = useRef(`yt-player-${++_playerSeq}`)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -137,15 +138,20 @@ function SmartVideoPlayer({ url, sourceType, clipStart, seekRef, onTimeUpdate }:
     }
   }, [type, seekRef])
 
-  // ── YouTube: poll getCurrentTime for highlighting + caption overlay ─────────
+  // ── YouTube: poll getCurrentTime for highlighting, caption overlay, clip end ─
   useEffect(() => {
     if (type !== 'youtube') return
     const id = setInterval(() => {
       const t = ytRef.current?.getCurrentTime?.()
-      if (typeof t === 'number') onTimeUpdate(t)
+      if (typeof t !== 'number') return
+      onTimeUpdate(t)
+      if (clipEnd > 0 && t >= clipEnd) {
+        ytRef.current?.pauseVideo?.()
+        ytRef.current?.seekTo?.(clipEnd, true)
+      }
     }, 250)
     return () => clearInterval(id)
-  }, [type, onTimeUpdate])
+  }, [type, clipEnd, onTimeUpdate])
 
   // ── Vimeo: wire seekRef ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -532,6 +538,7 @@ function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPan
                     url={videoUrl ?? ''}
                     sourceType={sourceType}
                     clipStart={clipStart}
+                    clipEnd={clipEnd}
                     seekRef={seekRef}
                     onTimeUpdate={setCurrentTime}
                   />
