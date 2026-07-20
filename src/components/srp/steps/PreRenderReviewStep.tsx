@@ -112,9 +112,8 @@ function SmartVideoPlayer({ url, sourceType, clipStart, seekRef, onTimeUpdate }:
         videoId,
         playerVars: { start: Math.floor(clipStart), autoplay: 0, rel: 0, modestbranding: 1 },
         events: {
-          onReady: (e: { target: { seekTo: (t: number, a: boolean) => void; pauseVideo: () => void } }) => {
-            e.target.seekTo(clipStart, true)
-            e.target.pauseVideo()
+          onReady: (e: { target: { cueVideoById: (opts: { videoId: string; startSeconds: number }) => void } }) => {
+            e.target.cueVideoById({ videoId, startSeconds: clipStart })
           },
         },
       })
