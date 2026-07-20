@@ -123,6 +123,7 @@ export default function SocialChurchPage() {
   const [editingLinks, setEditingLinks] = useState(false)
   const [linkDraft, setLinkDraft] = useState({ instagram: '', facebook: '', youtube: '', branded_carousel_task: '', branded_carousel_dropbox_file: '', brand_guide_link: '', notion_dashboard: '', platforms: '', bible_translation: '', photos_link: '', church_website: '' })
   const [linkSaving, setLinkSaving] = useState(false)
+  const [isAllIn, setIsAllIn] = useState(true) // false = Social Pro, saves to strategy_social_pro_profiles
 
   // ── Management fields edit state ─────────────────────────────────────────
   const [editingMgmt, setEditingMgmt] = useState(false)
@@ -189,16 +190,35 @@ export default function SocialChurchPage() {
               facebook  = facebook  ?? acct.facebook
             }
           }
+          setIsAllIn(true)
           setChurch({ ...(data as object), photos_link: photoUrl, instagram, facebook } as Church | null)
         } else {
           // Fallback — check strategy_social_pro_profiles for Social Pro churches
           const { data: proData } = await (supabase as any)
             .from('strategy_social_pro_profiles')
-            .select('member, church_name, css_rep, website')
+            .select('member, church_name, css_rep, website, instagram, facebook, youtube, photos_link, bible_translation, platforms, branded_carousel_task, branded_carousel_dropbox_file, notion_dashboard, sms_notes, social_coach')
             .eq('member', member)
             .maybeSingle()
           if (proData) {
-            setChurch({ member: proData.member, church_name: proData.church_name, css_rep: proData.css_rep } as Church)
+            setIsAllIn(false)
+            setChurch({
+              member: proData.member,
+              church_name: proData.church_name,
+              css_rep: proData.css_rep,
+              church_website: proData.website ?? null,
+              instagram: proData.instagram ?? null,
+              facebook: proData.facebook ?? null,
+              youtube: proData.youtube ?? null,
+              photos_link: proData.photos_link ?? null,
+              bible_translation: proData.bible_translation ?? null,
+              preferred_bible_translation: null,
+              which_social_media_platforms_do_you_want_us_to_post_to_from_all: proData.platforms ?? null,
+              branded_carousel_task: proData.branded_carousel_task ?? null,
+              branded_carousel_dropbox_file: proData.branded_carousel_dropbox_file ?? null,
+              notion_dashboard: proData.notion_dashboard ?? null,
+              sms_notes: proData.sms_notes ?? null,
+              social_coach: proData.social_coach ?? null,
+            } as Church)
           }
         }
         setChurchLoading(false)
@@ -354,8 +374,22 @@ export default function SocialChurchPage() {
       photos_link: linkDraft.photos_link.trim() || null,
       church_website: linkDraft.church_website.trim() || null,
     }
+    const proUpdates = isAllIn ? null : {
+      instagram: updates.instagram,
+      facebook: updates.facebook,
+      youtube: updates.youtube,
+      photos_link: updates.photos_link,
+      bible_translation: updates.preferred_bible_translation,
+      platforms: updates.which_social_media_platforms_do_you_want_us_to_post_to_from_all,
+      branded_carousel_task: updates.branded_carousel_task,
+      branded_carousel_dropbox_file: updates.branded_carousel_dropbox_file,
+      notion_dashboard: updates.notion_dashboard,
+      website: updates.church_website,
+    }
     const [{ error }, brandErr] = await Promise.all([
-      (supabase as any).from('strategy_account_progress').update(updates).eq('member', member),
+      isAllIn
+        ? (supabase as any).from('strategy_account_progress').update(updates).eq('member', member)
+        : (supabase as any).from('strategy_social_pro_profiles').update(proUpdates).eq('member', member),
       linkDraft.brand_guide_link.trim()
         ? (supabase as any).from('prf_brand_guides').upsert({ account: member, brand_guide_link: linkDraft.brand_guide_link.trim() }, { onConflict: 'account' })
         : Promise.resolve({ error: null }),
@@ -387,7 +421,10 @@ export default function SocialChurchPage() {
       css_rep:      mgmtDraft.css_rep.trim() || null,
       sms_notes:    mgmtDraft.sms_notes.trim() || null,
     }
-    const { error } = await (supabase as any).from('strategy_account_progress').update(updates).eq('member', member)
+    const { error } = await (supabase as any)
+      .from(isAllIn ? 'strategy_account_progress' : 'strategy_social_pro_profiles')
+      .update(updates)
+      .eq('member', member)
     if (!error) {
       setChurch(prev => prev ? { ...prev, ...updates } : prev)
       setEditingMgmt(false)
