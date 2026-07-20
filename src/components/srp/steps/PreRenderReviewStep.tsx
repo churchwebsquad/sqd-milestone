@@ -1,10 +1,15 @@
 /**
  * Pre-render review step — comes after all copy deliverables.
  *
- * For each selected clip: shows the sermon video seeked to the clip's start
- * time alongside a fully editable transcript segment list. Coach can:
- *   - Edit any segment's text
- *   - Edit any segment's start / end timestamp
+ * For each selected clip: side-by-side video player (left) and editable
+ * transcript segment list (right). The video uses the real YouTube IFrame
+ * Player API so seeks don't reload the iframe. Active segment is highlighted
+ * and shown as a caption overlay on the video.
+ *
+ * Coach can:
+ *   - Click a segment's timestamp to seek the video to that point
+ *   - Click segment text to edit it inline
+ *   - Edit start/end timestamps
  *   - Add new segments
  *   - Delete segments
  *
@@ -18,20 +23,7 @@ import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import type { SrpClipSelection } from '../../../types/database'
 
-// ── Smart video player ────────────────────────────────────────────────────────
-
-type SourceType = 'youtube' | 'dropbox' | 'vimeo' | 'google_drive' | 'direct' | 'unknown' | null
-
-function getYouTubeId(url: string): string | null {
-  // Handles: watch?v=, youtu.be/, embed/, live/, shorts/
-  const m = url.match(/(?:v=|youtu\.be\/|embed\/|live\/|shorts\/)([A-Za-z0-9_-]{11})/)
-  return m ? m[1] : null
-}
-
-function getVimeoId(url: string): string | null {
-  const m = url.match(/vimeo\.com\/(?:video\/)?(\d+)/)
-  return m ? m[1] : null
-}
+// ── YouTube IFrame API loader (singleton) ─────────────────────────────────────
 
 declare global {
   interface Window {
@@ -41,51 +33,140 @@ declare global {
   }
 }
 
-interface SmartVideoPlayerProps {
-  url:         string
-  sourceType:  SourceType
-  clipStart:   number
-  seekRef:     React.MutableRefObject<((t: number) => void) | null>
+let _ytLoading = false
+let _ytReady   = false
+const _ytCallbacks: (() => void)[] = []
+
+function loadYouTubeApi(): Promise<void> {
+  return new Promise(resolve => {
+    if (_ytReady) { resolve(); return }
+    _ytCallbacks.push(resolve)
+    if (!_ytLoading) {
+      _ytLoading = true
+      window.onYouTubeIframeAPIReady = () => {
+        _ytReady = true
+        _ytCallbacks.forEach(cb => cb())
+        _ytCallbacks.length = 0
+      }
+      const tag = document.createElement('script')
+      tag.src = 'https://www.youtube.com/iframe_api'
+      document.head.appendChild(tag)
+    }
+  })
 }
 
-function SmartVideoPlayer({ url, sourceType, clipStart, seekRef }: SmartVideoPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const iframeRef = useRef<HTMLIFrameElement>(null)
+// ── Source-type helpers ───────────────────────────────────────────────────────
 
-  // Resolve type — trust stored sourceType, fall back to URL sniffing
-  const type: SourceType = sourceType
-    ?? (/youtube\.com|youtu\.be/.test(url) ? 'youtube'
-      : /vimeo\.com/.test(url) ? 'vimeo'
-      : /\.(mp4|webm|mov|m4v|m3u8)(\?|$)/i.test(url) ? 'direct'
-      : 'unknown')
+type SourceType = 'youtube' | 'dropbox' | 'vimeo' | 'google_drive' | 'direct' | 'unknown' | null
 
-  // YouTube: track current seek position via state so changing it re-renders the iframe src
-  const [ytStart, setYtStart] = useState(Math.floor(clipStart))
-  const [ytAutoplay, setYtAutoplay] = useState(0)
+function getYouTubeId(url: string): string | null {
+  const m = url.match(/(?:v=|youtu\.be\/|embed\/|live\/|shorts\/)([A-Za-z0-9_-]{11})/)
+  return m ? m[1] : null
+}
 
-  // Wire up seekRef for each type
+function getVimeoId(url: string): string | null {
+  const m = url.match(/vimeo\.com\/(?:video\/)?(\d+)/)
+  return m ? m[1] : null
+}
+
+function resolveType(url: string, stored: SourceType): SourceType {
+  if (stored && stored !== 'unknown') return stored
+  if (/youtube\.com|youtu\.be/.test(url)) return 'youtube'
+  if (/vimeo\.com/.test(url))             return 'vimeo'
+  if (/dropbox\.com/.test(url))           return 'dropbox'
+  if (/drive\.google\.com/.test(url))     return 'google_drive'
+  if (/\.(mp4|webm|mov|m4v|m3u8)(\?|$)/i.test(url)) return 'direct'
+  return 'unknown'
+}
+
+// ── Smart video player ────────────────────────────────────────────────────────
+
+interface SmartVideoPlayerProps {
+  url:          string
+  sourceType:   SourceType
+  clipStart:    number
+  seekRef:      React.MutableRefObject<((t: number) => void) | null>
+  onTimeUpdate: (t: number) => void
+}
+
+let _playerSeq = 0
+
+function SmartVideoPlayer({ url, sourceType, clipStart, seekRef, onTimeUpdate }: SmartVideoPlayerProps) {
+  const type       = resolveType(url, sourceType)
+  const playerIdRef = useRef(`yt-player-${++_playerSeq}`)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ytRef      = useRef<any>(null)
+  const videoRef   = useRef<HTMLVideoElement>(null)
+  const iframeRef  = useRef<HTMLIFrameElement>(null)
+
+  // ── YouTube: create real YT.Player ─────────────────────────────────────────
   useEffect(() => {
-    if (type === 'youtube') {
-      seekRef.current = (t: number) => {
-        setYtStart(Math.floor(t))
-        setYtAutoplay(1)
-      }
-    } else if (type === 'vimeo') {
-      seekRef.current = (t: number) => {
-        iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ method: 'setCurrentTime', value: t }), '*')
-        iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ method: 'play' }), '*')
-      }
-    } else {
-      // direct / unknown
-      seekRef.current = (t: number) => {
-        if (!videoRef.current) return
-        videoRef.current.currentTime = t
-        videoRef.current.play().catch(() => {/* user gesture required */})
-      }
+    if (type !== 'youtube') return
+    const videoId = getYouTubeId(url)
+    if (!videoId) return
+
+    let destroyed = false
+    loadYouTubeApi().then(() => {
+      if (destroyed) return
+      ytRef.current = new window.YT.Player(playerIdRef.current, {
+        videoId,
+        playerVars: { start: Math.floor(clipStart), autoplay: 1, rel: 0, modestbranding: 1 },
+        events: {
+          onReady: (e: { target: { seekTo: (t: number, a: boolean) => void; playVideo: () => void } }) => {
+            e.target.seekTo(clipStart, true)
+            e.target.playVideo()
+          },
+        },
+      })
+    })
+
+    return () => {
+      destroyed = true
+      ytRef.current?.destroy?.()
+      ytRef.current = null
+    }
+  // Only recreate player when the video URL changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url])
+
+  // ── YouTube: wire seekRef ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (type !== 'youtube') return
+    seekRef.current = (t: number) => {
+      ytRef.current?.seekTo?.(t, true)
+      ytRef.current?.playVideo?.()
     }
   }, [type, seekRef])
 
-  // Seek direct video to clipStart on mount
+  // ── YouTube: poll getCurrentTime for highlighting + caption overlay ─────────
+  useEffect(() => {
+    if (type !== 'youtube') return
+    const id = setInterval(() => {
+      const t = ytRef.current?.getCurrentTime?.()
+      if (typeof t === 'number') onTimeUpdate(t)
+    }, 250)
+    return () => clearInterval(id)
+  }, [type, onTimeUpdate])
+
+  // ── Vimeo: wire seekRef ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (type !== 'vimeo') return
+    seekRef.current = (t: number) => {
+      iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ method: 'setCurrentTime', value: t }), '*')
+      iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ method: 'play' }), '*')
+    }
+  }, [type, seekRef])
+
+  // ── Direct/native video: wire seekRef + timeupdate ─────────────────────────
+  useEffect(() => {
+    if (type !== 'direct' && type !== 'unknown') return
+    seekRef.current = (t: number) => {
+      if (!videoRef.current) return
+      videoRef.current.currentTime = t
+      videoRef.current.play().catch(() => { /* needs user gesture */ })
+    }
+  }, [type, seekRef])
+
   useEffect(() => {
     if ((type === 'direct' || type === 'unknown') && videoRef.current && clipStart > 0) {
       videoRef.current.currentTime = clipStart
@@ -101,20 +182,8 @@ function SmartVideoPlayer({ url, sourceType, clipStart, seekRef }: SmartVideoPla
   }
 
   if (type === 'youtube') {
-    const videoId = getYouTubeId(url)
-    if (!videoId) return <p className="text-[12px] text-red-500">Could not parse YouTube URL</p>
-    // Changing src (via ytStart/ytAutoplay state) causes the iframe to reload at that timestamp
-    const ytSrc = `https://www.youtube.com/embed/${videoId}?start=${ytStart}&autoplay=${ytAutoplay}&rel=0`
-    return (
-      <iframe
-        ref={iframeRef}
-        key={ytSrc}
-        src={ytSrc}
-        className="w-full rounded-lg aspect-video bg-black"
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-        allowFullScreen
-      />
-    )
+    // The YT API replaces this div with the iframe
+    return <div id={playerIdRef.current} className="w-full aspect-video rounded-lg bg-black" />
   }
 
   if (type === 'vimeo') {
@@ -131,7 +200,6 @@ function SmartVideoPlayer({ url, sourceType, clipStart, seekRef }: SmartVideoPla
     )
   }
 
-  // Dropbox / Google Drive — can't embed, show a link to open externally
   if (type === 'dropbox' || type === 'google_drive') {
     return (
       <div className="aspect-video rounded-lg bg-[var(--color-lavender-tint)] flex flex-col items-center justify-center gap-3 p-4">
@@ -160,6 +228,7 @@ function SmartVideoPlayer({ url, sourceType, clipStart, seekRef }: SmartVideoPla
       controls
       playsInline
       className="w-full rounded-lg bg-black aspect-video"
+      onTimeUpdate={e => onTimeUpdate(e.currentTarget.currentTime)}
     />
   )
 }
@@ -167,7 +236,7 @@ function SmartVideoPlayer({ url, sourceType, clipStart, seekRef }: SmartVideoPla
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Segment {
-  id:    string   // local-only key for React
+  id:    string
   start: number
   end:   number
   text:  string
@@ -192,7 +261,6 @@ function toMMSS(secs: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-/** Parse a user-typed "M:SS" or "H:MM:SS" string into seconds. Returns NaN if invalid. */
 function parseMMSS(str: string): number {
   const parts = str.trim().split(':').map(Number)
   if (parts.some(isNaN)) return NaN
@@ -202,7 +270,6 @@ function parseMMSS(str: string): number {
   return NaN
 }
 
-/** Group flat word array into display segments for a clip's time range. */
 function buildSegmentsFromWords(
   words: { start: number; end: number; text: string }[],
   clipStart: number,
@@ -240,56 +307,82 @@ function buildSegmentsFromWords(
   return lines
 }
 
-
-// ── Single segment row ────────────────────────────────────────────────────────
+// ── Segment row ───────────────────────────────────────────────────────────────
 
 interface SegmentRowProps {
   idx:      number
   seg:      Segment
-  total:    number
+  isActive: boolean
   onSeek:   (t: number) => void
   onChange: (updated: Segment) => void
   onDelete: () => void
   onAdd:    () => void
 }
 
-function SegmentRow({ idx, seg, onSeek, onChange, onDelete, onAdd }: SegmentRowProps) {
+function SegmentRow({ idx, seg, isActive, onSeek, onChange, onDelete, onAdd }: SegmentRowProps) {
+  const [editing,   setEditing]   = useState(false)
   const [textDraft, setTextDraft] = useState(seg.text)
 
+  // Keep draft in sync if parent updates (e.g. re-derive from words)
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setTextDraft(seg.text) }, [seg.text])
+
   function commitText() {
+    setEditing(false)
     if (textDraft !== seg.text) onChange({ ...seg, text: textDraft })
   }
 
+  const activeClass = isActive
+    ? 'border-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)]'
+    : 'border-[var(--color-lavender)] bg-white hover:border-[var(--color-primary-purple)]/40'
+
   return (
-    <li className="group rounded-lg border border-[var(--color-lavender)] bg-white hover:border-[var(--color-primary-purple)]/50 transition-colors">
-      {/* Top row: index + timestamps + seek + actions */}
+    <li className={`group rounded-lg border transition-colors ${activeClass}`}>
+      {/* Top row: grip + index + timestamps (clickable) + actions */}
       <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
-        <GripVertical size={13} className="shrink-0 text-[var(--color-lavender)] group-hover:text-[var(--color-purple-gray)] transition-colors cursor-grab" />
+        <GripVertical size={13} className="shrink-0 text-[var(--color-lavender)] group-hover:text-[var(--color-purple-gray)] cursor-grab" />
         <span className="shrink-0 w-5 text-center text-[10px] font-bold text-[var(--color-purple-gray)]">
           {idx + 1}
         </span>
+
+        {/* Clickable timestamps — click to seek */}
         <div className="flex items-center gap-1.5 shrink-0">
-          <input
-            type="text"
-            value={toMMSS(seg.start)}
-            onChange={e => { const v = parseMMSS(e.target.value); if (!isNaN(v)) onChange({ ...seg, start: v }) }}
-            className="w-14 rounded border border-[var(--color-lavender)] bg-white px-2 py-1 text-[12px] font-mono text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)] text-center"
-          />
+          <button
+            type="button"
+            title="Seek to start"
+            onClick={() => onSeek(seg.start)}
+            className="font-mono text-[12px] text-[var(--color-primary-purple)] hover:underline focus:outline-none"
+          >
+            {toMMSS(seg.start)}
+          </button>
           <span className="text-[10px] text-[var(--color-purple-gray)]">→</span>
+          <button
+            type="button"
+            title="Seek to end"
+            onClick={() => onSeek(seg.end)}
+            className="font-mono text-[12px] text-[var(--color-primary-purple)] hover:underline focus:outline-none"
+          >
+            {toMMSS(seg.end)}
+          </button>
+        </div>
+
+        {/* Editable timestamp inputs — small, on hover */}
+        <div className="hidden group-focus-within:flex items-center gap-1 ml-1">
           <input
             type="text"
-            value={toMMSS(seg.end)}
-            onChange={e => { const v = parseMMSS(e.target.value); if (!isNaN(v)) onChange({ ...seg, end: v }) }}
-            className="w-14 rounded border border-[var(--color-lavender)] bg-white px-2 py-1 text-[12px] font-mono text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)] text-center"
+            defaultValue={toMMSS(seg.start)}
+            onBlur={e => { const v = parseMMSS(e.target.value); if (!isNaN(v)) onChange({ ...seg, start: v }) }}
+            className="w-12 rounded border border-[var(--color-lavender)] px-1.5 py-0.5 text-[11px] font-mono text-center text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)]"
+          />
+          <span className="text-[9px] text-[var(--color-purple-gray)]">→</span>
+          <input
+            type="text"
+            defaultValue={toMMSS(seg.end)}
+            onBlur={e => { const v = parseMMSS(e.target.value); if (!isNaN(v)) onChange({ ...seg, end: v }) }}
+            className="w-12 rounded border border-[var(--color-lavender)] px-1.5 py-0.5 text-[11px] font-mono text-center text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)]"
           />
         </div>
-        <button
-          type="button"
-          onClick={() => onSeek(seg.start)}
-          className="shrink-0 text-[10px] font-semibold text-[var(--color-primary-purple)] hover:underline whitespace-nowrap"
-        >
-          ▶ Seek
-        </button>
+
         <div className="ml-auto flex items-center gap-0.5 shrink-0">
           <button type="button" onClick={onDelete} title="Delete segment"
             className="p-1.5 rounded text-[var(--color-purple-gray)] hover:text-red-500 hover:bg-red-50 transition-colors">
@@ -301,16 +394,33 @@ function SegmentRow({ idx, seg, onSeek, onChange, onDelete, onAdd }: SegmentRowP
           </button>
         </div>
       </div>
-      {/* Text row — full width, no label clutter */}
+
+      {/* Text — click to edit */}
       <div className="px-3 pb-2.5">
-        <textarea
-          value={textDraft}
-          onChange={e => setTextDraft(e.target.value)}
-          onBlur={commitText}
-          rows={2}
-          placeholder="Transcript text…"
-          className="w-full rounded border border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] px-3 py-2 text-[13px] leading-snug text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] resize-none"
-        />
+        {editing ? (
+          <textarea
+            autoFocus
+            value={textDraft}
+            onChange={e => setTextDraft(e.target.value)}
+            onBlur={commitText}
+            onKeyDown={e => { if (e.key === 'Escape') { setTextDraft(seg.text); setEditing(false) } }}
+            rows={2}
+            className="w-full rounded border border-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)] px-3 py-2 text-[13px] leading-snug text-[var(--color-deep-plum)] focus:outline-none resize-none"
+          />
+        ) : (
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setEditing(true)}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setEditing(true) }}
+            className="cursor-text rounded border border-transparent hover:border-[var(--color-lavender)] px-3 py-2 text-[13px] leading-snug text-[var(--color-deep-plum)] transition-colors min-h-[40px]"
+          >
+            {textDraft
+              ? textDraft
+              : <span className="italic text-[var(--color-purple-gray)]">Click to edit…</span>
+            }
+          </div>
+        )}
       </div>
     </li>
   )
@@ -328,17 +438,14 @@ interface ClipPanelProps {
 }
 
 function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPanelProps) {
-  const [open, setOpen] = useState(true)
-  const seekRef         = useRef<((t: number) => void) | null>(null)
+  const [open, setOpen]           = useState(true)
+  const [currentTime, setCurrentTime] = useState(0)
+  const seekRef = useRef<((t: number) => void) | null>(null)
 
   const clipStart = useMemo(() => parseTime(clip.startTime), [clip.startTime])
   const clipEnd   = useMemo(() => parseTime(clip.endTime),   [clip.endTime])
   const duration  = clipEnd - clipStart
 
-  // Seed segments from saved data or derived words (lazy initializer runs once).
-  // Only use saved segments if at least some have non-empty text — otherwise the
-  // saved data is stale (written before the word-key bug was fixed) and we should
-  // re-derive from the raw word timestamps.
   const [segments, setSegs] = useState<Segment[]>(() => {
     const saved = clip.transcript_segments
     if (saved && saved.length > 0 && saved.some(s => s.text.trim().length > 0)) {
@@ -347,7 +454,6 @@ function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPan
     return buildSegmentsFromWords(words, clipStart, clipEnd)
   })
 
-  // Save segments back to the clip whenever they change.
   const saveSegments = useCallback((next: Segment[]) => {
     setSegs(next)
     onChange({
@@ -357,19 +463,15 @@ function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPan
   }, [clip, onChange])
 
   const seekTo = useCallback((t: number) => {
-    if (seekRef.current) {
-      seekRef.current(t)
-    }
+    seekRef.current?.(t)
   }, [])
 
   function updateSeg(i: number, updated: Segment) {
     saveSegments(segments.map((s, si) => si === i ? updated : s))
   }
-
   function deleteSeg(i: number) {
     saveSegments(segments.filter((_, si) => si !== i))
   }
-
   function addSegAfter(i: number) {
     const prev = segments[i]
     const next = segments[i + 1]
@@ -380,11 +482,14 @@ function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPan
     updated.splice(i + 1, 0, blank)
     saveSegments(updated)
   }
-
   function addSegAtStart() {
     const blank: Segment = { id: crypto.randomUUID(), start: clipStart, end: clipStart + 2, text: '' }
     saveSegments([blank, ...segments])
   }
+
+  // Active segment for highlighting + caption overlay
+  const activeSegIdx = segments.findIndex(s => currentTime >= s.start - 0.1 && currentTime <= s.end + 0.1)
+  const activeSeg    = activeSegIdx >= 0 ? segments[activeSegIdx] : null
 
   return (
     <div className="rounded-xl border border-[var(--color-lavender)] bg-white overflow-hidden">
@@ -416,67 +521,99 @@ function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPan
 
       {open && (
         <div className="border-t border-[var(--color-lavender)]">
-          {/* Video — sticky so it stays visible while scrolling segments */}
-          <div className="sticky top-0 z-10 bg-[var(--color-cream)] border-b border-[var(--color-lavender)] p-3">
-            <SmartVideoPlayer url={videoUrl ?? ''} sourceType={sourceType} clipStart={clipStart} seekRef={seekRef} />
-          </div>
+          {/* Side-by-side: video left, segments right */}
+          <div className="flex flex-col lg:flex-row">
 
-          {/* Segments — scrollable below the video */}
-          <div className="p-4 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
-                Transcript segments
-              </p>
-              <button
-                type="button"
-                onClick={addSegAtStart}
-                className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--color-primary-purple)] hover:underline"
-              >
-                <Plus size={12} /> Add segment
-              </button>
+            {/* ── Video column ─────────────────────────────────────────────── */}
+            <div className="lg:w-[42%] shrink-0 p-3 lg:border-r border-b lg:border-b-0 border-[var(--color-lavender)]">
+              <div className="sticky top-2">
+                {/* Video + caption overlay */}
+                <div className="relative rounded-lg overflow-hidden bg-black">
+                  <SmartVideoPlayer
+                    url={videoUrl ?? ''}
+                    sourceType={sourceType}
+                    clipStart={clipStart}
+                    seekRef={seekRef}
+                    onTimeUpdate={setCurrentTime}
+                  />
+                  {/* Caption overlay */}
+                  {activeSeg && activeSeg.text && (
+                    <div className="absolute bottom-6 left-0 right-0 flex justify-center px-4 pointer-events-none">
+                      <p className="bg-black/75 text-white text-[13px] font-medium px-3 py-1.5 rounded-lg text-center leading-snug max-w-[90%]">
+                        {activeSeg.text}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                {/* Current time indicator */}
+                <p className="mt-1.5 text-center text-[10px] text-[var(--color-purple-gray)] font-mono">
+                  {toMMSS(currentTime)}
+                  {activeSeg && (
+                    <span className="ml-2 text-[var(--color-primary-purple)]">
+                      — segment {activeSegIdx + 1}
+                    </span>
+                  )}
+                </p>
+              </div>
             </div>
 
-            {segments.length === 0 ? (
-              <div className="rounded-lg border-2 border-dashed border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] py-8 text-center space-y-2">
-                <p className="text-[12px] text-[var(--color-purple-gray)]">
-                  {clip.startTime
-                    ? 'No transcript segments found for this clip range.'
-                    : "This clip has no timestamps — segments can't be auto-derived."}
+            {/* ── Segments column ──────────────────────────────────────────── */}
+            <div className="flex-1 p-4 flex flex-col gap-3 overflow-y-auto max-h-[520px]">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
+                  Transcript segments
                 </p>
                 <button
                   type="button"
                   onClick={addSegAtStart}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--color-primary-purple)] text-white text-[11px] font-semibold hover:bg-[var(--color-deep-plum)] transition-colors"
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--color-primary-purple)] hover:underline"
                 >
-                  <Plus size={12} /> Add first segment manually
+                  <Plus size={12} /> Add segment
                 </button>
               </div>
-            ) : (
-              <ol className="space-y-2">
-                {segments.map((seg, i) => (
-                  <SegmentRow
-                    key={seg.id}
-                    idx={i}
-                    seg={seg}
-                    total={segments.length}
-                    onSeek={seekTo}
-                    onChange={updated => updateSeg(i, updated)}
-                    onDelete={() => deleteSeg(i)}
-                    onAdd={() => addSegAfter(i)}
-                  />
-                ))}
-              </ol>
-            )}
 
-            {segments.length > 0 && (
-              <button
-                type="button"
-                onClick={() => addSegAfter(segments.length - 1)}
-                className="inline-flex items-center gap-1.5 self-start text-[11px] font-semibold text-[var(--color-primary-purple)] hover:underline"
-              >
-                <Plus size={12} /> Add segment at end
-              </button>
-            )}
+              {segments.length === 0 ? (
+                <div className="rounded-lg border-2 border-dashed border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] py-8 text-center space-y-2">
+                  <p className="text-[12px] text-[var(--color-purple-gray)]">
+                    {clip.startTime
+                      ? 'No transcript segments found for this clip range.'
+                      : "This clip has no timestamps — segments can't be auto-derived."}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={addSegAtStart}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--color-primary-purple)] text-white text-[11px] font-semibold hover:bg-[var(--color-deep-plum)] transition-colors"
+                  >
+                    <Plus size={12} /> Add first segment manually
+                  </button>
+                </div>
+              ) : (
+                <ol className="space-y-2">
+                  {segments.map((seg, i) => (
+                    <SegmentRow
+                      key={seg.id}
+                      idx={i}
+                      seg={seg}
+                      isActive={i === activeSegIdx}
+                      onSeek={seekTo}
+                      onChange={updated => updateSeg(i, updated)}
+                      onDelete={() => deleteSeg(i)}
+                      onAdd={() => addSegAfter(i)}
+                    />
+                  ))}
+                </ol>
+              )}
+
+              {segments.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => addSegAfter(segments.length - 1)}
+                  className="inline-flex items-center gap-1.5 self-start text-[11px] font-semibold text-[var(--color-primary-purple)] hover:underline"
+                >
+                  <Plus size={12} /> Add segment at end
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -499,7 +636,6 @@ export function PreRenderReviewStep() {
     if (!Array.isArray(transcriptWords)) return []
     return (transcriptWords as unknown[]).map((w: unknown) => {
       const obj = w as Record<string, unknown>
-      // Transcription callback stores `word`; fall back to `text` for any alternate format
       const wordText = typeof obj.word === 'string' ? obj.word
         : typeof obj.text === 'string' ? obj.text
         : String(obj.word ?? obj.text ?? '')
@@ -525,7 +661,7 @@ export function PreRenderReviewStep() {
           Review &amp; edit clip transcripts
         </h2>
         <p className="text-[13px] text-[var(--color-purple-gray)] mt-1">
-          Verify each clip's timing in the video. Edit segment text and timestamps, add missing lines, or remove anything that shouldn't be captioned. These segments go straight to the video editor.
+          Click any timestamp to seek the video. Click segment text to edit it. The active segment highlights as the video plays and appears as a caption overlay.
         </p>
       </div>
 
