@@ -42,16 +42,15 @@ declare global {
 }
 
 interface SmartVideoPlayerProps {
-  url:        string
-  sourceType: SourceType
-  seekRef:    React.MutableRefObject<((t: number) => void) | null>
+  url:         string
+  sourceType:  SourceType
+  clipStart:   number
+  seekRef:     React.MutableRefObject<((t: number) => void) | null>
 }
 
-function SmartVideoPlayer({ url, sourceType, seekRef }: SmartVideoPlayerProps) {
-  const videoRef    = useRef<HTMLVideoElement>(null)
-  const iframeRef   = useRef<HTMLIFrameElement>(null)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ytPlayerRef = useRef<any>(null)
+function SmartVideoPlayer({ url, sourceType, clipStart, seekRef }: SmartVideoPlayerProps) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
 
   // Resolve type — trust stored sourceType, fall back to URL sniffing
   const type: SourceType = sourceType
@@ -60,58 +59,38 @@ function SmartVideoPlayer({ url, sourceType, seekRef }: SmartVideoPlayerProps) {
       : /\.(mp4|webm|mov|m4v|m3u8)(\?|$)/i.test(url) ? 'direct'
       : 'unknown')
 
-  // Wire direct-video seek
+  // YouTube: track current seek position via state so changing it re-renders the iframe src
+  const [ytStart, setYtStart] = useState(Math.floor(clipStart))
+  const [ytAutoplay, setYtAutoplay] = useState(0)
+
+  // Wire up seekRef for each type
   useEffect(() => {
-    if (type !== 'direct' && type !== 'unknown') return
-    seekRef.current = (t: number) => {
-      if (!videoRef.current) return
-      videoRef.current.currentTime = t
-      videoRef.current.play().catch(() => {/* blocked without user gesture */})
-    }
-  }, [type, seekRef])
-
-  // Wire YouTube seek via iframe API
-  useEffect(() => {
-    if (type !== 'youtube') return
-    const videoId = getYouTubeId(url)
-    if (!videoId) return
-
-    function initPlayer() {
-      if (!iframeRef.current) return
-      ytPlayerRef.current = new window.YT.Player(iframeRef.current, {
-        events: {
-          onReady: () => {
-            seekRef.current = (t: number) => {
-              ytPlayerRef.current?.seekTo(t, true)
-              ytPlayerRef.current?.playVideo()
-            }
-          },
-        },
-      })
-    }
-
-    if (window.YT?.Player) {
-      initPlayer()
-    } else {
-      if (!document.getElementById('yt-api-script')) {
-        const script   = document.createElement('script')
-        script.id      = 'yt-api-script'
-        script.src     = 'https://www.youtube.com/iframe_api'
-        document.head.appendChild(script)
+    if (type === 'youtube') {
+      seekRef.current = (t: number) => {
+        setYtStart(Math.floor(t))
+        setYtAutoplay(1)
       }
-      window.onYouTubeIframeAPIReady = initPlayer
-    }
-    return () => { ytPlayerRef.current = null }
-  }, [type, url, seekRef])
-
-  // Wire Vimeo seek via postMessage
-  useEffect(() => {
-    if (type !== 'vimeo') return
-    seekRef.current = (t: number) => {
-      iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ method: 'setCurrentTime', value: t }), '*')
-      iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ method: 'play' }), '*')
+    } else if (type === 'vimeo') {
+      seekRef.current = (t: number) => {
+        iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ method: 'setCurrentTime', value: t }), '*')
+        iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ method: 'play' }), '*')
+      }
+    } else {
+      // direct / unknown
+      seekRef.current = (t: number) => {
+        if (!videoRef.current) return
+        videoRef.current.currentTime = t
+        videoRef.current.play().catch(() => {/* user gesture required */})
+      }
     }
   }, [type, seekRef])
+
+  // Seek direct video to clipStart on mount
+  useEffect(() => {
+    if ((type === 'direct' || type === 'unknown') && videoRef.current && clipStart > 0) {
+      videoRef.current.currentTime = clipStart
+    }
+  }, [type, clipStart])
 
   if (!url) {
     return (
@@ -124,10 +103,13 @@ function SmartVideoPlayer({ url, sourceType, seekRef }: SmartVideoPlayerProps) {
   if (type === 'youtube') {
     const videoId = getYouTubeId(url)
     if (!videoId) return <p className="text-[12px] text-red-500">Could not parse YouTube URL</p>
+    // Changing src (via ytStart/ytAutoplay state) causes the iframe to reload at that timestamp
+    const ytSrc = `https://www.youtube.com/embed/${videoId}?start=${ytStart}&autoplay=${ytAutoplay}&rel=0`
     return (
       <iframe
         ref={iframeRef}
-        src={`https://www.youtube.com/embed/${videoId}?enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`}
+        key={ytSrc}
+        src={ytSrc}
         className="w-full rounded-lg aspect-video bg-black"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
         allowFullScreen
@@ -141,7 +123,7 @@ function SmartVideoPlayer({ url, sourceType, seekRef }: SmartVideoPlayerProps) {
     return (
       <iframe
         ref={iframeRef}
-        src={`https://player.vimeo.com/video/${videoId}?api=1`}
+        src={`https://player.vimeo.com/video/${videoId}?api=1#t=${Math.floor(clipStart)}s`}
         className="w-full rounded-lg aspect-video bg-black"
         allow="autoplay; fullscreen; picture-in-picture"
         allowFullScreen
@@ -165,7 +147,7 @@ function SmartVideoPlayer({ url, sourceType, seekRef }: SmartVideoPlayerProps) {
           Open video in new tab →
         </a>
         <p className="text-[10px] text-[var(--color-purple-gray)] text-center">
-          Note timestamps as you watch, then enter them in the segments on the right.
+          Note timestamps, then enter them in the segments on the right.
         </p>
       </div>
     )
@@ -500,7 +482,7 @@ function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPan
 
             {/* Left: video */}
             <div className="p-4 border-b lg:border-b-0 lg:border-r border-[var(--color-lavender)] bg-[var(--color-cream)] flex flex-col gap-2">
-              <SmartVideoPlayer url={videoUrl ?? ''} sourceType={sourceType} seekRef={seekRef} />
+              <SmartVideoPlayer url={videoUrl ?? ''} sourceType={sourceType} clipStart={clipStart} seekRef={seekRef} />
               {videoUrl && (
                 <p className="text-[10px] text-[var(--color-purple-gray)] text-center">
                   Click <strong>▶ Seek</strong> on a segment to jump to that moment
