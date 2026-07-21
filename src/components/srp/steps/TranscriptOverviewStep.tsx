@@ -36,7 +36,11 @@ interface OverviewResponse {
 
 function normalizeOverview(raw: unknown): Overview {
   const o = (raw ?? {}) as Record<string, unknown>
-  const toArr = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
+  const toArr = (v: unknown): unknown[] => {
+    if (Array.isArray(v)) return v
+    if (v && typeof v === 'object') return Object.values(v)
+    return []
+  }
   return {
     summary:       typeof o.summary === 'string' ? o.summary : '',
     mainPoints:    toArr(o.mainPoints) as string[],
