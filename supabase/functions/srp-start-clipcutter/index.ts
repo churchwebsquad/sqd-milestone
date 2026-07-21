@@ -137,10 +137,15 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    // Whitelist source_type. n8n must never receive "unknown" — omit it and
-    // let n8n detect, rather than sending a value it can't act on.
+    // Whitelist source_type for n8n — n8n must never receive "unknown".
+    // DB column is NOT NULL so we always store something; we just keep "unknown"
+    // out of the webhook payload.
     const validSourceTypes = ["youtube", "dropbox", "vimeo", "direct", "google_drive"];
-    const resolvedSourceType = validSourceTypes.includes(source_type) ? source_type : null;
+    // Prefer the validated URL-derived sourceType, then the caller-provided value.
+    const detectedType = (validation as { sourceType?: string }).sourceType ?? source_type;
+    const resolvedSourceType = validSourceTypes.includes(detectedType) ? detectedType : null;
+    // DB value — always a non-null string; n8n value — only valid types
+    const dbSourceType: string = resolvedSourceType ?? detectedType ?? "unknown";
 
     // Generate job_id
     const job_id = crypto.randomUUID();
@@ -189,7 +194,7 @@ serve(async (req) => {
         id: job_id,
         session_id,
         source_url,
-        source_type: resolvedSourceType,
+        source_type: dbSourceType,
         clips: storedClips,
         creative_direction: creative_direction || null,
         status: "pending",
