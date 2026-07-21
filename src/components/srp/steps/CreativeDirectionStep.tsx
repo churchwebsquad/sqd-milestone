@@ -9,6 +9,7 @@ import { DEFAULT_CAPTION_CFG, type CaptionStyleConfig } from '../../../lib/capti
 import { MusicPickerDialog } from './MusicPickerDialog'
 import { MUSIC_LIBRARY } from '../../../lib/musicLibrary'
 import { styleBySlug } from '../../../lib/captionStyles'
+import { useProcessedClips } from '../../../hooks/useProcessedClips'
 
 interface PerClipSettings {
   captionCfg:    CaptionStyleConfig
@@ -113,8 +114,11 @@ export function CreativeDirectionStep() {
     clipSelections,
     videoUrl, videoSourceType,
     visibleSteps,
+    sessionId,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
+
+  const { clips: processedClips } = useProcessedClips(sessionId)
 
   const stepNum = visibleSteps.indexOf('creativeDirection') + 1
 
@@ -225,32 +229,40 @@ export function CreativeDirectionStep() {
   return (
     <>
       {/* Global caption dialog */}
-      {captionDialogFor === 'global' && (
-        <CaptionStyleDialog
-          initial={globalCaptionCfg}
-          onApply={handleApplyGlobalCaption}
-          onClose={() => setCaptionDialogFor(null)}
-          videoUrl={videoUrl}
-          videoSourceType={videoSourceType}
-          clipStartSec={clipSelections[0] ? parseFloat(clipSelections[0].startTime ?? '0') || 0 : undefined}
-          clipEndSec={clipSelections[0] ? parseFloat(clipSelections[0].endTime ?? '0') || undefined : undefined}
-          clipText={clipSelections[0]?.caption_text ?? clipSelections[0]?.quote}
-        />
-      )}
+      {captionDialogFor === 'global' && (() => {
+        const firstClip   = clipSelections[0]
+        const firstClipId = firstClip?.clip_id ?? firstClip?.clip_name ?? ''
+        const pc          = processedClips[firstClipId]
+        const useRendered = pc?.status === 'ready' && !!pc.video_url
+        return (
+          <CaptionStyleDialog
+            initial={globalCaptionCfg}
+            onApply={handleApplyGlobalCaption}
+            onClose={() => setCaptionDialogFor(null)}
+            videoUrl={useRendered ? pc.video_url! : videoUrl}
+            videoSourceType={useRendered ? 'direct' : videoSourceType}
+            clipStartSec={useRendered ? 0 : (firstClip ? parseFloat(firstClip.startTime ?? '0') || 0 : undefined)}
+            clipEndSec={useRendered ? (pc.duration_ms ? pc.duration_ms / 1000 : undefined) : (firstClip ? parseFloat(firstClip.endTime ?? '0') || undefined : undefined)}
+            clipText={firstClip?.caption_text ?? firstClip?.quote}
+          />
+        )
+      })()}
 
       {/* Per-clip caption dialogs */}
       {captionDialogFor !== null && captionDialogFor !== 'global' && (() => {
         const idx = clipSelections.findIndex((c, i) => (c.clip_id ?? c.clip_name ?? String(i)) === captionDialogFor)
         const clip = idx >= 0 ? clipSelections[idx] : undefined
+        const pc   = processedClips[captionDialogFor]
+        const useRendered = pc?.status === 'ready' && !!pc.video_url
         return (
           <CaptionStyleDialog
             initial={perClip[captionDialogFor]?.captionCfg ?? DEFAULT_CAPTION_CFG}
             onApply={cfg => handleApplyClipCaption(captionDialogFor, cfg)}
             onClose={() => setCaptionDialogFor(null)}
-            videoUrl={videoUrl}
-            videoSourceType={videoSourceType}
-            clipStartSec={clip ? parseFloat(clip.startTime ?? '0') || 0 : undefined}
-            clipEndSec={clip ? parseFloat(clip.endTime ?? '0') || undefined : undefined}
+            videoUrl={useRendered ? pc.video_url! : videoUrl}
+            videoSourceType={useRendered ? 'direct' : videoSourceType}
+            clipStartSec={useRendered ? 0 : (clip ? parseFloat(clip.startTime ?? '0') || 0 : undefined)}
+            clipEndSec={useRendered ? (pc.duration_ms ? pc.duration_ms / 1000 : undefined) : (clip ? parseFloat(clip.endTime ?? '0') || undefined : undefined)}
             clipText={clip?.caption_text ?? clip?.quote}
           />
         )

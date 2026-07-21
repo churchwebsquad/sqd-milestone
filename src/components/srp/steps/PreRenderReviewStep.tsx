@@ -22,6 +22,7 @@ import { Film, Plus, Trash2, ChevronDown, ChevronRight, GripVertical, Image } fr
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import type { SrpClipSelection } from '../../../types/database'
+import { useProcessedClips } from '../../../hooks/useProcessedClips'
 
 // ── YouTube IFrame API loader (singleton) ─────────────────────────────────────
 
@@ -766,8 +767,11 @@ export function PreRenderReviewStep() {
     transcriptWords,
     videoUrl,
     videoSourceType,
+    sessionId,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
+
+  const { clips: processedClips } = useProcessedClips(sessionId)
 
   const words = useMemo(() => {
     if (!Array.isArray(transcriptWords)) return []
@@ -808,17 +812,22 @@ export function PreRenderReviewStep() {
         </div>
       ) : (
         <div className="space-y-4">
-          {clipSelections.map((clip, idx) => (
-            <ClipPanel
-              key={(clip as SrpClipSelection & { id?: string }).id ?? idx}
-              idx={idx}
-              clip={clip as SrpClipSelection}
-              words={words}
-              videoUrl={videoUrl}
-              sourceType={videoSourceType as SourceType}
-              onChange={updated => updateClip(idx, updated)}
-            />
-          ))}
+          {clipSelections.map((clip, idx) => {
+            const clipId = (clip as SrpClipSelection & { clip_id?: string }).clip_id ?? ''
+            const pc = clipId ? processedClips[clipId] : undefined
+            const useRendered = pc?.status === 'ready' && !!pc.video_url
+            return (
+              <ClipPanel
+                key={(clip as SrpClipSelection & { id?: string }).id ?? idx}
+                idx={idx}
+                clip={clip as SrpClipSelection}
+                words={words}
+                videoUrl={useRendered ? pc.video_url! : videoUrl}
+                sourceType={useRendered ? 'direct' : videoSourceType as SourceType}
+                onChange={updated => updateClip(idx, updated)}
+              />
+            )
+          })}
         </div>
       )}
 

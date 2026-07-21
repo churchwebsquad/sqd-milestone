@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import {
   ArrowLeft, ArrowRight, Loader2,
-  Check, Pin, PinOff, Play, Pencil, Plus, RefreshCw,
+  Check, Pin, PinOff, Play, Pencil, Plus, RefreshCw, Clapperboard, AlertCircle, CheckCircle2,
 } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
@@ -23,6 +23,7 @@ import { callSrpApi } from '../../../lib/srpApi'
 import { STEP_LABELS, STEP_DESCRIPTIONS } from '../../../lib/srpSessions'
 import { isSrpReelDeliverable, type SrpClipSelection } from '../../../types/database'
 import { buildAccountContext } from '../../../lib/accountContext'
+import { useProcessedClips } from '../../../hooks/useProcessedClips'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -231,21 +232,26 @@ function StickyVideoPlayer({
 
 // ── Clip card ─────────────────────────────────────────────────────────────────
 
+type RenderStatus = 'idle' | 'processing' | 'ready' | 'error'
+
 interface ClipCardProps {
-  clip:      SrpClipSelection & { [k: string]: any }
-  index:     number
-  isPicked:  boolean
-  isPinned:  boolean
-  onSelect:  () => void
-  onPlay:    () => void
-  onPin:     () => void
+  clip:          SrpClipSelection & { [k: string]: any }
+  index:         number
+  isPicked:      boolean
+  isPinned:      boolean
+  renderStatus:  RenderStatus
+  onSelect:      () => void
+  onPlay:        () => void
+  onPin:         () => void
+  onRender:      () => void
+  onResetRender: () => void
   transcriptWords: any[] | null | undefined
   onUpdateTimes: (startTime: string, endTime: string, quote: string) => void
 }
 
 function ClipCard({
   clip, index, isPicked, isPinned,
-  onSelect, onPlay, onPin,
+  renderStatus, onSelect, onPlay, onPin, onRender, onResetRender,
   transcriptWords, onUpdateTimes,
 }: ClipCardProps) {
   const [editing, setEditing]       = useState(false)
@@ -265,6 +271,7 @@ function ClipCard({
     const newQuote = sliceQuoteFromWords(transcriptWords, editStart, editEnd) || clip.quote || ''
     onUpdateTimes(editStart, editEnd, newQuote)
     setEditing(false)
+    if (renderStatus === 'ready') onResetRender()
   }
 
   return (
@@ -309,6 +316,21 @@ function ClipCard({
             )}
             {duration && (
               <span className="text-[10px] font-mono text-[var(--color-purple-gray)]">{duration}</span>
+            )}
+            {renderStatus === 'processing' && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)] rounded-full px-2 py-0.5">
+                <Loader2 size={9} className="animate-spin" /> Rendering…
+              </span>
+            )}
+            {renderStatus === 'ready' && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-green-700 bg-green-50 rounded-full px-2 py-0.5">
+                <CheckCircle2 size={9} /> Rendered
+              </span>
+            )}
+            {renderStatus === 'error' && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-600 bg-red-50 rounded-full px-2 py-0.5">
+                <AlertCircle size={9} /> Error
+              </span>
             )}
           </div>
           <p className="text-[12px] text-[var(--color-deep-plum)] leading-snug">
@@ -356,6 +378,42 @@ function ClipCard({
 
         {/* Action icons */}
         <div className="flex items-center gap-0.5 shrink-0">
+          {/* Render button */}
+          {renderStatus === 'idle' && (
+            <button
+              type="button"
+              onClick={onRender}
+              title="Cut this clip into an mp4 for creative direction"
+              className="p-1.5 rounded-lg text-[var(--color-primary-purple)] hover:bg-[var(--color-lavender-tint)] transition-colors"
+            >
+              <Clapperboard size={13} />
+            </button>
+          )}
+          {renderStatus === 'error' && (
+            <button
+              type="button"
+              onClick={onRender}
+              title="Retry render"
+              className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
+            >
+              <Clapperboard size={13} />
+            </button>
+          )}
+          {renderStatus === 'processing' && (
+            <span className="p-1.5">
+              <Loader2 size={13} className="animate-spin text-[var(--color-primary-purple)]" />
+            </span>
+          )}
+          {renderStatus === 'ready' && (
+            <button
+              type="button"
+              onClick={onRender}
+              title="Re-render clip"
+              className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 transition-colors"
+            >
+              <Clapperboard size={13} />
+            </button>
+          )}
           <button
             type="button"
             onClick={onPlay}
@@ -417,8 +475,11 @@ export function ClipSelectionStep() {
     visibleSteps,
     autoDrafts,
     intelProfile,
+    sessionId,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
+
+  const { clips: processedClips, upsertClip, deleteClip } = useProcessedClips(sessionId)
 
   // Seed from autoDrafts on first load if no suggestions yet
   useEffect(() => {
@@ -574,6 +635,31 @@ export function ClipSelectionStep() {
     ))
   }, [clipSuggestions, clipSelections, setClipSuggestions, setClipSelections])
 
+  // ── Render clip ──────────────────────────────────────────────────────────
+
+  const triggerRender = useCallback(async (clip: SrpClipSelection) => {
+    const clipId = (clip as any).clip_id
+    if (!clipId || !sessionId || !videoUrl) return
+    await upsertClip(clipId, { status: 'processing', error_message: null, video_url: null, clipcutter_job_id: null })
+    try {
+      const result = await callSrpApi<{ job_id: string }>('start-clipcutter', {
+        session_id:  sessionId,
+        source_url:  videoUrl,
+        source_type: videoSourceType || 'unknown',
+        clips: [{
+          clip_id:   clipId,
+          startTime: clip.startTime,
+          endTime:   clip.endTime,
+          quote:     clip.quote,
+        }],
+      })
+      await upsertClip(clipId, { clipcutter_job_id: result.job_id })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Render failed'
+      await upsertClip(clipId, { status: 'error', error_message: msg })
+    }
+  }, [sessionId, videoUrl, videoSourceType, upsertClip])
+
   // ── Manual entry ─────────────────────────────────────────────────────────
 
   const MIN_CLIP_SECONDS = 25
@@ -598,7 +684,6 @@ export function ClipSelectionStep() {
     setManualStart(''); setManualEnd(''); setShowManual(false)
   }, [manualStart, manualEnd, transcriptWords, clipSuggestions, setClipSuggestions])
 
-  const continueReady = clipSelections.length >= 1
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -706,6 +791,11 @@ export function ClipSelectionStep() {
           {clipSuggestions.map((c, i) => {
             const clipId = (c as any).clip_id ?? `suggestion-${i}`
             const cWithId = { ...c, clip_id: clipId }
+            const pc = processedClips[clipId]
+            const renderStatus: RenderStatus = pc?.status === 'ready' ? 'ready'
+              : pc?.status === 'processing' ? 'processing'
+              : pc?.status === 'error'      ? 'error'
+              : 'idle'
             return (
               <li key={clipId}>
                 <ClipCard
@@ -713,9 +803,12 @@ export function ClipSelectionStep() {
                   index={i}
                   isPicked={isPicked(c)}
                   isPinned={pinnedIds.has(clipId)}
+                  renderStatus={renderStatus}
                   onSelect={() => togglePick(cWithId)}
                   onPlay={() => c.startTime ? seekAndPlay(mmssToSeconds(c.startTime)) : undefined}
                   onPin={() => togglePin(clipId)}
+                  onRender={() => void triggerRender(cWithId)}
+                  onResetRender={() => void deleteClip(clipId)}
                   transcriptWords={transcriptWords}
                   onUpdateTimes={(st, et, q) => { updateClipTimes(i, st, et, q); seekAndPlay(mmssToSeconds(st)) }}
                 />
@@ -738,13 +831,10 @@ export function ClipSelectionStep() {
           Back
         </SrpButton>
         <SrpButton
-          disabled={!continueReady}
           onClick={goToNextStep}
           trailingIcon={<ArrowRight size={14} />}
         >
-          {continueReady
-            ? 'Continue'
-            : `Continue (${clipSelections.length}/${reelCount} picked)`}
+          Continue{clipSelections.length > 0 ? ` (${clipSelections.length} clip${clipSelections.length === 1 ? '' : 's'})` : ''}
         </SrpButton>
       </div>
     </div>

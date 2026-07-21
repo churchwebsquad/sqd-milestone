@@ -131,6 +131,41 @@ serve(async (req) => {
 
     console.log(`Updated clipcutter job ${job_id} to status: ${status}`);
 
+    // On completion, write result into processed_clips (per-clip render output table).
+    // Only applies when a single-clip render was triggered from the Render button in ClipSelectionStep.
+    if (status === "completed" && resolvedClips?.length > 0) {
+      const firstResult = resolvedClips[0];
+      if (firstResult?.video_url) {
+        const { error: pcError } = await supabase
+          .schema("srp_pipeline")
+          .from("processed_clips")
+          .update({
+            status: "ready",
+            video_url: firstResult.video_url,
+            transcript: firstResult.edited_transcript ?? firstResult.transcript ?? null,
+            duration_ms: firstResult.duration_ms ?? null,
+            error_message: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("clipcutter_job_id", job_id);
+        if (pcError) {
+          console.error("Failed to update processed_clips on completion:", pcError);
+        } else {
+          console.log(`Updated processed_clips for job ${job_id} to ready`);
+        }
+      }
+    } else if (status === "failed") {
+      await supabase
+        .schema("srp_pipeline")
+        .from("processed_clips")
+        .update({
+          status: "error",
+          error_message: error_message ?? "Render failed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("clipcutter_job_id", job_id);
+    }
+
     // On terminal statuses, update the parent session's clip_processing_status
     if ((status === "completed" || status === "failed") && job.session_id) {
       const { error: sessionError } = await supabase

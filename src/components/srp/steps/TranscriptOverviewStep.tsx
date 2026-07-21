@@ -34,6 +34,19 @@ interface OverviewResponse {
   overview: Overview
 }
 
+function normalizeOverview(raw: unknown): Overview {
+  const o = (raw ?? {}) as Record<string, unknown>
+  const toArr = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
+  return {
+    summary:       typeof o.summary === 'string' ? o.summary : '',
+    mainPoints:    toArr(o.mainPoints) as string[],
+    keyInsights:   toArr(o.keyInsights) as string[],
+    bibleVerses:   toArr(o.bibleVerses) as BibleVerse[],
+    worshipSongs:  toArr(o.worshipSongs) as WorshipSong[],
+    announcements: toArr(o.announcements) as Announcement[],
+  }
+}
+
 export function TranscriptOverviewStep() {
   const {
     transcript, sessionId,
@@ -44,7 +57,7 @@ export function TranscriptOverviewStep() {
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
-  const [overview,    setOverview]    = useState<Overview | null>(() => autoDrafts?.overview ?? null)
+  const [overview,    setOverview]    = useState<Overview | null>(() => autoDrafts?.overview ? normalizeOverview(autoDrafts.overview) : null)
   const [loading,     setLoading]     = useState(false)
   const [error,       setError]       = useState<string | null>(null)
 
@@ -64,8 +77,9 @@ export function TranscriptOverviewStep() {
         sermonTitle: (sermonSubmission as any)?.sermon_title ?? '',
         seriesName:  (sermonSubmission as any)?.series_name  ?? '',
       })
-      setOverview(r.overview)
-      setKeyInsights(r.overview.keyInsights ?? [])
+      const ov = normalizeOverview(r.overview)
+      setOverview(ov)
+      setKeyInsights(ov.keyInsights ?? [])
       // Persist to DB so navigating away and back doesn't re-trigger generation
       const merged = { ...(autoDrafts ?? {}), overview: r.overview }
       setAutoDrafts(merged)
@@ -84,9 +98,10 @@ export function TranscriptOverviewStep() {
   // When autoDrafts loads (async from DB), populate overview if not already set
   useEffect(() => {
     if (autoDrafts?.overview) {
-      setOverview(prev => prev ?? autoDrafts.overview)
-      if (autoDrafts.overview.keyInsights?.length) {
-        setKeyInsights(autoDrafts.overview.keyInsights)
+      const ov = normalizeOverview(autoDrafts.overview)
+      setOverview(prev => prev ?? ov)
+      if (ov.keyInsights?.length) {
+        setKeyInsights(ov.keyInsights)
       }
     }
   }, [autoDrafts, setKeyInsights])
