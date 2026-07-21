@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Film, Plus, Trash2, ChevronDown, ChevronRight, GripVertical } from 'lucide-react'
+import { Film, Plus, Trash2, ChevronDown, ChevronRight, GripVertical, Image } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import type { SrpClipSelection } from '../../../types/database'
@@ -241,10 +241,12 @@ function SmartVideoPlayer({ url, sourceType, clipStart, clipEnd, seekRef, onTime
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Segment {
-  id:    string
-  start: number
-  end:   number
-  text:  string
+  id:       string
+  start:    number
+  end:      number
+  text:     string
+  type?:    'text' | 'title_card'
+  imageUrl?: string
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -431,6 +433,102 @@ function SegmentRow({ idx, seg, isActive, onSeek, onChange, onDelete, onAdd }: S
   )
 }
 
+// ── Title card row ────────────────────────────────────────────────────────────
+
+interface TitleCardRowProps {
+  idx:      number
+  seg:      Segment
+  onSeek:   (t: number) => void
+  onChange: (updated: Segment) => void
+  onDelete: () => void
+  onAdd:    () => void
+}
+
+function TitleCardRow({ idx, seg, onSeek, onChange, onDelete, onAdd }: TitleCardRowProps) {
+  const [urlDraft, setUrlDraft] = useState(seg.imageUrl ?? '')
+
+  function commitUrl() {
+    if (urlDraft !== seg.imageUrl) onChange({ ...seg, imageUrl: urlDraft })
+  }
+
+  return (
+    <li className="group rounded-lg border-2 border-[var(--color-primary-purple)]/40 bg-[var(--color-lavender-tint)]">
+      <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
+        <GripVertical size={13} className="shrink-0 text-[var(--color-lavender)] cursor-grab" />
+        <span className="shrink-0 w-5 text-center text-[10px] font-bold text-[var(--color-purple-gray)]">
+          {idx + 1}
+        </span>
+
+        {/* Timestamp chips */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button type="button" title="Seek to start" onClick={() => onSeek(seg.start)}
+            className="font-mono text-[12px] text-[var(--color-primary-purple)] hover:underline focus:outline-none">
+            {toMMSS(seg.start)}
+          </button>
+          <span className="text-[10px] text-[var(--color-purple-gray)]">→</span>
+          <button type="button" title="Seek to end" onClick={() => onSeek(seg.end)}
+            className="font-mono text-[12px] text-[var(--color-primary-purple)] hover:underline focus:outline-none">
+            {toMMSS(seg.end)}
+          </button>
+        </div>
+
+        {/* Editable timestamps on focus */}
+        <div className="hidden group-focus-within:flex items-center gap-1 ml-1">
+          <input type="text" defaultValue={toMMSS(seg.start)}
+            onBlur={e => { const v = parseMMSS(e.target.value); if (!isNaN(v)) onChange({ ...seg, start: v }) }}
+            className="w-12 rounded border border-[var(--color-lavender)] px-1.5 py-0.5 text-[11px] font-mono text-center text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)]"
+          />
+          <span className="text-[9px] text-[var(--color-purple-gray)]">→</span>
+          <input type="text" defaultValue={toMMSS(seg.end)}
+            onBlur={e => { const v = parseMMSS(e.target.value); if (!isNaN(v)) onChange({ ...seg, end: v }) }}
+            className="w-12 rounded border border-[var(--color-lavender)] px-1.5 py-0.5 text-[11px] font-mono text-center text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)]"
+          />
+        </div>
+
+        <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--color-primary-purple)] text-white text-[10px] font-bold uppercase tracking-widest shrink-0">
+          <Image size={9} /> Title Card
+        </span>
+
+        <div className="ml-auto flex items-center gap-0.5 shrink-0">
+          <button type="button" onClick={onDelete} title="Delete title card"
+            className="p-1.5 rounded text-[var(--color-purple-gray)] hover:text-red-500 hover:bg-red-50 transition-colors">
+            <Trash2 size={12} />
+          </button>
+          <button type="button" onClick={onAdd} title="Add segment after"
+            className="p-1.5 rounded text-[var(--color-purple-gray)] hover:text-[var(--color-primary-purple)] hover:bg-white transition-colors">
+            <Plus size={12} />
+          </button>
+        </div>
+      </div>
+
+      {/* Image URL + preview */}
+      <div className="px-3 pb-3 flex gap-3 items-start">
+        <div className="flex-1">
+          <input
+            type="url"
+            value={urlDraft}
+            onChange={e => setUrlDraft(e.target.value)}
+            onBlur={commitUrl}
+            placeholder="Paste PNG URL (Dropbox, Wasabi, etc.)"
+            className="w-full rounded border border-[var(--color-lavender)] bg-white px-3 py-2 text-[12px] text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)]"
+          />
+          <p className="mt-1 text-[10px] text-[var(--color-purple-gray)]">
+            This PNG overlays the video at the timestamps above. Must be a direct public link.
+          </p>
+        </div>
+        {urlDraft && (
+          <img
+            src={urlDraft}
+            alt="Title card preview"
+            className="w-16 h-16 rounded object-contain border border-[var(--color-lavender)] bg-white shrink-0"
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+          />
+        )}
+      </div>
+    </li>
+  )
+}
+
 // ── Per-clip panel ────────────────────────────────────────────────────────────
 
 interface ClipPanelProps {
@@ -453,7 +551,7 @@ function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPan
 
   const [segments, setSegs] = useState<Segment[]>(() => {
     const saved = clip.transcript_segments
-    if (saved && saved.length > 0 && saved.some(s => s.text.trim().length > 0)) {
+    if (saved && saved.length > 0 && saved.some(s => s.text.trim().length > 0 || s.type === 'title_card')) {
       return saved.map(s => ({ ...s, id: crypto.randomUUID() }))
     }
     return buildSegmentsFromWords(words, clipStart, clipEnd)
@@ -463,7 +561,10 @@ function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPan
     setSegs(next)
     onChange({
       ...clip,
-      transcript_segments: next.map(({ start, end, text }) => ({ start, end, text })),
+      transcript_segments: next.map(({ start, end, text, type, imageUrl }) => ({
+        start, end, text,
+        ...(type === 'title_card' ? { type, imageUrl: imageUrl ?? '' } : {}),
+      })),
     })
   }, [clip, onChange])
 
@@ -490,6 +591,10 @@ function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPan
   function addSegAtStart() {
     const blank: Segment = { id: crypto.randomUUID(), start: clipStart, end: clipStart + 2, text: '' }
     saveSegments([blank, ...segments])
+  }
+  function addTitleCardAtStart() {
+    const card: Segment = { id: crypto.randomUUID(), start: clipStart, end: clipStart + 3, text: '', type: 'title_card', imageUrl: '' }
+    saveSegments([card, ...segments])
   }
 
   // Active segment for highlighting + caption overlay
@@ -542,8 +647,13 @@ function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPan
                     seekRef={seekRef}
                     onTimeUpdate={setCurrentTime}
                   />
-                  {/* Caption overlay */}
-                  {activeSeg && activeSeg.text && (
+                  {/* Caption / title card overlay */}
+                  {activeSeg && activeSeg.type === 'title_card' && activeSeg.imageUrl && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <img src={activeSeg.imageUrl} alt="Title card" className="max-w-full max-h-full object-contain" />
+                    </div>
+                  )}
+                  {activeSeg && activeSeg.type !== 'title_card' && activeSeg.text && (
                     <div className="absolute bottom-6 left-0 right-0 flex justify-center px-4 pointer-events-none">
                       <p className="bg-black/75 text-white text-[13px] font-medium px-3 py-1.5 rounded-lg text-center leading-snug max-w-[90%]">
                         {activeSeg.text}
@@ -569,13 +679,22 @@ function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPan
                 <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
                   Transcript segments
                 </p>
-                <button
-                  type="button"
-                  onClick={addSegAtStart}
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--color-primary-purple)] hover:underline"
-                >
-                  <Plus size={12} /> Add segment
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={addTitleCardAtStart}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--color-primary-purple)] hover:underline"
+                  >
+                    <Image size={12} /> Add title card
+                  </button>
+                  <button
+                    type="button"
+                    onClick={addSegAtStart}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--color-primary-purple)] hover:underline"
+                  >
+                    <Plus size={12} /> Add segment
+                  </button>
+                </div>
               </div>
 
               {segments.length === 0 ? (
@@ -596,16 +715,26 @@ function ClipPanel({ idx, clip, words, videoUrl, sourceType, onChange }: ClipPan
               ) : (
                 <ol className="space-y-2">
                   {segments.map((seg, i) => (
-                    <SegmentRow
-                      key={seg.id}
-                      idx={i}
-                      seg={seg}
-                      isActive={i === activeSegIdx}
-                      onSeek={seekTo}
-                      onChange={updated => updateSeg(i, updated)}
-                      onDelete={() => deleteSeg(i)}
-                      onAdd={() => addSegAfter(i)}
-                    />
+                    seg.type === 'title_card'
+                      ? <TitleCardRow
+                          key={seg.id}
+                          idx={i}
+                          seg={seg}
+                          onSeek={seekTo}
+                          onChange={updated => updateSeg(i, updated)}
+                          onDelete={() => deleteSeg(i)}
+                          onAdd={() => addSegAfter(i)}
+                        />
+                      : <SegmentRow
+                          key={seg.id}
+                          idx={i}
+                          seg={seg}
+                          isActive={i === activeSegIdx}
+                          onSeek={seekTo}
+                          onChange={updated => updateSeg(i, updated)}
+                          onDelete={() => deleteSeg(i)}
+                          onAdd={() => addSegAfter(i)}
+                        />
                   ))}
                 </ol>
               )}

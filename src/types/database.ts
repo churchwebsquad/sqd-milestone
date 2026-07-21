@@ -2578,7 +2578,7 @@ export interface SrpClipSelection {
   /** Coach-edited transcript segments for this clip. When present, these
    *  override the auto-derived word-level segments in Pre-render Review
    *  and are forwarded to the clipcutter as the caption source. */
-  transcript_segments?: { start: number; end: number; text: string }[]
+  transcript_segments?: { start: number; end: number; text: string; type?: 'text' | 'title_card'; imageUrl?: string }[]
   /** Instagram/Facebook caption for this reel's social post. */
   social_caption?: string | null
   /** True once the coach explicitly approves the caption. */
