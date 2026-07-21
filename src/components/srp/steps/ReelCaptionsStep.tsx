@@ -139,11 +139,11 @@ export function ReelCaptionsStep() {
           caption={clip.social_caption ?? ''}
           approved={clip.caption_approved === true}
           onCaptionChange={v => {
-            updateClipSocialCaption(clip.clip_id!, v || null)
-            if (clip.caption_approved) updateClipCaptionApproved(clip.clip_id!, false)
+            if (clip.clip_id) updateClipSocialCaption(clip.clip_id, v || null)
+            if (clip.clip_id && clip.caption_approved) updateClipCaptionApproved(clip.clip_id, false)
           }}
-          onApprove={() => updateClipCaptionApproved(clip.clip_id!, true)}
-          onUnapprove={() => updateClipCaptionApproved(clip.clip_id!, false)}
+          onApprove={() => { if (clip.clip_id) updateClipCaptionApproved(clip.clip_id, true) }}
+          onUnapprove={() => { if (clip.clip_id) updateClipCaptionApproved(clip.clip_id, false) }}
           guidance={reelGuidance[i] ?? ''}
           onGuidanceChange={v => setReelGuidance({ ...reelGuidance, [i]: v })}
           prevCaption={prevCaptions[i] ?? null}

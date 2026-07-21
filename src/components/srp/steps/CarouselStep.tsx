@@ -162,7 +162,7 @@ export function CarouselStep() {
         accountContext: buildAccountContext(account, sermonSubmission),
         userGuidance: refineInstruction,
       })
-      setEditedSlides(r.slides)
+      setEditedSlides(r.slides ?? [])
       setTags(r.brandVoiceTags ?? [])
       setRefineInstruction('')
     } catch (e) {
