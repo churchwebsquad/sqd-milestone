@@ -1,24 +1,25 @@
-import { useCallback, useState } from 'react'
-import { ArrowLeft, ArrowRight, Loader2, Save, Music2, Palette, Film, Link } from 'lucide-react'
+import { useCallback, useMemo, useState } from 'react'
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronUp, Film, Link, Loader2, Music2, Palette, Save } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import { callSrpApi } from '../../../lib/srpApi'
 import { STEP_LABELS, STEP_DESCRIPTIONS } from '../../../lib/srpSessions'
-import { CaptionStyleDialog, type CaptionStyleConfig } from './CaptionStyleDialog'
+import { CaptionStyleDialog } from './CaptionStyleDialog'
+import { DEFAULT_CAPTION_CFG, type CaptionStyleConfig } from '../../../lib/captionStyles'
 import { MusicPickerDialog } from './MusicPickerDialog'
 import { MUSIC_LIBRARY } from '../../../lib/musicLibrary'
+import { styleBySlug } from '../../../lib/captionStyles'
 
-const DEFAULT_CAPTION_CFG: CaptionStyleConfig = {
-  templateId:      'SRPA',
-  textColor:       '#ffffff',
-  highlightColor:  '#513DE5',
-  font:            '',
-  position:        'Bottom',
-  textCase:        'As typed',
-  sizePct:         100,
-  wordsPerSegment: 'Auto',
-  reverentCaps:    false,
-  deliver9x16:     false,
+interface PerClipSettings {
+  captionCfg:    CaptionStyleConfig
+  musicMode:     string
+  musicTrackId:  string
+}
+
+const DEFAULT_PER_CLIP: PerClipSettings = {
+  captionCfg:   DEFAULT_CAPTION_CFG,
+  musicMode:    'editor_choice',
+  musicTrackId: '',
 }
 
 const MUSIC_OPTIONS = [
@@ -34,10 +35,69 @@ const MUSIC_OPTIONS = [
   },
   {
     value:    'select',
-    label:    'Select Music (per clip)',
-    subtitle: 'Choose a track for each clip (or one default for all) — auto-mastered and baked in.',
+    label:    'Select Music',
+    subtitle: 'Choose a specific track — auto-mastered and baked in.',
   },
 ]
+
+/* ---------- helpers ---------- */
+
+function CaptionChip({ cfg }: { cfg: CaptionStyleConfig }) {
+  const meta = styleBySlug(cfg.captionSlug)
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      {meta && (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--color-lavender-tint)] text-[var(--color-primary-purple)] text-[11px] font-semibold">
+          {meta.label}
+        </span>
+      )}
+      {cfg.deliver9x16 && (
+        <span className="inline-flex px-2 py-0.5 rounded-full bg-[var(--color-lavender-tint)] text-[var(--color-primary-purple)] text-[10px] font-semibold uppercase tracking-widest">
+          9:16
+        </span>
+      )}
+    </div>
+  )
+}
+
+function MusicRadio({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <div className="space-y-2">
+      {MUSIC_OPTIONS.map(opt => {
+        const active = value === opt.value
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            className={[
+              'w-full rounded-xl border-2 px-4 py-3 text-left transition-colors',
+              active
+                ? 'border-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)]'
+                : 'border-[var(--color-lavender)] bg-white hover:border-[var(--color-primary-purple)]/50',
+            ].join(' ')}
+          >
+            <p className={[
+              'text-[13px] font-semibold',
+              active ? 'text-[var(--color-primary-purple)]' : 'text-[var(--color-deep-plum)]',
+            ].join(' ')}>
+              {opt.label}
+            </p>
+            <p className="text-[11px] text-[var(--color-purple-gray)] mt-0.5">{opt.subtitle}</p>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/* ---------- main component ---------- */
 
 export function CreativeDirectionStep() {
   const {
@@ -50,38 +110,93 @@ export function CreativeDirectionStep() {
     captionStyleConfig, setCaptionStyleConfig,
     deliver9x16, setDeliver9x16,
     outroUrl, setOutroUrl,
+    clipSelections,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
-  const [captionDialogOpen, setCaptionDialogOpen] = useState(false)
-  const [musicDialogOpen, setMusicDialogOpen] = useState(false)
-  const [saveAsDefault, setSaveAsDefault] = useState(false)
-  const [savingDefault, setSavingDefault] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [savedAt, setSavedAt] = useState<Date | null>(null)
-
   const stepNum = visibleSteps.indexOf('creativeDirection') + 1
 
-  const activeCaptionCfg: CaptionStyleConfig = {
+  // -- Global caption cfg (same-for-all mode) --
+  const globalCaptionCfg = useMemo<CaptionStyleConfig>(() => ({
     ...DEFAULT_CAPTION_CFG,
-    templateId:  srpTemplate || 'SRPA',
-    deliver9x16: deliver9x16,
     ...(captionStyleConfig as Partial<CaptionStyleConfig>),
-  }
+    deliver9x16,
+  }), [captionStyleConfig, deliver9x16])
 
-  const selectedTrack = selectedMusicTrackId
+  // -- Per-clip settings state --
+  const [perClip, setPerClip] = useState<Record<string, PerClipSettings>>(() => {
+    const byClip = (captionStyleConfig as { byClip?: Record<string, unknown> }).byClip ?? {}
+    const init: Record<string, PerClipSettings> = {}
+    for (const clip of clipSelections) {
+      const id = clip.clip_id ?? clip.clip_name ?? String(clipSelections.indexOf(clip))
+      const stored = byClip[id] as Partial<PerClipSettings> | undefined
+      init[id] = { ...DEFAULT_PER_CLIP, ...stored }
+    }
+    return init
+  })
+
+  // -- Dialog state --
+  const [captionDialogFor, setCaptionDialogFor] = useState<'global' | string | null>(null)
+  const [musicDialogFor,   setMusicDialogFor]   = useState<'global' | string | null>(null)
+  const [expandedClips,    setExpandedClips]     = useState<Set<string>>(new Set())
+
+  // -- Save-as-default --
+  const [saveAsDefault, setSaveAsDefault] = useState(false)
+  const [savingDefault, setSavingDefault] = useState(false)
+  const [saveError,     setSaveError]     = useState<string | null>(null)
+  const [savedAt,       setSavedAt]       = useState<Date | null>(null)
+
+  /* helpers */
+  const clipKey = (idx: number) =>
+    clipSelections[idx]?.clip_id ?? clipSelections[idx]?.clip_name ?? String(idx)
+
+  const toggleExpand = (id: string) =>
+    setExpandedClips(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) { next.delete(id) } else { next.add(id) }
+      return next
+    })
+
+  const updatePerClip = (id: string, patch: Partial<PerClipSettings>) =>
+    setPerClip(prev => ({ ...prev, [id]: { ...(prev[id] ?? DEFAULT_PER_CLIP), ...patch } }))
+
+  const selectedGlobalTrack = selectedMusicTrackId
     ? MUSIC_LIBRARY.find(t => t.id === selectedMusicTrackId)
     : null
 
-  const handleApplyCaptions = useCallback((cfg: CaptionStyleConfig) => {
-    setSrpTemplate(cfg.templateId)
+  /* apply global caption */
+  const handleApplyGlobalCaption = useCallback((cfg: CaptionStyleConfig) => {
+    setSrpTemplate(cfg.captionSlug)
     setDeliver9x16(cfg.deliver9x16)
-    setCaptionStyleConfig(cfg as unknown as Record<string, unknown>)
-    setCaptionDialogOpen(false)
+    setCaptionStyleConfig({ ...cfg } as unknown as Record<string, unknown>)
+    setCaptionDialogFor(null)
   }, [setSrpTemplate, setDeliver9x16, setCaptionStyleConfig])
 
+  /* apply per-clip caption */
+  const handleApplyClipCaption = useCallback((id: string, cfg: CaptionStyleConfig) => {
+    updatePerClip(id, { captionCfg: cfg })
+    setCaptionDialogFor(null)
+  }, [])
+
+  /* flush per-clip settings into context before navigating */
+  const flushPerClip = useCallback(() => {
+    const byClip: Record<string, unknown> = {}
+    for (const [id, s] of Object.entries(perClip)) {
+      byClip[id] = s
+    }
+    setCaptionStyleConfig({ ...globalCaptionCfg, byClip } as unknown as Record<string, unknown>)
+    const musicMap: Record<string, string> = {}
+    for (const [id, s] of Object.entries(perClip)) {
+      if (s.musicTrackId) musicMap[id] = s.musicTrackId
+    }
+    // setMusicByClip is not exposed directly; we encode via captionStyleConfig.byClip above
+    void musicMap
+  }, [perClip, globalCaptionCfg, setCaptionStyleConfig])
+
   const handleContinue = useCallback(async () => {
+    if (!sameCreativeForAll) flushPerClip()
+
     if (saveAsDefault && account?.member) {
       setSavingDefault(true)
       setSaveError(null)
@@ -103,22 +218,47 @@ export function CreativeDirectionStep() {
       }
     }
     goToNextStep()
-  }, [saveAsDefault, account?.member, srpTemplate, musicMode, designerNotes, goToNextStep])
+  }, [sameCreativeForAll, flushPerClip, saveAsDefault, account?.member, srpTemplate, musicMode, designerNotes, goToNextStep])
 
+  /* ---------- render ---------- */
   return (
     <>
-      {captionDialogOpen && (
+      {/* Global caption dialog */}
+      {captionDialogFor === 'global' && (
         <CaptionStyleDialog
-          initial={activeCaptionCfg}
-          onApply={handleApplyCaptions}
-          onClose={() => setCaptionDialogOpen(false)}
+          initial={globalCaptionCfg}
+          onApply={handleApplyGlobalCaption}
+          onClose={() => setCaptionDialogFor(null)}
         />
       )}
-      {musicDialogOpen && (
+
+      {/* Per-clip caption dialogs */}
+      {captionDialogFor !== null && captionDialogFor !== 'global' && (
+        <CaptionStyleDialog
+          initial={perClip[captionDialogFor]?.captionCfg ?? DEFAULT_CAPTION_CFG}
+          onApply={cfg => handleApplyClipCaption(captionDialogFor, cfg)}
+          onClose={() => setCaptionDialogFor(null)}
+        />
+      )}
+
+      {/* Global music dialog */}
+      {musicDialogFor === 'global' && (
         <MusicPickerDialog
           selectedTrackId={selectedMusicTrackId}
           onSelect={id => setSelectedMusicTrackId(id)}
-          onClose={() => setMusicDialogOpen(false)}
+          onClose={() => setMusicDialogFor(null)}
+        />
+      )}
+
+      {/* Per-clip music dialog */}
+      {musicDialogFor !== null && musicDialogFor !== 'global' && (
+        <MusicPickerDialog
+          selectedTrackId={perClip[musicDialogFor]?.musicTrackId ?? ''}
+          onSelect={id => {
+            updatePerClip(musicDialogFor, { musicTrackId: id })
+            setMusicDialogFor(null)
+          }}
+          onClose={() => setMusicDialogFor(null)}
         />
       )}
 
@@ -137,10 +277,10 @@ export function CreativeDirectionStep() {
             Per-clip creative direction
           </p>
           <p className="text-[13px] font-semibold text-[var(--color-deep-plum)] mb-4">
-            Apply same creative direction to all clips?
+            Apply the same creative direction to all clips?
           </p>
           <div className="flex gap-3">
-            {[true, false].map(val => (
+            {([true, false] as const).map(val => (
               <button
                 key={String(val)}
                 type="button"
@@ -158,93 +298,155 @@ export function CreativeDirectionStep() {
           </div>
         </section>
 
-        {/* 2. Caption Style */}
-        <section className="rounded-xl border border-[var(--color-lavender)] bg-white p-5 space-y-3">
-          <div className="flex items-center gap-2 mb-1">
-            <Palette size={15} className="text-[var(--color-primary-purple)]" />
-            <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
-              Caption Style
-            </p>
-          </div>
+        {/* ---- SAME FOR ALL MODE ---- */}
+        {sameCreativeForAll && (
+          <>
+            {/* Caption style */}
+            <section className="rounded-xl border border-[var(--color-lavender)] bg-white p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Palette size={15} className="text-[var(--color-primary-purple)]" />
+                <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">Caption Style</p>
+              </div>
+              {globalCaptionCfg.captionSlug && <CaptionChip cfg={globalCaptionCfg} />}
+              <SrpButton
+                variant="secondary"
+                leadingIcon={<Film size={14} />}
+                onClick={() => setCaptionDialogFor('global')}
+              >
+                Choose Caption Style
+              </SrpButton>
+            </section>
 
-          {srpTemplate && (
-            <div className="flex items-center gap-3 text-[12px] text-[var(--color-deep-plum)]">
-              <span className="font-semibold">
-                {srpTemplate.replace('SRP', 'Template ')}
-              </span>
-              {deliver9x16 && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--color-lavender-tint)] text-[var(--color-primary-purple)] text-[10px] font-semibold uppercase tracking-widest">
-                  9:16 reel
-                </span>
+            {/* Background music */}
+            <section className="rounded-xl border border-[var(--color-lavender)] bg-white p-5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Music2 size={15} className="text-[var(--color-primary-purple)]" />
+                <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">Background Music</p>
+              </div>
+              <MusicRadio value={musicMode} onChange={setMusicMode} />
+              {musicMode === 'select' && (
+                <div className="flex items-center gap-3 pt-1">
+                  <SrpButton
+                    variant="secondary"
+                    leadingIcon={<Music2 size={14} />}
+                    onClick={() => setMusicDialogFor('global')}
+                  >
+                    Choose Track
+                  </SrpButton>
+                  {selectedGlobalTrack && (
+                    <span className="text-[12px] text-[var(--color-deep-plum)]">
+                      <span className="font-semibold">{selectedGlobalTrack.name}</span>
+                      <span className="text-[var(--color-purple-gray)] ml-1">({selectedGlobalTrack.genre})</span>
+                    </span>
+                  )}
+                </div>
               )}
-            </div>
-          )}
+            </section>
+          </>
+        )}
 
-          <SrpButton
-            variant="secondary"
-            leadingIcon={<Film size={14} />}
-            onClick={() => setCaptionDialogOpen(true)}
-          >
-            Choose Caption Style
-          </SrpButton>
-        </section>
-
-        {/* 3. Music */}
-        <section className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Music2 size={15} className="text-[var(--color-primary-purple)]" />
+        {/* ---- PER-CLIP MODE ---- */}
+        {!sameCreativeForAll && clipSelections.length > 0 && (
+          <div className="space-y-3">
             <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
-              Background Music
+              Clip settings — configure each clip below
             </p>
-          </div>
+            {clipSelections.map((clip, idx) => {
+              const id       = clipKey(idx)
+              const settings = perClip[id] ?? DEFAULT_PER_CLIP
+              const expanded = expandedClips.has(id)
+              const captionMeta = styleBySlug(settings.captionCfg.captionSlug)
+              const musicTrack  = settings.musicTrackId
+                ? MUSIC_LIBRARY.find(t => t.id === settings.musicTrackId)
+                : null
 
-          <div className="space-y-2">
-            {MUSIC_OPTIONS.map(opt => {
-              const active = musicMode === opt.value
               return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setMusicMode(opt.value)}
-                  className={[
-                    'w-full rounded-xl border-2 px-4 py-3 text-left transition-colors',
-                    active
-                      ? 'border-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)]'
-                      : 'border-[var(--color-lavender)] bg-white hover:border-[var(--color-primary-purple)]/50',
-                  ].join(' ')}
+                <div
+                  key={id}
+                  className="rounded-xl border border-[var(--color-lavender)] bg-white overflow-hidden"
                 >
-                  <p className={[
-                    'text-[13px] font-semibold',
-                    active ? 'text-[var(--color-primary-purple)]' : 'text-[var(--color-deep-plum)]',
-                  ].join(' ')}>
-                    {opt.label}
-                  </p>
-                  <p className="text-[11px] text-[var(--color-purple-gray)] mt-0.5">{opt.subtitle}</p>
-                </button>
+                  {/* Clip header / collapse toggle */}
+                  <button
+                    type="button"
+                    onClick={() => toggleExpand(id)}
+                    className="w-full flex items-center justify-between px-5 py-4 text-left"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-semibold text-[var(--color-deep-plum)] truncate">
+                        Clip {idx + 1}{clip.clip_title ? ` — ${clip.clip_title}` : ''}
+                      </p>
+                      <div className="flex items-center gap-3 mt-1 flex-wrap">
+                        {captionMeta && (
+                          <span className="text-[11px] text-[var(--color-purple-gray)]">
+                            <span className="font-medium text-[var(--color-deep-plum)]">{captionMeta.label}</span>
+                          </span>
+                        )}
+                        {settings.musicMode !== 'editor_choice' && (
+                          <span className="text-[11px] text-[var(--color-purple-gray)]">
+                            {settings.musicMode === 'none' ? 'No music' : (musicTrack?.name ?? 'Track selected')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {expanded ? <ChevronUp size={16} className="text-[var(--color-purple-gray)] shrink-0" /> : <ChevronDown size={16} className="text-[var(--color-purple-gray)] shrink-0" />}
+                  </button>
+
+                  {/* Expanded body */}
+                  {expanded && (
+                    <div className="border-t border-[var(--color-lavender)] px-5 pb-5 pt-4 space-y-5">
+                      {/* Caption */}
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Palette size={13} className="text-[var(--color-primary-purple)]" />
+                          <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">Caption Style</p>
+                        </div>
+                        <CaptionChip cfg={settings.captionCfg} />
+                        <SrpButton
+                          variant="secondary"
+                          leadingIcon={<Film size={14} />}
+                          onClick={() => setCaptionDialogFor(id)}
+                        >
+                          Choose Caption Style
+                        </SrpButton>
+                      </div>
+
+                      {/* Music */}
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Music2 size={13} className="text-[var(--color-primary-purple)]" />
+                          <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">Background Music</p>
+                        </div>
+                        <MusicRadio
+                          value={settings.musicMode}
+                          onChange={v => updatePerClip(id, { musicMode: v })}
+                        />
+                        {settings.musicMode === 'select' && (
+                          <div className="flex items-center gap-3 pt-1">
+                            <SrpButton
+                              variant="secondary"
+                              leadingIcon={<Music2 size={14} />}
+                              onClick={() => setMusicDialogFor(id)}
+                            >
+                              Choose Track
+                            </SrpButton>
+                            {musicTrack && (
+                              <span className="text-[12px] text-[var(--color-deep-plum)]">
+                                <span className="font-semibold">{musicTrack.name}</span>
+                                <span className="text-[var(--color-purple-gray)] ml-1">({musicTrack.genre})</span>
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )
             })}
           </div>
+        )}
 
-          {musicMode === 'select' && (
-            <div className="flex items-center gap-3 pt-1">
-              <SrpButton
-                variant="secondary"
-                leadingIcon={<Music2 size={14} />}
-                onClick={() => setMusicDialogOpen(true)}
-              >
-                Choose Track
-              </SrpButton>
-              {selectedTrack && (
-                <span className="text-[12px] text-[var(--color-deep-plum)]">
-                  <span className="font-semibold">{selectedTrack.name}</span>
-                  <span className="text-[var(--color-purple-gray)] ml-1">({selectedTrack.genre})</span>
-                </span>
-              )}
-            </div>
-          )}
-        </section>
-
-        {/* 4. Outro video */}
+        {/* Outro video (always shown) */}
         <section className="rounded-xl border border-[var(--color-lavender)] bg-white p-5 space-y-2">
           <div className="flex items-center gap-2">
             <Link size={15} className="text-[var(--color-primary-purple)]" />
