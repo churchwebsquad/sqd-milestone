@@ -290,9 +290,9 @@ function ClipCard({
   const missingQuote = isPlaceholderQuote(clip.quote)
 
   const handleSaveEdit = () => {
-    // Priority: manually typed text > word-level slice > existing quote
+    // Priority: word-level slice (most accurate) > manually typed text > nothing
     const sliced = sliceQuoteFromWords(transcriptWords, editStart, editEnd)
-    const newQuote = editQuote.trim() || sliced || (isPlaceholderQuote(clip.quote) ? '' : clip.quote) || ''
+    const newQuote = sliced || editQuote.trim() || ''
     onUpdateTimes(editStart, editEnd, newQuote)
     setEditing(false)
     if (renderStatus === 'ready') onResetRender()
