@@ -38,9 +38,9 @@ Post 1 (Community angle): Write for the person on the fence. Name something real
 
 Post 2 (Momentum angle): Write for the person who needs a reason to show up this specific Sunday. Forward-leaning, confident, not hype-y. Do not reference the sermon.
 
-Post 3 (Sermon tease, only write this if a transcript or sermon details are provided): Find the tension in the sermon. The question people are already carrying. Tease it in one phrase and open a loop. Do not summarize. The person should finish reading and think "I want to know how that ends."
+Post 3 (What's coming this Sunday, only write this if "Looking Ahead" context includes a real upcoming topic, series, event, or reason to show up): Build the invite around why being there THIS coming Sunday specifically matters. A series launch, a baptism Sunday, a guest speaker, a new topic. Open a loop — make them curious about what they'll miss if they don't come. If no specific upcoming context is provided, skip this post entirely.
 
-Post 4 (What's coming, only write this if "Looking Ahead" context or a real upcoming event is provided that doesn't overlap with Posts 1-3): Build the invite around why being there THIS Sunday specifically matters. If nothing specific is provided, skip this post entirely rather than writing something generic.
+Post 4 (Extra angle, only write if you have enough genuinely distinct material and it won't feel like a repeat of Posts 1-3): A completely different door in — a question, a human moment, an observation. If the previous posts already cover the range well, skip this one.
 
 RULES FOR ALL POSTS:
 - 2-4 sentences plus the details block.
@@ -53,11 +53,14 @@ RULES FOR ALL POSTS:
 - Write for the person who's on the fence, not the person already coming.
 - Use emojis only if the voice guide does.
 
+CRITICAL — THESE ARE INVITES FOR NEXT SUNDAY. NEVER REFERENCE THIS PAST SUNDAY'S TEACHING:
+These posts go out to invite people to the COMING Sunday service. Next Sunday will be a completely different message, different text, different teaching. Never write anything like "last Sunday we talked about X," "this past weekend the message was Y," "continuing from Sunday's message," or any reference to what was taught. That's a different week entirely. These posts must stand completely on their own as invitations forward, not a recap of what people missed.
+
 SERMON TRANSCRIPT USE:
-The transcript is source material, not a quote mine. Read it to understand what the pastor actually cares about, what tension the sermon lives in, what it would feel like to be in that room. Write from that understanding. You don't need to quote it directly.
+The transcript is provided only to help you understand this church's culture, vocabulary, and spiritual temperature — not as content to reference. Read it to absorb their voice, what kinds of things they care about, how their pastor communicates. Do not reference the sermon, quote it, or tease it. These posts invite to next Sunday, not back to this Sunday.
 
 WHEN EXTRA CONTEXT IS PROVIDED:
-If a direction, theme, event detail, or specific request is included: use it specifically. Specific context always overrides your defaults.
+If a direction, theme, event detail, or specific request is included: use it specifically and completely. Specific context always overrides your defaults. Lean into exactly what is asked — do not dilute it with generic angles.
 
 DETAILS BLOCK:
 Every single post must end with a details block on its own line. No exceptions. Use these exact placeholders even if real values haven't been provided:
@@ -122,19 +125,22 @@ export default async function handler(req: any, res: any) {
     : ''
 
   const insightsSection = keyInsights.length
-    ? `\n\nKEY INSIGHTS FROM THIS SERMON (use for Post 3 sermon tease):\n${keyInsights.map((ins, i) => `${i + 1}. ${ins}`).join('\n')}`
+    ? `\n\nCHURCH VOICE CONTEXT (themes this church cares about — use to inform tone, not to reference as past content):\n${keyInsights.map((ins, i) => `${i + 1}. ${ins}`).join('\n')}`
+    : ''
+
+  const guidanceBlock = userGuidance.trim()
+    ? `\n\nDIRECTION FROM THE COACH — THIS OVERRIDES ALL OTHER DEFAULTS. Lean into exactly what is asked here. Build every post from this direction. Do not soften it or dilute it with generic angles:\n"${userGuidance}"\n`
     : ''
 
   const userPrompt =
-    `Write 2-4 Sunday invite posts following the angles in the system prompt.\n\n` +
-    `Only write Post 3 if sermon details are provided below. Only write Post 4 if "Looking Ahead" context provides a real upcoming event.\n\n` +
+    `Write 2-4 Sunday invite posts for NEXT Sunday's service. Do not reference what was taught this past Sunday.\n\n` +
+    guidanceBlock +
     (deliverableIntel ? `\nChurch-specific guidance for this deliverable:\n${deliverableIntel}\n\n` : '') +
-    (transcript
-      ? `Sermon transcript:\n${transcript.slice(0, 6000)}`
-      : 'No transcript provided. Write Posts 1 and 2 only.') +
     lookingAheadSection +
     insightsSection +
-    (userGuidance ? `\n\nAdditional guidance: "${userGuidance}"` : '')
+    (transcript
+      ? `\n\nChurch context (for voice and tone only — do NOT reference or tease this content, it is from a past service):\n${transcript.slice(0, 6000)}`
+      : '')
 
   try {
     const result = await callGateway<{ invites: any[] }>({

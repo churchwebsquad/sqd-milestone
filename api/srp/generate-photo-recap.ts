@@ -175,13 +175,17 @@ export default async function handler(req: any, res: any) {
     ? `\n\nWHAT HAPPENED THIS WEEKEND (use this as your primary source, this is the most important context):\n${lookingBack}`
     : ''
 
+  const guidanceBlock = userGuidance.trim()
+    ? `\n\nDIRECTION FROM THE COACH — THIS OVERRIDES ALL OTHER DEFAULTS. Lean into exactly what is asked here. Do not soften it, dilute it with other angles, or fall back to generic patterns:\n"${userGuidance}"\n`
+    : ''
+
   const userPrompt =
     `Generate 3-5 photo recap caption options for this weekend's service.\n` +
+    guidanceBlock +
     (deliverableIntel ? `\nChurch-specific guidance for this deliverable:\n${deliverableIntel}\n` : '') +
     lookingBackSection +
     insightsSection +
-    (transcript ? `\n\nSermon transcript (use for message context where relevant):\n${transcript.slice(0, 20000)}` : '') +
-    (userGuidance ? `\n\nAdditional guidance: "${userGuidance}"` : '')
+    (transcript ? `\n\nSermon transcript (use for message context where relevant):\n${transcript.slice(0, 20000)}` : '')
 
   try {
     const result = await callGateway<{ captions: any[] }>({
