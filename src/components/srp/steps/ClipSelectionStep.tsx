@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import {
   ArrowLeft, ArrowRight, Loader2,
-  Check, Pin, PinOff, Play, Pencil, Plus, RefreshCw, Clapperboard, AlertCircle, CheckCircle2,
+  Check, Pin, PinOff, Play, Pencil, Plus, RefreshCw, Clapperboard, AlertCircle, CheckCircle2, Copy,
 } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
@@ -805,66 +805,110 @@ export function ClipSelectionStep() {
         </div>
       )}
 
-      {/* Render tray — appears when a clip is active */}
-      {activeClipIndex !== null && (() => {
-        const activeClip   = clipSuggestions[activeClipIndex] as SrpClipSelection & { [k: string]: any }
-        if (!activeClip) return null
-        const activeClipId = activeClip.clip_id ?? `suggestion-${activeClipIndex}`
-        const pc           = processedClips[activeClipId]
-        const status: RenderStatus = pc?.status === 'ready' ? 'ready'
-          : pc?.status === 'processing' ? 'processing'
-          : pc?.status === 'error'      ? 'error'
-          : 'idle'
-        return (
-          <div className="sticky bottom-0 z-20 -mx-1 rounded-2xl border border-[var(--color-primary-purple)]/30 bg-[var(--color-deep-plum)] shadow-2xl px-4 py-3 flex items-center gap-4">
-            {/* Clip info */}
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-lavender)] mb-0.5">
-                Clip {activeClipIndex + 1}
-                {activeClip.startTime && activeClip.endTime && (
-                  <span className="ml-2 font-mono normal-case tracking-normal text-[var(--color-lavender)]/70">
-                    {activeClip.startTime} → {activeClip.endTime}
-                  </span>
-                )}
-              </p>
-              <p className="text-[12px] text-white/90 truncate leading-snug">
-                "{activeClip.quote}"
-              </p>
-              {status === 'ready' && (
-                <p className="text-[10px] text-green-400 mt-0.5 flex items-center gap-1">
-                  <CheckCircle2 size={10} /> Rendered — video ready for creative direction
-                </p>
-              )}
-              {status === 'error' && pc?.error_message && (
-                <p className="text-[10px] text-red-400 mt-0.5 flex items-center gap-1">
-                  <AlertCircle size={10} /> {pc.error_message}
-                </p>
-              )}
-            </div>
-
-            {/* Render button */}
-            {status === 'processing' ? (
-              <div className="shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 text-white text-[13px] font-semibold">
-                <Loader2 size={15} className="animate-spin" /> Rendering…
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => void triggerRender({ ...activeClip, clip_id: activeClipId })}
-                className={[
-                  'shrink-0 flex items-center gap-2 px-6 py-2.5 rounded-full text-[13px] font-bold transition-colors',
-                  status === 'ready'
-                    ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30'
-                    : 'bg-[var(--color-primary-purple)] text-white hover:bg-[var(--color-purple-mid)]',
-                ].join(' ')}
-              >
-                <Clapperboard size={15} />
-                {status === 'ready' ? 'Re-render' : status === 'error' ? 'Retry render' : 'Render clip'}
-              </button>
-            )}
+      {/* Render panel — shows once clips are selected */}
+      {clipSelections.length > 0 && (
+        <div className="rounded-2xl border border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] p-5 space-y-4">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.12em] font-bold text-[var(--color-primary-purple)] mb-1">
+              Ready to render
+            </p>
+            <h3 className="text-[16px] font-bold text-[var(--color-deep-plum)]">
+              And now, time to render your clips
+            </h3>
+            <p className="text-[12px] text-[var(--color-purple-gray)] mt-0.5">
+              Hit render on each clip below, then continue while they process in the background.
+            </p>
           </div>
-        )
-      })()}
+
+          <div className="space-y-3">
+            {clipSelections.map((clip, i) => {
+              const clipId = (clip as any).clip_id ?? `selection-${i}`
+              const pc = processedClips[clipId]
+              const status: RenderStatus = pc?.status === 'ready' ? 'ready'
+                : pc?.status === 'processing' ? 'processing'
+                : pc?.status === 'error'      ? 'error'
+                : 'idle'
+              return (
+                <div key={clipId} className="bg-white rounded-xl border border-[var(--color-lavender)] px-4 py-3 space-y-2">
+                  {/* Row 1: label + timestamps + render button */}
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-[13px] font-bold text-[var(--color-deep-plum)] shrink-0">
+                      Reel {i + 1}
+                    </span>
+                    <div className="flex items-center gap-2 flex-1 flex-wrap">
+                      {clip.startTime && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-[var(--color-purple-gray)]">Start:</span>
+                          <span className="text-[13px] font-mono font-bold text-[var(--color-deep-plum)]">{clip.startTime}</span>
+                          <button
+                            type="button"
+                            onClick={() => void navigator.clipboard.writeText(clip.startTime ?? '')}
+                            className="p-1 rounded text-[var(--color-purple-gray)] hover:text-[var(--color-primary-purple)] hover:bg-[var(--color-lavender-tint)] transition-colors"
+                            title="Copy start time"
+                          >
+                            <Copy size={11} />
+                          </button>
+                        </div>
+                      )}
+                      {clip.endTime && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-[var(--color-purple-gray)]">End:</span>
+                          <span className="text-[13px] font-mono font-bold text-[var(--color-deep-plum)]">{clip.endTime}</span>
+                          <button
+                            type="button"
+                            onClick={() => void navigator.clipboard.writeText(clip.endTime ?? '')}
+                            className="p-1 rounded text-[var(--color-purple-gray)] hover:text-[var(--color-primary-purple)] hover:bg-[var(--color-lavender-tint)] transition-colors"
+                            title="Copy end time"
+                          >
+                            <Copy size={11} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Render button */}
+                    {status === 'processing' ? (
+                      <div className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[var(--color-lavender)] text-[var(--color-deep-plum)] text-[12px] font-semibold">
+                        <Loader2 size={13} className="animate-spin" /> Rendering…
+                      </div>
+                    ) : status === 'ready' ? (
+                      <div className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-50 border border-green-200 text-green-700 text-[12px] font-semibold">
+                        <CheckCircle2 size={13} /> Rendered
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void triggerRender({ ...clip, clip_id: clipId })}
+                        className={[
+                          'shrink-0 inline-flex items-center gap-2 px-5 py-2 rounded-full text-[12px] font-bold transition-colors',
+                          status === 'error'
+                            ? 'bg-red-50 border border-red-200 text-red-600 hover:bg-red-100'
+                            : 'bg-[var(--color-primary-purple)] text-white hover:bg-[var(--color-purple-mid)]',
+                        ].join(' ')}
+                      >
+                        <Clapperboard size={13} />
+                        {status === 'error' ? 'Retry' : 'Render'}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Row 2: quote + error */}
+                  {clip.quote && (
+                    <p className="text-[11px] text-[var(--color-purple-gray)] leading-snug line-clamp-1">
+                      "{clip.quote}"
+                    </p>
+                  )}
+                  {status === 'error' && pc?.error_message && (
+                    <p className="text-[10px] text-red-500 flex items-center gap-1">
+                      <AlertCircle size={10} /> {pc.error_message}
+                    </p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Nav */}
       <div className="flex items-center justify-between gap-3 pt-2">
