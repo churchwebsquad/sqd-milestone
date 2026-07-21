@@ -1,0 +1,235 @@
+/* ============================================================
+   CHURCH MEDIA SQUAD — Colors & Type
+   Source of truth for the Squarespace site + brand
+   ============================================================ */
+
+/* ---------- FONT FACES --------------------------------------
+   Heading family: Albra (serif-ish geometric) — brand-owned, italic is signature.
+   Secondary / UI: Albra Grotesk (sans companion) — brand-owned.
+   Body on the live site uses 'arponasans' (Adobe Fonts) which
+   we don't have a license/file for. We substitute Albra Grotesk
+   Regular for body — it keeps the brand family intact. FLAGGED.
+   'normalidad-extended' (UI pills / all-caps) also missing; we
+   substitute Albra Grotesk Bold with +letter-spacing. FLAGGED.
+   -------------------------------------------------------------*/
+
+@font-face { font-family: "Albra"; font-style: normal; font-weight: 300; src: url("fonts/Albra-Light.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra"; font-style: normal; font-weight: 400; src: url("fonts/Albra-Regular.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra"; font-style: normal; font-weight: 500; src: url("fonts/Albra-Medium.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra"; font-style: normal; font-weight: 600; src: url("fonts/Albra-Semi.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra"; font-style: normal; font-weight: 700; src: url("fonts/Albra-Bold.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra"; font-style: normal; font-weight: 900; src: url("fonts/Albra-Black.otf") format("opentype"); font-display: swap; }
+
+@font-face { font-family: "Albra Grotesk"; font-style: normal; font-weight: 300; src: url("fonts/AlbraGrotesk-Light.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra Grotesk"; font-style: italic; font-weight: 300; src: url("fonts/AlbraGrotesk-LightItalic.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra Grotesk"; font-style: normal; font-weight: 400; src: url("fonts/AlbraGrotesk-Regular.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra Grotesk"; font-style: italic; font-weight: 400; src: url("fonts/AlbraGrotesk-RegularItalic.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra Grotesk"; font-style: normal; font-weight: 500; src: url("fonts/AlbraGrotesk-Medium.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra Grotesk"; font-style: italic; font-weight: 500; src: url("fonts/AlbraGrotesk-MediumItalic.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra Grotesk"; font-style: normal; font-weight: 600; src: url("fonts/AlbraGrotesk-Semi.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra Grotesk"; font-style: italic; font-weight: 600; src: url("fonts/AlbraGrotesk-SemiItalic.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra Grotesk"; font-style: normal; font-weight: 700; src: url("fonts/AlbraGrotesk-Bold.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra Grotesk"; font-style: italic; font-weight: 700; src: url("fonts/AlbraGrotesk-BoldItalic.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra Grotesk"; font-style: normal; font-weight: 900; src: url("fonts/AlbraGrotesk-Black.otf") format("opentype"); font-display: swap; }
+@font-face { font-family: "Albra Grotesk"; font-style: italic; font-weight: 900; src: url("fonts/AlbraGrotesk-BlackItalic.otf") format("opentype"); font-display: swap; }
+
+:root {
+  /* ---------- COLOR TOKENS (brand) ---------- */
+  --cms-darkest:  #341756;   /* deep purple — headings, borders, dark text */
+  --cms-dark:     #513DE5;   /* brand purple — primary buttons, links, logo */
+  --cms-medium:   #9992CE;   /* muted lavender — secondary badges, metadata */
+  --cms-light:    #CFC9F8;   /* pale lavender — card backgrounds, pills */
+  --cms-coral:    #FBA09C;   /* coral/pink — accent pop, hover states */
+  --cms-cream:    #F9F5F1;   /* warm off-white — page / card neutral */
+  --cms-white:    #FFFFFF;
+
+  /* Extended hero gradient anchors (from top-tier pricing card) */
+  --cms-hero-red:    #F9635D;
+  --cms-hero-magenta:#CC4291;
+
+  /* ---------- SEMANTIC TOKENS ---------- */
+  --fg-1: var(--cms-darkest);        /* primary text */
+  --fg-2: #5a4a7a;                   /* secondary text (darkest @ 70% feel) */
+  --fg-3: var(--cms-medium);         /* tertiary / metadata */
+  --fg-on-dark: var(--cms-white);
+  --fg-link: var(--cms-dark);
+  --fg-accent: var(--cms-coral);
+
+  --bg-1: var(--cms-cream);          /* page background */
+  --bg-2: var(--cms-white);          /* cards, elevated surfaces */
+  --bg-3: var(--cms-light);          /* soft card / pill */
+  --bg-dark: var(--cms-darkest);     /* inverse surface */
+  --bg-brand: var(--cms-dark);       /* brand fill */
+
+  --border-1: var(--cms-light);
+  --border-2: var(--cms-medium);
+  --border-strong: var(--cms-darkest);
+
+  /* ---------- GRADIENTS (signature) ---------- */
+  --grad-announcement: linear-gradient(99deg, #FBA09C, #CFC9F8, #9992CE);
+  --grad-hero:         linear-gradient(to right, #F9635D, #CC4291, #513DE5);
+  --grad-soft:         linear-gradient(135deg, #FBA09C 0%, #CFC9F8 100%);
+
+  /* ---------- RADII ---------- */
+  --radius-xs:   10px;   /* nav dropdowns, lightbox */
+  --radius-md:   20px;   /* cards, sections, images (SIGNATURE) */
+  --radius-lg:   30px;   /* summary read-more links */
+  --radius-xl:   50px;
+  --radius-pill: 999px;  /* buttons, pills, nav wrapper */
+
+  /* ---------- SHADOWS ---------- */
+  /* Signature: offset solid purple drop — no blur */
+  --shadow-nav:    5px 5px 0 var(--cms-darkest);
+  --shadow-nav-sm: 3px 3px 0 var(--cms-darkest);
+  /* Softer hover lift */
+  --shadow-hover:  0px 8px 20px rgba(81, 61, 229, 0.10);
+  --shadow-card:   0px 4px 12px rgba(52, 23, 86, 0.06);
+
+  /* ---------- SPACING (8px rhythm, tuned up for airy marketing pages) ---------- */
+  --space-0:  0;
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  24px;
+  --space-6:  32px;
+  --space-7:  48px;
+  --space-8:  64px;
+  --space-9:  96px;
+  --space-10: 128px;
+
+  /* ---------- MOTION ---------- */
+  --ease-standard: cubic-bezier(.4, 0, .2, 1);
+  --ease-out:      cubic-bezier(.16, 1, .3, 1);
+  --dur-fast:   150ms;
+  --dur-base:   300ms;
+  --dur-slow:   500ms;  /* SIGNATURE — all buttons/hovers */
+  --dur-loop-gradient: 10s;  /* gradient animation loops */
+
+  /* ---------- TYPE FAMILIES ---------- */
+  --font-heading:        "Albra", Georgia, "Times New Roman", serif;
+  --font-heading-italic: "Albra", Georgia, serif; /* use font-style: italic */
+  --font-body:           "Albra Grotesk", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  --font-ui:             "Albra Grotesk", ui-sans-serif, system-ui, sans-serif; /* uppercase + tracked */
+  --font-mono:           ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* ---------- TYPE SCALE ---------- */
+  --fs-display: clamp(3rem, 7vw, 6rem);     /* 48–96px */
+  --fs-h1:      clamp(2.25rem, 4.5vw, 3.75rem); /* 36–60px */
+  --fs-h2:      clamp(1.75rem, 3vw, 2.75rem);
+  --fs-h3:      clamp(1.375rem, 2vw, 1.875rem);
+  --fs-h4:      1.25rem;
+  --fs-lg:      1.125rem;
+  --fs-base:    1rem;         /* 16px */
+  --fs-sm:      0.875rem;
+  --fs-xs:      0.75rem;
+  --fs-ui:      0.8rem;       /* button/pill default */
+
+  --lh-tight:  1.1;
+  --lh-heading:1.2;          /* site standard */
+  --lh-body:   1.5;          /* site standard */
+
+  --ls-heading: 0;
+  --ls-body:    0.02em;
+  --ls-ui:      0.1em;       /* uppercase pills/buttons */
+}
+
+/* ---------- SEMANTIC ELEMENT STYLES ---------- */
+/* Opinionated defaults — include via `.cms-prose` scope to avoid leaking. */
+
+.cms-prose {
+  color: var(--fg-1);
+  background: var(--bg-1);
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
+  line-height: var(--lh-body);
+  letter-spacing: var(--ls-body);
+}
+
+.cms-prose h1, .cms-h1 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: var(--fs-h1);
+  line-height: var(--lh-heading);
+  letter-spacing: var(--ls-heading);
+  color: var(--fg-1);
+  margin: 0 0 var(--space-5);
+}
+.cms-prose h2, .cms-h2 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: var(--fs-h2);
+  line-height: var(--lh-heading);
+  color: var(--fg-1);
+  margin: 0 0 var(--space-5);
+}
+.cms-prose h3, .cms-h3 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: var(--fs-h3);
+  line-height: var(--lh-heading);
+  color: var(--fg-1);
+  margin: 0 0 var(--space-4);
+}
+.cms-prose h4, .cms-h4 {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: var(--fs-h4);
+  line-height: var(--lh-heading);
+  color: var(--fg-1);
+  margin: 0 0 var(--space-3);
+}
+
+/* SIGNATURE: italicized emphasis inside headings — coral shift */
+.cms-prose h1 em, .cms-prose h2 em, .cms-prose h3 em,
+.cms-h1 em, .cms-h2 em, .cms-h3 em {
+  font-style: italic;
+  font-weight: 500;
+  color: var(--cms-coral);
+}
+
+.cms-prose p, .cms-p {
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
+  line-height: var(--lh-body);
+  letter-spacing: var(--ls-body);
+  color: var(--fg-1);
+  margin: 0 0 var(--space-4);
+  text-wrap: pretty;
+}
+
+.cms-prose a, .cms-link {
+  color: var(--fg-link);
+  text-decoration: none;
+  transition: color var(--dur-slow) var(--ease-standard);
+}
+.cms-prose a:hover, .cms-link:hover { color: var(--fg-accent); }
+
+.cms-prose blockquote, .cms-blockquote {
+  background: var(--cms-cream);
+  border-left: 4px solid var(--cms-coral);
+  color: var(--cms-darkest);
+  padding: var(--space-5) var(--space-6);
+  border-radius: var(--radius-md);
+  font-style: italic;
+  margin: var(--space-5) 0;
+}
+
+.cms-prose code, .cms-code {
+  font-family: var(--font-mono);
+  background: var(--cms-cream);
+  color: var(--cms-darkest);
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.9em;
+}
+
+/* UI uppercase label — pills, pagination, nav CTAs */
+.cms-eyebrow, .cms-ui-label {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: var(--fs-ui);
+  letter-spacing: var(--ls-ui);
+  color: var(--fg-1);
+}
