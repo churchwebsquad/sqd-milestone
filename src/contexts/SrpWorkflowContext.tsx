@@ -118,6 +118,20 @@ interface SrpWorkflowState {
   setBackgroundMusic: (v: boolean) => void
   designerNotes: string
   setDesignerNotes: (v: string) => void
+  sameCreativeForAll: boolean
+  setSameCreativeForAll: (v: boolean) => void
+  musicMode: string
+  setMusicMode: (v: string) => void
+  selectedMusicTrackId: string | null
+  setSelectedMusicTrackId: (v: string | null) => void
+  musicByClip: Record<string, string>
+  setMusicByClip: (v: Record<string, string>) => void
+  captionStyleConfig: Record<string, unknown>
+  setCaptionStyleConfig: (v: Record<string, unknown>) => void
+  deliver9x16: boolean
+  setDeliver9x16: (v: boolean) => void
+  outroUrl: string
+  setOutroUrl: (v: string) => void
 
   // Clip processing
   clipcutterJobId: string | null
@@ -240,6 +254,13 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
   const [srpTemplate, setSrpTemplate] = useState<string>('SRPA')
   const [backgroundMusic, setBackgroundMusic] = useState<boolean>(false)
   const [designerNotes, setDesignerNotes] = useState<string>('')
+  const [sameCreativeForAll, setSameCreativeForAll] = useState<boolean>(true)
+  const [musicMode, setMusicMode] = useState<string>('editor_choice')
+  const [selectedMusicTrackId, setSelectedMusicTrackId] = useState<string | null>(null)
+  const [musicByClip, setMusicByClip] = useState<Record<string, string>>({})
+  const [captionStyleConfig, setCaptionStyleConfig] = useState<Record<string, unknown>>({})
+  const [deliver9x16, setDeliver9x16] = useState<boolean>(false)
+  const [outroUrl, setOutroUrl] = useState<string>('')
 
   // Clip processing
   const [clipcutterJobId, setClipcutterJobId] = useState<string | null>(null)
@@ -336,6 +357,13 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     setSrpTemplate(row.srp_template ?? 'SRPA')
     setBackgroundMusic(row.background_music ?? false)
     setDesignerNotes(row.designer_notes ?? '')
+    setMusicMode((row as any).music_mode ?? 'editor_choice')
+    setSelectedMusicTrackId(null)
+    setMusicByClip(((row as any).music_by_clip as Record<string,string>) ?? {})
+    setCaptionStyleConfig(((row as any).animated_captions as Record<string,unknown>) ?? {})
+    setDeliver9x16((row as any).deliver_9x16 ?? false)
+    setOutroUrl((row as any).outro_url ?? '')
+    setSameCreativeForAll((row as any).same_creative_for_all ?? true)
 
     setClipcutterJobId(row.clipcutter_job_id ?? null)
 
@@ -533,6 +561,14 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
       srp_template:           srpTemplate || null,
       background_music:       backgroundMusic,
       designer_notes:         designerNotes || null,
+      ...(({
+        music_mode:             musicMode || null,
+        music_by_clip:          Object.keys(musicByClip).length > 0 ? musicByClip : null,
+        animated_captions:      Object.keys(captionStyleConfig).length > 0 ? captionStyleConfig : null,
+        deliver_9x16:           deliver9x16,
+        outro_url:              outroUrl || null,
+        same_creative_for_all:  sameCreativeForAll,
+      }) as any),
       clipcutter_job_id:      clipcutterJobId,
       clickup_task_id:        clickupTaskId,
       srp_task_id_override:   srpTaskIdOverride,
@@ -549,6 +585,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     facebookPost, sundayInvite, photoRecapCaption,
     carouselSlides, carouselCaption,
     srpTemplate, backgroundMusic, designerNotes,
+    musicMode, musicByClip, captionStyleConfig, deliver9x16, outroUrl, sameCreativeForAll,
     clipcutterJobId, clickupTaskId, srpTaskIdOverride,
     reelGuidance, sundayInviteInput, facebookInput, carouselInput, photoRecapInput,
   ])
@@ -595,6 +632,13 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
     srpTemplate, setSrpTemplate,
     backgroundMusic, setBackgroundMusic,
     designerNotes, setDesignerNotes,
+    sameCreativeForAll, setSameCreativeForAll,
+    musicMode, setMusicMode,
+    selectedMusicTrackId, setSelectedMusicTrackId,
+    musicByClip, setMusicByClip,
+    captionStyleConfig, setCaptionStyleConfig,
+    deliver9x16, setDeliver9x16,
+    outroUrl, setOutroUrl,
     clipcutterJobId, setClipcutterJobId,
     clickupTaskId, setClickupTaskId,
     srpTaskIdOverride, setSrpTaskIdOverride,
