@@ -11,6 +11,8 @@ export interface ProcessedClip {
   transcript?:        string | null
   duration_ms?:       number | null
   error_message?:     string | null
+  created_at?:        string | null
+  updated_at?:        string | null
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

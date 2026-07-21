@@ -430,6 +430,26 @@ function ClipCard({
   )
 }
 
+// ── Render elapsed timer ──────────────────────────────────────────────────────
+
+function RenderTimer({ startedAt }: { startedAt: string | null | undefined }) {
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    if (!startedAt) return
+    const start = new Date(startedAt).getTime()
+    const tick = () => setElapsed(Math.floor((Date.now() - start) / 1000))
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [startedAt])
+
+  if (!startedAt) return <span>Rendering…</span>
+  const m = Math.floor(elapsed / 60)
+  const s = elapsed % 60
+  return <span>Rendering for {m > 0 ? `${m}m ` : ''}{s}s…</span>
+}
+
 // ── Generate clips response ───────────────────────────────────────────────────
 
 interface GenerateClipsResponse {
@@ -869,7 +889,8 @@ export function ClipSelectionStep() {
                     {/* Render button */}
                     {status === 'processing' ? (
                       <div className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[var(--color-lavender)] text-[var(--color-deep-plum)] text-[12px] font-semibold">
-                        <Loader2 size={13} className="animate-spin" /> Rendering…
+                        <Loader2 size={13} className="animate-spin" />
+                        <RenderTimer startedAt={pc?.created_at} />
                       </div>
                     ) : status === 'ready' ? (
                       <div className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-50 border border-green-200 text-green-700 text-[12px] font-semibold">
