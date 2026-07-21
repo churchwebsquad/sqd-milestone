@@ -44,6 +44,7 @@
     "@tiptap/extension-placeholder": "^3.23.4",
     "@tiptap/react": "^3.23.4",
     "@tiptap/starter-kit": "^3.23.4",
+    "@vimeo/player": "^2.30.4",
     "ai": "^6.0.182",
     "fflate": "^0.8.3",
     "lucide-react": "^1.8.0",

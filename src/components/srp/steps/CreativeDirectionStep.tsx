@@ -111,6 +111,7 @@ export function CreativeDirectionStep() {
     deliver9x16, setDeliver9x16,
     outroUrl, setOutroUrl,
     clipSelections,
+    videoUrl, videoSourceType,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
@@ -229,17 +230,29 @@ export function CreativeDirectionStep() {
           initial={globalCaptionCfg}
           onApply={handleApplyGlobalCaption}
           onClose={() => setCaptionDialogFor(null)}
+          videoUrl={videoUrl}
+          videoSourceType={videoSourceType}
+          clipStartSec={clipSelections[0] ? parseFloat(clipSelections[0].startTime ?? '0') || 0 : undefined}
+          clipEndSec={clipSelections[0] ? parseFloat(clipSelections[0].endTime ?? '0') || undefined : undefined}
         />
       )}
 
       {/* Per-clip caption dialogs */}
-      {captionDialogFor !== null && captionDialogFor !== 'global' && (
-        <CaptionStyleDialog
-          initial={perClip[captionDialogFor]?.captionCfg ?? DEFAULT_CAPTION_CFG}
-          onApply={cfg => handleApplyClipCaption(captionDialogFor, cfg)}
-          onClose={() => setCaptionDialogFor(null)}
-        />
-      )}
+      {captionDialogFor !== null && captionDialogFor !== 'global' && (() => {
+        const idx = clipSelections.findIndex((c, i) => (c.clip_id ?? c.clip_name ?? String(i)) === captionDialogFor)
+        const clip = idx >= 0 ? clipSelections[idx] : undefined
+        return (
+          <CaptionStyleDialog
+            initial={perClip[captionDialogFor]?.captionCfg ?? DEFAULT_CAPTION_CFG}
+            onApply={cfg => handleApplyClipCaption(captionDialogFor, cfg)}
+            onClose={() => setCaptionDialogFor(null)}
+            videoUrl={videoUrl}
+            videoSourceType={videoSourceType}
+            clipStartSec={clip ? parseFloat(clip.startTime ?? '0') || 0 : undefined}
+            clipEndSec={clip ? parseFloat(clip.endTime ?? '0') || undefined : undefined}
+          />
+        )
+      })()}
 
       {/* Global music dialog */}
       {musicDialogFor === 'global' && (
