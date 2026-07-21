@@ -251,19 +251,19 @@ interface ClipCardProps {
   index:         number
   isPicked:      boolean
   isPinned:      boolean
+  isActive:      boolean
   renderStatus:  RenderStatus
   onSelect:      () => void
   onPlay:        () => void
   onPin:         () => void
-  onRender:      () => void
   onResetRender: () => void
   transcriptWords: any[] | null | undefined
   onUpdateTimes: (startTime: string, endTime: string, quote: string) => void
 }
 
 function ClipCard({
-  clip, index, isPicked, isPinned,
-  renderStatus, onSelect, onPlay, onPin, onRender, onResetRender,
+  clip, index, isPicked, isPinned, isActive,
+  renderStatus, onSelect, onPlay, onPin, onResetRender,
   transcriptWords, onUpdateTimes,
 }: ClipCardProps) {
   const [editing, setEditing]       = useState(false)
@@ -289,9 +289,9 @@ function ClipCard({
   return (
     <div className={[
       'rounded-xl border overflow-hidden transition-colors',
-      isPicked
-        ? 'border-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)]/60'
-        : 'border-[var(--color-lavender)] bg-white',
+      isActive  ? 'border-[var(--color-primary-purple)] ring-2 ring-[var(--color-primary-purple)]/20 bg-[var(--color-lavender-tint)]/60'
+      : isPicked ? 'border-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)]/40'
+      : 'border-[var(--color-lavender)] bg-white',
     ].join(' ')}>
       <div className="flex items-start gap-3 px-4 py-3">
 
@@ -390,42 +390,6 @@ function ClipCard({
 
         {/* Action icons */}
         <div className="flex items-center gap-0.5 shrink-0">
-          {/* Render button */}
-          {renderStatus === 'idle' && (
-            <button
-              type="button"
-              onClick={onRender}
-              title="Cut this clip into an mp4 for creative direction"
-              className="p-1.5 rounded-lg text-[var(--color-primary-purple)] hover:bg-[var(--color-lavender-tint)] transition-colors"
-            >
-              <Clapperboard size={13} />
-            </button>
-          )}
-          {renderStatus === 'error' && (
-            <button
-              type="button"
-              onClick={onRender}
-              title="Retry render"
-              className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 transition-colors"
-            >
-              <Clapperboard size={13} />
-            </button>
-          )}
-          {renderStatus === 'processing' && (
-            <span className="p-1.5">
-              <Loader2 size={13} className="animate-spin text-[var(--color-primary-purple)]" />
-            </span>
-          )}
-          {renderStatus === 'ready' && (
-            <button
-              type="button"
-              onClick={onRender}
-              title="Re-render clip"
-              className="p-1.5 rounded-lg text-green-600 hover:bg-green-50 transition-colors"
-            >
-              <Clapperboard size={13} />
-            </button>
-          )}
           <button
             type="button"
             onClick={onPlay}
@@ -502,8 +466,9 @@ export function ClipSelectionStep() {
   }, [])
 
   const playerRef  = useRef<HTMLIFrameElement | null>(null)
-  const [activeStartSec, setActiveStartSec] = useState<number | null>(null)
-  const [generating, setGenerating]         = useState(false)
+  const [activeStartSec, setActiveStartSec]   = useState<number | null>(null)
+  const [activeClipIndex, setActiveClipIndex] = useState<number | null>(null)
+  const [generating, setGenerating]           = useState(false)
   const [genError, setGenError]             = useState<string | null>(null)
   const [guidance, setGuidance]             = useState('')
   const [pinnedIds, setPinnedIds]           = useState<Set<string>>(new Set())
@@ -815,11 +780,14 @@ export function ClipSelectionStep() {
                   index={i}
                   isPicked={isPicked(c)}
                   isPinned={pinnedIds.has(clipId)}
+                  isActive={activeClipIndex === i}
                   renderStatus={renderStatus}
                   onSelect={() => togglePick(cWithId)}
-                  onPlay={() => c.startTime ? seekAndPlay(mmssToSeconds(c.startTime)) : undefined}
+                  onPlay={() => {
+                    if (c.startTime) seekAndPlay(mmssToSeconds(c.startTime))
+                    setActiveClipIndex(i)
+                  }}
                   onPin={() => togglePin(clipId)}
-                  onRender={() => void triggerRender(cWithId)}
                   onResetRender={() => void deleteClip(clipId)}
                   transcriptWords={transcriptWords}
                   onUpdateTimes={(st, et, q) => { updateClipTimes(i, st, et, q); seekAndPlay(mmssToSeconds(st)) }}
@@ -836,6 +804,67 @@ export function ClipSelectionStep() {
           <span className="text-[13px]">Finding the best moments…</span>
         </div>
       )}
+
+      {/* Render tray — appears when a clip is active */}
+      {activeClipIndex !== null && (() => {
+        const activeClip   = clipSuggestions[activeClipIndex] as SrpClipSelection & { [k: string]: any }
+        if (!activeClip) return null
+        const activeClipId = activeClip.clip_id ?? `suggestion-${activeClipIndex}`
+        const pc           = processedClips[activeClipId]
+        const status: RenderStatus = pc?.status === 'ready' ? 'ready'
+          : pc?.status === 'processing' ? 'processing'
+          : pc?.status === 'error'      ? 'error'
+          : 'idle'
+        return (
+          <div className="sticky bottom-0 z-20 -mx-1 rounded-2xl border border-[var(--color-primary-purple)]/30 bg-[var(--color-deep-plum)] shadow-2xl px-4 py-3 flex items-center gap-4">
+            {/* Clip info */}
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-lavender)] mb-0.5">
+                Clip {activeClipIndex + 1}
+                {activeClip.startTime && activeClip.endTime && (
+                  <span className="ml-2 font-mono normal-case tracking-normal text-[var(--color-lavender)]/70">
+                    {activeClip.startTime} → {activeClip.endTime}
+                  </span>
+                )}
+              </p>
+              <p className="text-[12px] text-white/90 truncate leading-snug">
+                "{activeClip.quote}"
+              </p>
+              {status === 'ready' && (
+                <p className="text-[10px] text-green-400 mt-0.5 flex items-center gap-1">
+                  <CheckCircle2 size={10} /> Rendered — video ready for creative direction
+                </p>
+              )}
+              {status === 'error' && pc?.error_message && (
+                <p className="text-[10px] text-red-400 mt-0.5 flex items-center gap-1">
+                  <AlertCircle size={10} /> {pc.error_message}
+                </p>
+              )}
+            </div>
+
+            {/* Render button */}
+            {status === 'processing' ? (
+              <div className="shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/10 text-white text-[13px] font-semibold">
+                <Loader2 size={15} className="animate-spin" /> Rendering…
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void triggerRender({ ...activeClip, clip_id: activeClipId })}
+                className={[
+                  'shrink-0 flex items-center gap-2 px-6 py-2.5 rounded-full text-[13px] font-bold transition-colors',
+                  status === 'ready'
+                    ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30'
+                    : 'bg-[var(--color-primary-purple)] text-white hover:bg-[var(--color-purple-mid)]',
+                ].join(' ')}
+              >
+                <Clapperboard size={15} />
+                {status === 'ready' ? 'Re-render' : status === 'error' ? 'Retry render' : 'Render clip'}
+              </button>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Nav */}
       <div className="flex items-center justify-between gap-3 pt-2">
