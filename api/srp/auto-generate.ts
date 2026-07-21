@@ -16,7 +16,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 
-export const maxDuration = 90
+export const maxDuration = 60
 
 function buildBaseUrl(req: any): string {
   const proto = (req.headers['x-forwarded-proto'] as string) || 'https'

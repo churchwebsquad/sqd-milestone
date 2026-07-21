@@ -24,7 +24,7 @@ import {
 } from './_lib/aiGateway.js'
 import { createClient } from '@supabase/supabase-js'
 
-export const maxDuration = 90
+export const maxDuration = 60
 
 const SYSTEM_PROMPT = `You are a sermon content analyst. Your job is to identify the most compelling, self-contained moments from church service transcripts and package them as short-form video clips (Reels/Shorts).
 
@@ -202,6 +202,14 @@ The following clips have already been selected and pinned by the coach. Your sug
     ? `\n\nChurch-specific guidance for this deliverable:\n${deliverableIntel}`
     : ''
 
+  // Full-service streams can exceed 80k chars. Cap at 50k to stay within
+  // the Vercel hobby 60s function limit while still covering ~70min of content.
+  const MAX_TRANSCRIPT_CHARS = 50_000
+  const transcriptTruncated = transcript.length > MAX_TRANSCRIPT_CHARS
+  const transcriptForPrompt = transcriptTruncated
+    ? transcript.slice(0, MAX_TRANSCRIPT_CHARS) + '\n\n[transcript truncated — focus clips within the content above]'
+    : transcript
+
   const userPrompt = `Analyze this sermon transcript and identify 6-10 compelling teaching moments for short-form video clips, ranked by social media potential (rank 1 = best single clip).
 
 ${durationRule}
@@ -209,7 +217,7 @@ ${durationRule}
 THE QUOTE IS NON-NEGOTIABLE: Copy it WORD FOR WORD from the transcript. Every filler word, every pause, exactly as spoken. The video editor must match it to the audio.${intelSection}${insightsSection}${pinnedSection}
 
 Transcript:
-${transcript}`
+${transcriptForPrompt}`
 
   try {
     const result = await callGateway<{ clips: ClipOutput[] }>({
