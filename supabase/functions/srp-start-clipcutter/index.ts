@@ -110,11 +110,10 @@ serve(async (req) => {
       if (!sessErr && sess?.session_id) session_id = sess.session_id;
     }
 
-    // Validate required fields
+    // Validate required fields (source_type is optional — resolved from URL if omitted)
     const missing: string[] = [];
     if (!session_id) missing.push("session_id (or session_db_id pointing to a saved session)");
     if (!source_url) missing.push("source_url");
-    if (!source_type) missing.push("source_type");
     if (!clips || !Array.isArray(clips) || clips.length === 0) missing.push("clips");
 
     if (missing.length > 0) {
