@@ -638,11 +638,20 @@ export function ClipSelectionStep() {
     const clipId = (clip as any).clip_id
     if (!clipId || !sessionId || !videoUrl) return
     await upsertClip(clipId, { status: 'processing', error_message: null, video_url: null, clipcutter_job_id: null })
+
+    // Manual clips (clip_id starts with "manual_") may not have a quote if
+    // word-level timestamps weren't available. Tell n8n to transcribe the
+    // audio instead of skipping transcription.
+    const isManual = String(clipId).startsWith('manual_')
+    const hasQuote = typeof clip.quote === 'string' && clip.quote.trim().length > 20
+    const skipTranscription = !isManual || hasQuote
+
     try {
       const result = await callSrpApi<{ job_id: string }>('start-clipcutter', {
-        session_id:  sessionId,
-        source_url:  videoUrl,
-        source_type: videoSourceType || 'unknown',
+        session_id:       sessionId,
+        source_url:       videoUrl,
+        source_type:      videoSourceType || 'unknown',
+        skip_transcription: skipTranscription,
         clips: [{
           clip_id:   clipId,
           startTime: clip.startTime,

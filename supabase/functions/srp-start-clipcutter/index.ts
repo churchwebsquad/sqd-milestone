@@ -82,7 +82,12 @@ serve(async (req) => {
       member,
       clips,
       creative_direction,
+      skip_transcription: skipTranscriptionParam,
     } = await req.json();
+
+    // Callers can opt into transcription (e.g. manual clips with no quote text)
+    // by passing skip_transcription: false. Default is true (use provided quote).
+    const skipTranscription = skipTranscriptionParam !== false;
 
     // Create Supabase client early so we can do session lookup
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -203,7 +208,7 @@ serve(async (req) => {
       source_url,
       source_type,
       member: member || null,
-      skip_transcription: true,
+      skip_transcription: skipTranscription,
       clips,
       creative_direction: creative_direction || null,
       callback_url: callbackUrl,
