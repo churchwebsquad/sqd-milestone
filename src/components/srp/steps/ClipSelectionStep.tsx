@@ -137,6 +137,11 @@ function sliceQuoteFromWords(
 
 // ── Sticky YouTube player ─────────────────────────────────────────────────────
 
+function extractVimeoId(url: string): string | null {
+  const m = url.match(/vimeo\.com\/(?:video\/)?(\d+)/)
+  return m ? m[1] : null
+}
+
 function StickyVideoPlayer({
   videoUrl,
   videoSourceType,
@@ -148,11 +153,10 @@ function StickyVideoPlayer({
   activeStart:     number | null
   playerRef:       MutableRefObject<HTMLIFrameElement | null>
 }) {
-  const videoElemRef = useRef<HTMLVideoElement | null>(null)
+  const videoElemRef  = useRef<HTMLVideoElement | null>(null)
+  const vimeoRef      = useRef<HTMLIFrameElement | null>(null)
 
-  // Seek the native <video> element only when activeStart actually changes —
-  // not on every re-render. This prevents the video from restarting whenever
-  // unrelated state updates (like clip selection) cause a re-render.
+  // Seek native <video> on activeStart change
   useEffect(() => {
     const vid = videoElemRef.current
     if (!vid || activeStart === null) return
@@ -168,34 +172,51 @@ function StickyVideoPlayer({
     }
   }, [activeStart])
 
+  // Seek Vimeo iframe via postMessage on activeStart change
+  useEffect(() => {
+    const iframe = vimeoRef.current
+    if (!iframe?.contentWindow || activeStart === null) return
+    iframe.contentWindow.postMessage(JSON.stringify({ method: 'setCurrentTime', value: activeStart }), '*')
+    iframe.contentWindow.postMessage(JSON.stringify({ method: 'play' }), '*')
+  }, [activeStart])
+
   // Detect source type from URL if not stored
   const effectiveSourceType = videoSourceType ?? (
-    videoUrl.includes('youtu') ? 'youtube' :
+    videoUrl.includes('youtu')      ? 'youtube' :
     videoUrl.includes('dropbox.com') ? 'dropbox' :
-    videoUrl.includes('vimeo.com') ? 'vimeo' : 'direct'
+    videoUrl.includes('vimeo.com')   ? 'vimeo'   : 'direct'
   )
 
-  const ytId = effectiveSourceType === 'youtube' ? extractYouTubeId(videoUrl) : null
+  const ytId     = effectiveSourceType === 'youtube' ? extractYouTubeId(videoUrl) : null
+  const vimeoId  = effectiveSourceType === 'vimeo'   ? extractVimeoId(videoUrl)   : null
+
+  const wrapCls = 'sticky top-0 z-10 bg-[var(--color-cream)] pt-1 pb-3'
+  const label   = activeStart !== null
+    ? <p className="text-[10px] text-[var(--color-purple-gray)] mt-1 text-center">Playing from {secondsToMmss(activeStart)}</p>
+    : null
 
   if (ytId) {
     const src = `https://www.youtube.com/embed/${ytId}?enablejsapi=1&rel=0&modestbranding=1`
     return (
-      <div className="sticky top-0 z-10 bg-[var(--color-cream)] pt-1 pb-3">
+      <div className={wrapCls}>
         <div className="aspect-video w-full rounded-xl overflow-hidden bg-black shadow-md">
-          <iframe
-            ref={playerRef}
-            src={src}
-            className="w-full h-full"
-            allow="autoplay; encrypted-media"
-            allowFullScreen
-            title="Sermon video"
-          />
+          <iframe ref={playerRef} src={src} className="w-full h-full"
+            allow="autoplay; encrypted-media" allowFullScreen title="Sermon video" />
         </div>
-        {activeStart !== null && (
-          <p className="text-[10px] text-[var(--color-purple-gray)] mt-1 text-center">
-            Playing from {secondsToMmss(activeStart)}
-          </p>
-        )}
+        {label}
+      </div>
+    )
+  }
+
+  if (vimeoId) {
+    const src = `https://player.vimeo.com/video/${vimeoId}?api=1&autopause=0`
+    return (
+      <div className={wrapCls}>
+        <div className="aspect-video w-full rounded-xl overflow-hidden bg-black shadow-md">
+          <iframe ref={vimeoRef} src={src} className="w-full h-full"
+            allow="autoplay; fullscreen; picture-in-picture" allowFullScreen title="Sermon video" />
+        </div>
+        {label}
       </div>
     )
   }
@@ -209,20 +230,11 @@ function StickyVideoPlayer({
           .replace(/([?&])st=[^&]+/, '')
       : videoUrl
     return (
-      <div className="sticky top-0 z-10 bg-[var(--color-cream)] pt-1 pb-3">
+      <div className={wrapCls}>
         {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-        <video
-          ref={videoElemRef}
-          src={direct}
-          controls
-          className="w-full rounded-xl bg-black shadow-md"
-          style={{ maxHeight: 340 }}
-        />
-        {activeStart !== null && (
-          <p className="text-[10px] text-[var(--color-purple-gray)] mt-1 text-center">
-            Playing from {secondsToMmss(activeStart)}
-          </p>
-        )}
+        <video ref={videoElemRef} src={direct} controls
+          className="w-full rounded-xl bg-black shadow-md" style={{ maxHeight: 340 }} />
+        {label}
       </div>
     )
   }
