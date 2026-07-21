@@ -261,6 +261,13 @@ interface ClipCardProps {
   onUpdateTimes: (startTime: string, endTime: string, quote: string) => void
 }
 
+// A quote that is just a timestamp placeholder (e.g. "9:01 – 9:55") or empty
+// means we never captured real transcript text for this clip.
+function isPlaceholderQuote(q: string | undefined): boolean {
+  if (!q || q.trim().length === 0) return true
+  return /^\d{1,2}:\d{2}\s*[–\-]\s*\d{1,2}:\d{2}$/.test(q.trim())
+}
+
 function ClipCard({
   clip, index, isPicked, isPinned, isActive,
   renderStatus, onSelect, onPlay, onPin, onResetRender,
@@ -269,6 +276,7 @@ function ClipCard({
   const [editing, setEditing]       = useState(false)
   const [editStart, setEditStart]   = useState(clip.startTime ?? '')
   const [editEnd, setEditEnd]       = useState(clip.endTime ?? '')
+  const [editQuote, setEditQuote]   = useState(() => isPlaceholderQuote(clip.quote) ? '' : (clip.quote ?? ''))
   const catColor = CATEGORY_COLORS[clip.category ?? ''] ?? 'bg-[var(--color-lavender-tint)] text-[var(--color-deep-plum)]'
 
   const durationSec = useMemo(() => {
@@ -279,8 +287,12 @@ function ClipCard({
 
   const duration = durationSec != null ? `${durationSec}s` : null
 
+  const missingQuote = isPlaceholderQuote(clip.quote)
+
   const handleSaveEdit = () => {
-    const newQuote = sliceQuoteFromWords(transcriptWords, editStart, editEnd) || clip.quote || ''
+    // Priority: manually typed text > word-level slice > existing quote
+    const sliced = sliceQuoteFromWords(transcriptWords, editStart, editEnd)
+    const newQuote = editQuote.trim() || sliced || (isPlaceholderQuote(clip.quote) ? '' : clip.quote) || ''
     onUpdateTimes(editStart, editEnd, newQuote)
     setEditing(false)
     if (renderStatus === 'ready') onResetRender()
@@ -345,11 +357,21 @@ function ClipCard({
               </span>
             )}
           </div>
-          <p className="text-[12px] text-[var(--color-deep-plum)] leading-snug">
-            "{clip.quote}"
-          </p>
+          {missingQuote && !editing ? (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 hover:bg-amber-100 transition-colors"
+            >
+              <Pencil size={9} /> No transcript — tap to add
+            </button>
+          ) : (
+            <p className="text-[12px] text-[var(--color-deep-plum)] leading-snug">
+              "{clip.quote}"
+            </p>
+          )}
 
-          {/* Inline time editor */}
+          {/* Inline editor */}
           {editing && (
             <div className="mt-3 space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
@@ -369,6 +391,23 @@ function ClipCard({
                   placeholder="MM:SS"
                   className="w-20 rounded border border-[var(--color-lavender)] px-2 py-1 text-[11px] font-mono text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)]"
                 />
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold text-[var(--color-purple-gray)] mb-1">
+                  Transcript text
+                  {!transcriptWords?.length && (
+                    <span className="ml-1 font-normal text-amber-600">(word timestamps unavailable — paste manually)</span>
+                  )}
+                </label>
+                <textarea
+                  value={editQuote}
+                  onChange={e => setEditQuote(e.target.value)}
+                  placeholder="Paste the spoken words from this clip…"
+                  rows={3}
+                  className="w-full rounded border border-[var(--color-lavender)] px-2 py-1.5 text-[11px] text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] resize-none"
+                />
+              </div>
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={handleSaveEdit}
