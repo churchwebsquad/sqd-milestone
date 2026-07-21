@@ -3,6 +3,7 @@ import { X, Check } from 'lucide-react'
 import { SrpButton } from '../_shared/SrpButton'
 import {
   CAPTION_STYLES, CAPTION_GROUPS, styleBySlug,
+  CUSTOM_SLUG,
   type CaptionGroup, type CaptionStyleConfig,
 } from '../../../lib/captionStyles'
 import { ClipLoopPlayer } from '../ClipLoopPlayer'
@@ -212,6 +213,7 @@ interface Props {
 export function CaptionStyleDialog({ initial, onApply, onClose, videoUrl, videoSourceType, clipStartSec, clipEndSec }: Props) {
   const [cfg, setCfg] = useState<CaptionStyleConfig>(initial)
   const [tab, setTab] = useState<CaptionGroup>(() => {
+    if (initial.captionSlug === CUSTOM_SLUG) return 'Custom'
     const meta = styleBySlug(initial.captionSlug)
     return (meta?.group ?? 'Traditional') as CaptionGroup
   })
@@ -339,24 +341,47 @@ export function CaptionStyleDialog({ initial, onApply, onClose, videoUrl, videoS
             </div>
 
             <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4 space-y-5">
-              {/* Style grid */}
-              <ul className="grid grid-cols-3 gap-3">
-                {tabStyles.map(style => (
-                  <li key={style.slug}>
-                    <StyleTile
-                      style={style}
-                      selected={style.slug === cfg.captionSlug}
-                      onSelect={() => handleSelect(style.slug)}
-                    />
-                  </li>
-                ))}
-              </ul>
-
-              {selectedMeta && (
-                <p className="text-[11px] text-[var(--color-purple-gray)] text-center -mt-1">
-                  Selected: <span className="font-semibold text-[var(--color-deep-plum)]">{selectedMeta.label}</span>
-                  <span className="ml-2 text-[var(--color-primary-purple)]">{selectedMeta.group}</span>
-                </p>
+              {tab === 'Custom' ? (
+                /* Custom tab — activate custom slug + show a description */
+                <div className="rounded-xl border-2 border-dashed border-[var(--color-primary-purple)]/40 bg-[var(--color-lavender-tint)] p-5 text-center space-y-3">
+                  <div className="text-[32px]">✏️</div>
+                  <p className="text-[13px] font-semibold text-[var(--color-deep-plum)]">Build your own style</p>
+                  <p className="text-[11px] text-[var(--color-purple-gray)] leading-relaxed">
+                    Set every caption property below — color, font, position, size, and more.
+                    Your settings are saved as a custom style for this clip.
+                  </p>
+                  {cfg.captionSlug !== CUSTOM_SLUG && (
+                    <SrpButton variant="secondary" onClick={() => set('captionSlug', CUSTOM_SLUG)}>
+                      Start with custom settings
+                    </SrpButton>
+                  )}
+                  {cfg.captionSlug === CUSTOM_SLUG && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--color-primary-purple)] text-white text-[11px] font-semibold">
+                      <Check size={11} strokeWidth={3} /> Custom style active
+                    </span>
+                  )}
+                </div>
+              ) : (
+                /* Preset tabs — tile grid */
+                <>
+                  <ul className="grid grid-cols-3 gap-3">
+                    {tabStyles.map(style => (
+                      <li key={style.slug}>
+                        <StyleTile
+                          style={style}
+                          selected={style.slug === cfg.captionSlug}
+                          onSelect={() => handleSelect(style.slug)}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                  {selectedMeta && (
+                    <p className="text-[11px] text-[var(--color-purple-gray)] text-center -mt-1">
+                      Selected: <span className="font-semibold text-[var(--color-deep-plum)]">{selectedMeta.label}</span>
+                      <span className="ml-2 text-[var(--color-primary-purple)]">{selectedMeta.group}</span>
+                    </p>
+                  )}
+                </>
               )}
 
               {/* Config controls */}

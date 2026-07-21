@@ -1,4 +1,4 @@
-export type CaptionGroup = 'Traditional' | 'Elevated' | 'Reference' | 'Basic'
+export type CaptionGroup = 'Traditional' | 'Elevated' | 'Reference' | 'Basic' | 'Custom'
 
 export interface CaptionStyleMeta {
   slug:           string
@@ -13,7 +13,9 @@ export interface CaptionStyleMeta {
   }
 }
 
-export const CAPTION_GROUPS: CaptionGroup[] = ['Traditional', 'Elevated', 'Reference', 'Basic']
+export const CAPTION_GROUPS: CaptionGroup[] = ['Traditional', 'Elevated', 'Reference', 'Basic', 'Custom']
+
+export const CUSTOM_SLUG = 'cap-custom'
 
 export const CAPTION_STYLES: CaptionStyleMeta[] = [
   // Traditional
