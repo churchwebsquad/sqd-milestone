@@ -657,6 +657,34 @@ export function ClipSelectionStep() {
     })
   }, [])
 
+  // ── Auto-backfill quote from render transcript ───────────────────────────
+  // When a clip finishes rendering and n8n writes back a transcript (common
+  // for manual clips that had no word-level timestamps), automatically update
+  // the clip's quote so captions and downstream steps have real text.
+  useEffect(() => {
+    let changed = false
+    const nextSuggestions = clipSuggestions.map(c => {
+      const clipId = (c as any).clip_id
+      if (!clipId) return c
+      const pc = processedClips[clipId]
+      if (pc?.status !== 'ready' || !pc.transcript) return c
+      if (!isPlaceholderQuote(c.quote)) return c
+      changed = true
+      return { ...c, quote: pc.transcript }
+    })
+    if (!changed) return
+    setClipSuggestions(nextSuggestions)
+    setClipSelections(clipSelections.map(c => {
+      const clipId = (c as any).clip_id
+      if (!clipId) return c
+      const pc = processedClips[clipId]
+      if (pc?.status !== 'ready' || !pc.transcript) return c
+      if (!isPlaceholderQuote(c.quote)) return c
+      return { ...c, quote: pc.transcript }
+    }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processedClips])
+
   // ── Update clip times + re-slice quote ──────────────────────────────────
 
   const updateClipTimes = useCallback((

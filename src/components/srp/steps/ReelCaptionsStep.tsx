@@ -18,6 +18,7 @@ import { callSrpApi } from '../../../lib/srpApi'
 import { STEP_LABELS, STEP_DESCRIPTIONS, srpPipeline } from '../../../lib/srpSessions'
 import { buildAccountContext } from '../../../lib/accountContext'
 import { SRP_MAX_REELS, isSrpReelDeliverable, type SrpClipSelection } from '../../../types/database'
+import { useProcessedClips } from '../../../hooks/useProcessedClips'
 
 interface CaptionResponse {
   caption: string
@@ -92,6 +93,8 @@ export function ReelCaptionsStep() {
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
+  const { clips: processedClips } = useProcessedClips(sessionId)
+
   const stepNum   = visibleSteps.indexOf('reelCaptions') + 1
   const reelCount = selectedDeliverables.filter(isSrpReelDeliverable).length
   const picks     = clipSelections.slice(0, reelCount || SRP_MAX_REELS)
@@ -131,27 +134,33 @@ export function ReelCaptionsStep() {
         </div>
       )}
 
-      {picks.map((clip, i) => (
-        <ReelPanel
-          key={clip.clip_id ?? `${i}-${clip.quote?.slice(0, 24)}`}
-          index={i}
-          clip={clip}
-          caption={clip.social_caption ?? ''}
-          approved={clip.caption_approved === true}
-          onCaptionChange={v => {
-            if (clip.clip_id) updateClipSocialCaption(clip.clip_id, v || null)
-            if (clip.clip_id && clip.caption_approved) updateClipCaptionApproved(clip.clip_id, false)
-          }}
-          onApprove={() => { if (clip.clip_id) updateClipCaptionApproved(clip.clip_id, true) }}
-          onUnapprove={() => { if (clip.clip_id) updateClipCaptionApproved(clip.clip_id, false) }}
-          guidance={reelGuidance[i] ?? ''}
-          onGuidanceChange={v => setReelGuidance({ ...reelGuidance, [i]: v })}
-          prevCaption={prevCaptions[i] ?? null}
-          brandVoice={brandVoice}
-          keyInsights={keyInsights}
-          accountContext={buildAccountContext(account, sermonSubmission)}
-        />
-      ))}
+      {picks.map((clip, i) => {
+        const pc = clip.clip_id ? processedClips[clip.clip_id] : undefined
+        // Prefer the transcript written back by n8n after rendering — it's
+        // more accurate than the AI quote (especially for manual clips).
+        const bestQuote = (pc?.status === 'ready' && pc.transcript) ? pc.transcript : clip.quote
+        return (
+          <ReelPanel
+            key={clip.clip_id ?? `${i}-${clip.quote?.slice(0, 24)}`}
+            index={i}
+            clip={{ ...clip, quote: bestQuote }}
+            caption={clip.social_caption ?? ''}
+            approved={clip.caption_approved === true}
+            onCaptionChange={v => {
+              if (clip.clip_id) updateClipSocialCaption(clip.clip_id, v || null)
+              if (clip.clip_id && clip.caption_approved) updateClipCaptionApproved(clip.clip_id, false)
+            }}
+            onApprove={() => { if (clip.clip_id) updateClipCaptionApproved(clip.clip_id, true) }}
+            onUnapprove={() => { if (clip.clip_id) updateClipCaptionApproved(clip.clip_id, false) }}
+            guidance={reelGuidance[i] ?? ''}
+            onGuidanceChange={v => setReelGuidance({ ...reelGuidance, [i]: v })}
+            prevCaption={prevCaptions[i] ?? null}
+            brandVoice={brandVoice}
+            keyInsights={keyInsights}
+            accountContext={buildAccountContext(account, sermonSubmission)}
+          />
+        )
+      })}
 
       <div className="flex items-center justify-between gap-3 pt-2">
         <SrpButton variant="ghost" onClick={goToPrevStep} leadingIcon={<ArrowLeft size={14} />}>
