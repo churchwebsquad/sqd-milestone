@@ -118,13 +118,22 @@ export default async function handler(req: any, res: any) {
     ? `\n\nKEY INSIGHTS FROM THIS SERVICE (use to add depth and choose the most resonant angles):\n${keyInsights.map((ins, i) => `${i + 1}. ${ins}`).join('\n')}`
     : ''
 
+  const guidanceBlock = userGuidance.trim()
+    ? `\n\nDIRECTION FROM THE COACH — THIS OVERRIDES ALL OTHER DEFAULTS. Lean into exactly what is asked here. Do not soften it or default to generic angles:\n"${userGuidance}"\n`
+    : ''
+
+  const MAX_TRANSCRIPT_CHARS = 20_000
+  const transcriptForPrompt = transcript.length > MAX_TRANSCRIPT_CHARS
+    ? transcript.slice(0, MAX_TRANSCRIPT_CHARS) + '\n\n[transcript truncated]'
+    : transcript
+
   const userPrompt =
     `Write exactly 4 Facebook text post options from this sermon transcript, one for each angle described in the system prompt.\n\n` +
     `For each post, provide a "citations" field listing ALL verbatim transcript quotes the post draws from.\n\n` +
+    guidanceBlock +
     (deliverableIntel ? `\nChurch-specific guidance for this deliverable:\n${deliverableIntel}\n` : '') +
-    `Transcript:\n${transcript.slice(0, 30000)}` +
-    insightsSection +
-    (userGuidance ? `\n\nSPECIAL DIRECTION: "${userGuidance}"` : '')
+    `Transcript:\n${transcriptForPrompt}` +
+    insightsSection
 
   try {
     const result = await callGateway<{ posts: any[] }>({

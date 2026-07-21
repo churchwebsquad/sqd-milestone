@@ -86,7 +86,7 @@ export default async function handler(req: any, res: any) {
     const result = await callGateway<any>({
       model:  'anthropic/claude-sonnet-4-6',
       system: `You are analyzing a church service recording. Extract a structured overview from the transcript. Return only what is actually present — do not fabricate details. Worship songs and announcements should be empty arrays if not found in the transcript.`,
-      user: `${ctx ? ctx + '\n\n' : ''}Transcript:\n${transcript.slice(0, 60000)}`,
+      user: `${ctx ? ctx + '\n\n' : ''}Transcript:\n${transcript.slice(0, 50000)}`,
       toolName: 'generate_overview',
       toolDescription: 'Return a structured overview of the church service.',
       toolSchema: TOOL_SCHEMA,

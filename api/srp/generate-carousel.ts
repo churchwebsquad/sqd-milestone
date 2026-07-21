@@ -298,7 +298,7 @@ export default async function handler(req: any, res: any) {
     `Layout 5 is a single-slide graphic. Choose the single strongest quote or verse from the sermon.\n\n` +
     `For each concept include a "citations" field listing ALL verbatim quotes from the transcript that the carousel draws from.\n\n` +
     (deliverableIntel ? `\nChurch-specific guidance for this deliverable:\n${deliverableIntel}\n\n` : '') +
-    `Transcript:\n${transcript.slice(0, 30000)}` +
+    `Transcript:\n${transcript.slice(0, 20000)}` +
     insightsSection +
     (userGuidance ? `\n\nSPECIAL DIRECTION: "${userGuidance}"` : '')
 
