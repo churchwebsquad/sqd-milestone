@@ -66,6 +66,15 @@ function validateMediaUrl(input: unknown) {
   return { ok: true, sourceType: "unknown", normalizedUrl: url.toString() };
 }
 
+// Convert MM:SS or H:MM:SS timestamp string to integer milliseconds.
+function mmssToMs(ts: string | undefined): number {
+  if (!ts) return 0;
+  const parts = ts.split(":").map(Number);
+  if (parts.length === 3) return Math.round((parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000);
+  if (parts.length === 2) return Math.round((parts[0] * 60 + parts[1]) * 1000);
+  return Math.round(parts[0] * 1000);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -82,12 +91,7 @@ serve(async (req) => {
       member,
       clips,
       creative_direction,
-      skip_transcription: skipTranscriptionParam,
     } = await req.json();
-
-    // Callers can opt into transcription (e.g. manual clips with no quote text)
-    // by passing skip_transcription: false. Default is true (use provided quote).
-    const skipTranscription = skipTranscriptionParam !== false;
 
     // Create Supabase client early so we can do session lookup
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -134,22 +138,49 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    // Whitelist source_type — accept everything the validator can produce.
-    const validSourceTypes = ["youtube", "dropbox", "vimeo", "direct", "google_drive", "unknown"];
-    if (!validSourceTypes.includes(source_type)) {
-      return new Response(
-        JSON.stringify({
-          error: `Invalid source_type: ${source_type}. Must be one of: ${validSourceTypes.join(", ")}`,
-        }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
+    // Whitelist source_type. n8n must never receive "unknown" — omit it and
+    // let n8n detect, rather than sending a value it can't act on.
+    const validSourceTypes = ["youtube", "dropbox", "vimeo", "direct", "google_drive"];
+    const resolvedSourceType = validSourceTypes.includes(source_type) ? source_type : null;
 
     // Generate job_id
     const job_id = crypto.randomUUID();
+
+    // Build the label prefix for clip_name — use clickup_id when available,
+    // fall back to a short session slug. n8n echoes clip_name back in the
+    // callback so we can reverse-map to our internal clip_ids.
+    const namePrefix = clickup_id || session_id.slice(0, 8);
+
+    // Transform our internal clip format → n8n contract format.
+    // Store internal clips (with clip_id) in the DB; send n8n format to webhook.
+    const n8nClips = (clips as Array<{
+      clip_id?: string;
+      clip_name?: string;
+      startTime?: string;
+      endTime?: string;
+      in_point_ms?: number;
+      out_point_ms?: number;
+      quote?: string;
+      kept_segments?: unknown[];
+    }>).map((clip, i) => {
+      const inMs  = clip.in_point_ms  ?? mmssToMs(clip.startTime);
+      const outMs = clip.out_point_ms ?? mmssToMs(clip.endTime);
+      const clipName = clip.clip_name ?? `${namePrefix}_Clip_${String(i + 1).padStart(2, "0")}-01`;
+      return {
+        clip_name:     clipName,
+        in_point_ms:   inMs,
+        out_point_ms:  outMs,
+        quote:         clip.quote ?? "",
+        kept_segments: clip.kept_segments ?? [{ in_point_ms: inMs, out_point_ms: outMs }],
+      };
+    });
+
+    // Enrich stored clips with the generated clip_name so the callback can
+    // reverse-map clip_name → clip_id without a separate lookup table.
+    const storedClips = (clips as Array<Record<string, unknown>>).map((clip, i) => ({
+      ...clip,
+      clip_name: (clip.clip_name as string) ?? `${namePrefix}_Clip_${String(i + 1).padStart(2, "0")}-01`,
+    }));
 
     // Insert clipcutter_jobs row with status "pending"
     const { error: insertError } = await supabase
@@ -159,8 +190,8 @@ serve(async (req) => {
         id: job_id,
         session_id,
         source_url,
-        source_type,
-        clips,
+        source_type: resolvedSourceType,
+        clips: storedClips,
         creative_direction: creative_direction || null,
         status: "pending",
         progress_percent: 0,
@@ -200,22 +231,25 @@ serve(async (req) => {
     const callbackUrl = `${supabaseUrl}/functions/v1/srp-clipcutter-callback`;
     const callbackSecret = Deno.env.get("SRP_TOOL_N8N_CALLBACK_SECRET") || "";
 
-    // Build webhook payload matching SRP clipcutter workflow contract
-    const webhookPayload = {
+    // Build webhook payload matching the n8n clipcutter contract exactly.
+    // - clips must use n8n format: clip_name, in_point_ms, out_point_ms, kept_segments
+    // - skip_transcription is always true — the clipcutter cuts video only, no transcription
+    // - source_type must never be "unknown" — omit the field if type is unresolved
+    const webhookPayload: Record<string, unknown> = {
       job_id,
       user_id: user_id || null,
       clickup_id: clickup_id || null,
       source_url,
-      source_type,
       member: member || null,
-      skip_transcription: skipTranscription,
-      clips,
+      skip_transcription: true,
+      clips: n8nClips,
       creative_direction: creative_direction || null,
       callback_url: callbackUrl,
       callback_secret: callbackSecret,
       supabase_url: supabaseUrl,
       supabase_service_key: supabaseServiceKey,
     };
+    if (resolvedSourceType) webhookPayload.source_type = resolvedSourceType;
 
     // Fire webhook to n8n clipcutter — but DO NOT await the response.
     // The clipcutter pipeline takes 3-7 minutes; awaiting blows past the

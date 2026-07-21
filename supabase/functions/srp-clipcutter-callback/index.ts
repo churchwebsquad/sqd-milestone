@@ -68,11 +68,12 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Look up the clipcutter_jobs row
+    // Look up the clipcutter_jobs row — include stored clips so we can
+    // reverse-map clip_name → clip_id for processed_clips updates.
     const { data: job, error: lookupError } = await supabase
       .schema("srp_pipeline")
       .from("clipcutter_jobs")
-      .select("id, session_id, status")
+      .select("id, session_id, status, clips")
       .eq("id", job_id)
       .single();
 
@@ -131,27 +132,57 @@ serve(async (req) => {
 
     console.log(`Updated clipcutter job ${job_id} to status: ${status}`);
 
-    // On completion, write result into processed_clips (per-clip render output table).
-    // Only applies when a single-clip render was triggered from the Render button in ClipSelectionStep.
+    // Update processed_clips rows for each clip in the result.
+    // n8n identifies clips by clip_name (not clip_id). We stored the mapping
+    // in clipcutter_jobs.clips when the job was created — use that to resolve
+    // the clip_id for each result, falling back to array order if clip_name
+    // is missing from the response.
+    // The clipcutter never transcribes — no transcript/srt in results.
+    const storedClips: Array<{ clip_id?: string; clip_name?: string }> =
+      Array.isArray(job?.clips) ? job.clips : [];
+
     if (status === "completed" && resolvedClips?.length > 0) {
-      const firstResult = resolvedClips[0];
-      if (firstResult?.video_url) {
-        const { error: pcError } = await supabase
-          .schema("srp_pipeline")
-          .from("processed_clips")
-          .update({
-            status: "ready",
-            video_url: firstResult.video_url,
-            transcript: firstResult.edited_transcript ?? firstResult.transcript ?? null,
-            duration_ms: firstResult.duration_ms ?? null,
-            error_message: null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("clipcutter_job_id", job_id);
-        if (pcError) {
-          console.error("Failed to update processed_clips on completion:", pcError);
+      for (let i = 0; i < resolvedClips.length; i++) {
+        const result = resolvedClips[i];
+        if (!result?.video_url) continue;
+
+        // Resolve clip_id: match by clip_name first, then fall back to order.
+        const matchedStored = result.clip_name
+          ? storedClips.find((sc) => sc.clip_name === result.clip_name)
+          : storedClips[i];
+        const clipId = matchedStored?.clip_id;
+
+        const pcUpdate = {
+          status: "ready",
+          video_url: result.video_url,
+          transcript: null, // clipcutter does not transcribe
+          duration_ms: result.duration_ms ?? null,
+          error_message: null,
+          updated_at: new Date().toISOString(),
+        };
+
+        let pcError;
+        if (clipId) {
+          // Prefer clip_id match — most precise
+          ({ error: pcError } = await supabase
+            .schema("srp_pipeline")
+            .from("processed_clips")
+            .update(pcUpdate)
+            .eq("session_id", job.session_id)
+            .eq("clip_id", clipId));
         } else {
-          console.log(`Updated processed_clips for job ${job_id} to ready`);
+          // Fall back to job-level match (single-clip renders)
+          ({ error: pcError } = await supabase
+            .schema("srp_pipeline")
+            .from("processed_clips")
+            .update(pcUpdate)
+            .eq("clipcutter_job_id", job_id));
+        }
+
+        if (pcError) {
+          console.error(`Failed to update processed_clips for clip ${clipId ?? i}:`, pcError);
+        } else {
+          console.log(`processed_clips ready: clip_id=${clipId ?? "order-" + i} job=${job_id}`);
         }
       }
     } else if (status === "failed") {
