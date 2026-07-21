@@ -43,7 +43,7 @@ const MUSIC_OPTIONS = [
 /* ---------- helpers ---------- */
 
 function CaptionChip({ cfg }: { cfg: CaptionStyleConfig }) {
-  const meta = styleBySlug(cfg.captionSlug)
+  const meta = styleBySlug(cfg.captionSlug ?? '')
   return (
     <div className="flex items-center gap-2 flex-wrap">
       {meta && (
@@ -168,8 +168,8 @@ export function CreativeDirectionStep() {
 
   /* apply global caption */
   const handleApplyGlobalCaption = useCallback((cfg: CaptionStyleConfig) => {
-    setSrpTemplate(cfg.captionSlug)
-    setDeliver9x16(cfg.deliver9x16)
+    if (cfg.captionSlug) setSrpTemplate(cfg.captionSlug)
+    setDeliver9x16(cfg.deliver9x16 ?? false)
     setCaptionStyleConfig({ ...cfg } as unknown as Record<string, unknown>)
     setCaptionDialogFor(null)
   }, [setSrpTemplate, setDeliver9x16, setCaptionStyleConfig])
@@ -234,6 +234,7 @@ export function CreativeDirectionStep() {
           videoSourceType={videoSourceType}
           clipStartSec={clipSelections[0] ? parseFloat(clipSelections[0].startTime ?? '0') || 0 : undefined}
           clipEndSec={clipSelections[0] ? parseFloat(clipSelections[0].endTime ?? '0') || undefined : undefined}
+          clipText={clipSelections[0]?.caption_text ?? clipSelections[0]?.quote}
         />
       )}
 
@@ -250,6 +251,7 @@ export function CreativeDirectionStep() {
             videoSourceType={videoSourceType}
             clipStartSec={clip ? parseFloat(clip.startTime ?? '0') || 0 : undefined}
             clipEndSec={clip ? parseFloat(clip.endTime ?? '0') || undefined : undefined}
+            clipText={clip?.caption_text ?? clip?.quote}
           />
         )
       })()}
@@ -368,7 +370,7 @@ export function CreativeDirectionStep() {
               const id       = clipKey(idx)
               const settings = perClip[id] ?? DEFAULT_PER_CLIP
               const expanded = expandedClips.has(id)
-              const captionMeta = styleBySlug(settings.captionCfg.captionSlug)
+              const captionMeta = styleBySlug(settings.captionCfg.captionSlug ?? '')
               const musicTrack  = settings.musicTrackId
                 ? MUSIC_LIBRARY.find(t => t.id === settings.musicTrackId)
                 : null

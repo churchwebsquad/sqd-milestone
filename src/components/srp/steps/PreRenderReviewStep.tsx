@@ -73,10 +73,19 @@ function resolveType(url: string, stored: SourceType): SourceType {
   if (stored && stored !== 'unknown') return stored
   if (/youtube\.com|youtu\.be/.test(url)) return 'youtube'
   if (/vimeo\.com/.test(url))             return 'vimeo'
-  if (/dropbox\.com/.test(url))           return 'dropbox'
+  if (/dropbox\.com/.test(url))           return 'direct'
   if (/drive\.google\.com/.test(url))     return 'google_drive'
   if (/\.(mp4|webm|mov|m4v|m3u8)(\?|$)/i.test(url)) return 'direct'
   return 'unknown'
+}
+
+function toDirectUrl(url: string): string {
+  if (url.includes('dropbox.com')) {
+    return url
+      .replace('www.dropbox.com', 'dl.dropboxusercontent.com')
+      .replace(/[?&]dl=\d/, '')
+  }
+  return url
 }
 
 // ── Smart video player ────────────────────────────────────────────────────────
@@ -205,23 +214,16 @@ function SmartVideoPlayer({ url, sourceType, clipStart, clipEnd, seekRef, onTime
     )
   }
 
-  if (type === 'dropbox' || type === 'google_drive') {
+  if (type === 'google_drive') {
     return (
       <div className="aspect-video rounded-lg bg-[var(--color-lavender-tint)] flex flex-col items-center justify-center gap-3 p-4">
         <p className="text-[12px] font-medium text-[var(--color-deep-plum)] text-center">
-          {type === 'dropbox' ? 'Dropbox' : 'Google Drive'} videos can't be embedded here.
+          Google Drive videos can't be embedded here.
         </p>
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[var(--color-primary-purple)] text-white text-[12px] font-semibold hover:bg-[var(--color-deep-plum)] transition-colors"
-        >
+        <a href={url} target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[var(--color-primary-purple)] text-white text-[12px] font-semibold hover:bg-[var(--color-deep-plum)] transition-colors">
           Open video in new tab →
         </a>
-        <p className="text-[10px] text-[var(--color-purple-gray)] text-center">
-          Note timestamps, then enter them in the segments on the right.
-        </p>
       </div>
     )
   }
@@ -229,7 +231,7 @@ function SmartVideoPlayer({ url, sourceType, clipStart, clipEnd, seekRef, onTime
   return (
     <video
       ref={videoRef}
-      src={url}
+      src={toDirectUrl(url)}
       controls
       playsInline
       className="w-full rounded-lg bg-black aspect-video"

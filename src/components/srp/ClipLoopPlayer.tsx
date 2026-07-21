@@ -7,6 +7,7 @@ interface Props {
   startSec: number | null
   endSec: number | null
   nonce: number
+  muted?: boolean
   skipRanges?: SkipRange[]
   tailBufferSec?: number
   onTimeUpdate?: (currentSec: number) => void
