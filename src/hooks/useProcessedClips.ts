@@ -2,17 +2,20 @@ import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 
 export interface ProcessedClip {
-  id:                 string
-  session_id:         string
-  clip_id:            string
-  clipcutter_job_id?: string | null
-  status:             'processing' | 'ready' | 'error'
-  video_url?:         string | null
-  transcript?:        string | null
-  duration_ms?:       number | null
-  error_message?:     string | null
-  created_at?:        string | null
-  updated_at?:        string | null
+  id:                   string
+  session_id:           string
+  clip_id:              string
+  clipcutter_job_id?:   string | null
+  status:               'processing' | 'ready' | 'error'
+  video_url?:           string | null
+  transcript?:          string | null
+  duration_ms?:         number | null
+  error_message?:       string | null
+  title_card_url?:      string | null
+  title_card_start_ms?: number | null
+  title_card_end_ms?:   number | null
+  created_at?:          string | null
+  updated_at?:          string | null
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

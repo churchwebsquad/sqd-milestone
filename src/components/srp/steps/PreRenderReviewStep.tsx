@@ -1,21 +1,22 @@
 /**
  * Pre-render review step — shows cut clip videos with synced transcript.
  *
- * For each selected clip: video player (left) + scrollable SRT segment list
- * (right). Active segment highlights as the video plays and appears as a
- * caption overlay. Clicking a segment row seeks the video to that point.
- *
- * Clip states:
- *   - processing/pending: loading card with spinner + elapsed timer
- *   - ready: full video + transcript layout
- *   - error: error message with retry note
+ * Features per clip:
+ *   - Video player with caption overlay + title card image overlay
+ *   - Editable caption segments (click pencil → edit → save)
+ *   - Manual segment entry (add a time range + text)
+ *   - Title card upload (image overlaid on video between two timestamps)
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2, CheckCircle2, AlertCircle, Film, ArrowLeft, ArrowRight } from 'lucide-react'
+import {
+  Loader2, CheckCircle2, AlertCircle, Film,
+  ArrowLeft, ArrowRight, Pencil, Check, X, Plus, Image, Trash2,
+} from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import { useProcessedClips } from '../../../hooks/useProcessedClips'
+import { supabase } from '../../../lib/supabase'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,9 @@ function toMMSS(secs: number): string {
   const s = Math.floor(Math.max(0, secs) % 60)
   return `${m}:${String(s).padStart(2, '0')}`
 }
+
+function msToSeconds(ms: number) { return ms / 1000 }
+function secondsToMs(s: number) { return Math.round(s * 1000) }
 
 // ── SRT segment type ──────────────────────────────────────────────────────────
 
@@ -69,7 +73,14 @@ function buildSrtSegments(
   return segments
 }
 
-// ── Elapsed timer (reused from ClipSelectionStep pattern) ─────────────────────
+function reindexSegments(segs: SrtSegment[]): SrtSegment[] {
+  return segs
+    .slice()
+    .sort((a, b) => a.startSec - b.startSec)
+    .map((s, i) => ({ ...s, index: i + 1 }))
+}
+
+// ── Elapsed timer ─────────────────────────────────────────────────────────────
 
 function ElapsedTimer({ startedAt }: { startedAt: string | null | undefined }) {
   const [elapsed, setElapsed] = useState(0)
@@ -92,6 +103,7 @@ function ElapsedTimer({ startedAt }: { startedAt: string | null | undefined }) {
 interface ClipCardProps {
   idx:         number
   clipId:      string
+  sessionId:   string
   clipTitle?:  string | null
   startTime?:  string | null
   endTime?:    string | null
@@ -101,34 +113,44 @@ interface ClipCardProps {
   status:      'processing' | 'ready' | 'error' | 'pending'
   errorMsg?:   string | null
   createdAt?:  string | null
+  titleCardUrl?:     string | null
+  titleCardStartMs?: number | null
+  titleCardEndMs?:   number | null
   words:       { word: string; start: number; end: number }[]
+  onSaveTranscript: (clipId: string, segments: SrtSegment[]) => Promise<void>
+  onSaveTitleCard:  (clipId: string, url: string, startMs: number, endMs: number) => Promise<void>
+  onRemoveTitleCard:(clipId: string) => Promise<void>
 }
 
 function ClipCard({
-  idx, clipTitle, startTime, endTime, quote,
+  idx, clipId, sessionId, clipTitle, startTime, endTime, quote,
   videoUrl, transcript, status, errorMsg, createdAt, words,
+  titleCardUrl, titleCardStartMs, titleCardEndMs,
+  onSaveTranscript, onSaveTitleCard, onRemoveTitleCard,
 }: ClipCardProps) {
-  const videoRef    = useRef<HTMLVideoElement>(null)
-  const listRef     = useRef<HTMLUListElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const listRef  = useRef<HTMLUListElement>(null)
   const [currentTime, setCurrentTime] = useState(0)
 
   const clipStartSec = mmssToSeconds(startTime)
   const clipEndSec   = mmssToSeconds(endTime)
 
-  // Build SRT segments — prefer processedClip transcript json if available,
-  // fall back to raw transcriptWords filtered to clip range.
-  const segments: SrtSegment[] = (() => {
+  // ── Segments state ─────────────────────────────────────────────────────────
+
+  const initialSegments = (() => {
     if (transcript) {
       try {
-        // transcript may be a JSON array of word objects
-        const parsed = JSON.parse(transcript) as { word?: string; text?: string; start: number; end: number }[]
+        const parsed = JSON.parse(transcript)
+        if (Array.isArray(parsed) && parsed.length > 0 && 'startSec' in parsed[0]) {
+          return parsed as SrtSegment[]
+        }
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const w = parsed.map(p => ({ word: p.word ?? p.text ?? '', start: p.start, end: p.end }))
+          const w = parsed.map((p: { word?: string; text?: string; start: number; end: number }) => ({
+            word: p.word ?? p.text ?? '', start: p.start, end: p.end,
+          }))
           return buildSrtSegments(w, clipStartSec, clipEndSec)
         }
-      } catch {
-        // not JSON — will fall through to raw words
-      }
+      } catch { /* fall through */ }
     }
     if (words.length > 0 && clipStartSec < clipEndSec) {
       return buildSrtSegments(words, clipStartSec, clipEndSec)
@@ -136,12 +158,39 @@ function ClipCard({
     return []
   })()
 
+  const [segments, setSegments]         = useState<SrtSegment[]>(initialSegments)
+  const [editingIdx, setEditingIdx]     = useState<number | null>(null)
+  const [editText, setEditText]         = useState('')
+  const [savingTranscript, setSavingTranscript] = useState(false)
+  const [transcriptDirty, setTranscriptDirty]   = useState(false)
+
+  // Manual segment add
+  const [showAddSeg, setShowAddSeg]   = useState(false)
+  const [newSegStart, setNewSegStart] = useState('')
+  const [newSegEnd, setNewSegEnd]     = useState('')
+  const [newSegText, setNewSegText]   = useState('')
+
+  // Title card
+  const [tcUrl, setTcUrl]               = useState(titleCardUrl ?? '')
+  const [tcStartRaw, setTcStartRaw]     = useState(titleCardStartMs != null ? toMMSS(msToSeconds(titleCardStartMs)) : '')
+  const [tcEndRaw, setTcEndRaw]         = useState(titleCardEndMs   != null ? toMMSS(msToSeconds(titleCardEndMs))   : '')
+  const [tcUploading, setTcUploading]   = useState(false)
+  const [tcSaving, setTcSaving]         = useState(false)
+  const [tcDirty, setTcDirty]           = useState(false)
+  const tcFileRef = useRef<HTMLInputElement>(null)
+
+  const tcStartSec = mmssToSeconds(tcStartRaw)
+  const tcEndSec   = mmssToSeconds(tcEndRaw)
+  const showTitleCard = !!tcUrl && tcStartSec < tcEndSec &&
+    currentTime >= tcStartSec && currentTime < tcEndSec
+
+  // ── Active segment ────────────────────────────────────────────────────────
+
   const activeIdx = segments.findIndex(
     s => currentTime >= s.startSec - 0.1 && currentTime < s.endSec + 0.1,
   )
   const activeSeg = activeIdx >= 0 ? segments[activeIdx] : null
 
-  // Auto-scroll active segment into view
   useEffect(() => {
     if (activeIdx < 0 || !listRef.current) return
     const li = listRef.current.children[activeIdx] as HTMLLIElement | undefined
@@ -151,10 +200,101 @@ function ClipCard({
   const seekTo = useCallback((sec: number) => {
     if (!videoRef.current) return
     videoRef.current.currentTime = sec
-    videoRef.current.play().catch(() => { /* needs user gesture */ })
+    videoRef.current.play().catch(() => {})
   }, [])
 
-  // ── Loading state ──────────────────────────────────────────────────────────
+  // ── Segment edit helpers ──────────────────────────────────────────────────
+
+  const startEdit = (i: number) => {
+    setEditingIdx(i)
+    setEditText(segments[i].text)
+  }
+
+  const commitEdit = () => {
+    if (editingIdx === null) return
+    setSegments(prev => {
+      const next = prev.map((s, i) => i === editingIdx ? { ...s, text: editText.trim() } : s)
+      return next
+    })
+    setEditingIdx(null)
+    setTranscriptDirty(true)
+  }
+
+  const deleteSegment = (i: number) => {
+    setSegments(prev => reindexSegments(prev.filter((_, idx) => idx !== i)))
+    setTranscriptDirty(true)
+  }
+
+  const addManualSegment = () => {
+    if (!newSegStart || !newSegEnd || !newSegText.trim()) return
+    const startSec = mmssToSeconds(newSegStart)
+    const endSec   = mmssToSeconds(newSegEnd)
+    if (endSec <= startSec) return
+    const next = reindexSegments([
+      ...segments,
+      { index: 0, startSec, endSec, text: newSegText.trim() },
+    ])
+    setSegments(next)
+    setNewSegStart('')
+    setNewSegEnd('')
+    setNewSegText('')
+    setShowAddSeg(false)
+    setTranscriptDirty(true)
+  }
+
+  const saveTranscript = async () => {
+    setSavingTranscript(true)
+    await onSaveTranscript(clipId, segments)
+    setSavingTranscript(false)
+    setTranscriptDirty(false)
+  }
+
+  // ── Title card helpers ────────────────────────────────────────────────────
+
+  const handleTcFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setTcUploading(true)
+    try {
+      const ext  = file.name.split('.').pop() ?? 'png'
+      const path = `${sessionId}/${clipId}/title-card.${ext}`
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error: upErr } = await (supabase as any).storage
+        .from('srp-title-cards')
+        .upload(path, file, { upsert: true })
+      if (upErr) throw upErr
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: { publicUrl } } = (supabase as any).storage
+        .from('srp-title-cards')
+        .getPublicUrl(path)
+      setTcUrl(publicUrl)
+      setTcDirty(true)
+    } catch (err) {
+      console.error('Title card upload failed:', err)
+      alert('Upload failed — please try again.')
+    } finally {
+      setTcUploading(false)
+    }
+  }
+
+  const saveTitleCard = async () => {
+    if (!tcUrl || !tcStartRaw || !tcEndRaw) return
+    setTcSaving(true)
+    await onSaveTitleCard(clipId, tcUrl, secondsToMs(tcStartSec), secondsToMs(tcEndSec))
+    setTcSaving(false)
+    setTcDirty(false)
+  }
+
+  const removeTitleCard = async () => {
+    setTcUrl('')
+    setTcStartRaw('')
+    setTcEndRaw('')
+    setTcDirty(false)
+    await onRemoveTitleCard(clipId)
+  }
+
+  // ── Loading state ─────────────────────────────────────────────────────────
+
   if (status === 'processing' || status === 'pending') {
     return (
       <div className="rounded-xl border border-[var(--color-lavender)] bg-white p-5 space-y-3">
@@ -181,7 +321,8 @@ function ClipCard({
     )
   }
 
-  // ── Error state ────────────────────────────────────────────────────────────
+  // ── Error state ───────────────────────────────────────────────────────────
+
   if (status === 'error') {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-5 space-y-2">
@@ -191,9 +332,7 @@ function ClipCard({
             Clip {idx + 1}{clipTitle ? ` — ${clipTitle}` : ''} failed to process
           </p>
         </div>
-        {errorMsg && (
-          <p className="text-[12px] text-red-500 pl-5">{errorMsg}</p>
-        )}
+        {errorMsg && <p className="text-[12px] text-red-500 pl-5">{errorMsg}</p>}
         <p className="text-[11px] text-red-400 pl-5">
           Go back to Clip Selection and use Retry to resubmit this clip.
         </p>
@@ -201,7 +340,8 @@ function ClipCard({
     )
   }
 
-  // ── Ready state ────────────────────────────────────────────────────────────
+  // ── Ready state ───────────────────────────────────────────────────────────
+
   return (
     <div className="rounded-xl border border-[var(--color-lavender)] bg-white overflow-hidden">
       {/* Header */}
@@ -217,11 +357,14 @@ function ClipCard({
         )}
       </div>
 
-      {/* Body: video left, transcript right */}
+      {/* Body */}
       <div className="flex flex-col lg:flex-row">
-        {/* Video column */}
-        <div className="lg:w-[50%] shrink-0 p-3 lg:border-r border-b lg:border-b-0 border-[var(--color-lavender)]">
-          <div className="sticky top-2">
+
+        {/* ── Left: Video + Title Card ── */}
+        <div className="lg:w-[50%] shrink-0 p-3 lg:border-r border-b lg:border-b-0 border-[var(--color-lavender)] space-y-3">
+          <div className="sticky top-2 space-y-3">
+
+            {/* Video with overlays */}
             <div className="relative rounded-lg overflow-hidden bg-black">
               {videoUrl ? (
                 <video
@@ -237,8 +380,18 @@ function ClipCard({
                   <p className="text-[12px] text-[var(--color-purple-gray)]">No video available</p>
                 </div>
               )}
+
+              {/* Title card overlay */}
+              {showTitleCard && (
+                <img
+                  src={tcUrl}
+                  alt="Title card"
+                  className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+                />
+              )}
+
               {/* Caption overlay */}
-              {activeSeg && activeSeg.text && (
+              {activeSeg && activeSeg.text && !showTitleCard && (
                 <div className="absolute bottom-6 left-0 right-0 flex justify-center px-4 pointer-events-none">
                   <p className="bg-black/75 text-white text-[13px] font-bold px-3 py-1.5 rounded-lg text-center leading-snug max-w-[90%]">
                     {activeSeg.text}
@@ -246,7 +399,8 @@ function ClipCard({
                 </div>
               )}
             </div>
-            <p className="mt-1.5 text-center text-[10px] text-[var(--color-purple-gray)] font-mono">
+
+            <p className="text-center text-[10px] text-[var(--color-purple-gray)] font-mono">
               {toMMSS(currentTime)}
               {activeSeg && (
                 <span className="ml-2 text-[var(--color-primary-purple)]">
@@ -254,55 +408,241 @@ function ClipCard({
                 </span>
               )}
             </p>
+
+            {/* Title Card section */}
+            <div className="rounded-lg border border-[var(--color-lavender)] p-3 space-y-2">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] flex items-center gap-1.5">
+                <Image size={10} /> Title Card
+              </p>
+
+              {tcUrl && (
+                <div className="relative rounded overflow-hidden border border-[var(--color-lavender)]">
+                  <img src={tcUrl} alt="Title card preview" className="w-full object-contain max-h-24 bg-black" />
+                  <button
+                    onClick={removeTitleCard}
+                    className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5 hover:bg-red-600 transition-colors"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
+
+              {!tcUrl && (
+                <button
+                  onClick={() => tcFileRef.current?.click()}
+                  disabled={tcUploading}
+                  className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-[var(--color-lavender)] rounded-lg text-[12px] text-[var(--color-purple-gray)] hover:border-[var(--color-primary-purple)] hover:text-[var(--color-primary-purple)] transition-colors"
+                >
+                  {tcUploading ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                  {tcUploading ? 'Uploading…' : 'Upload title card image'}
+                </button>
+              )}
+
+              <input
+                ref={tcFileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleTcFileChange}
+              />
+
+              {tcUrl && (
+                <div className="space-y-1.5">
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="text-[10px] text-[var(--color-purple-gray)] font-semibold">Start</label>
+                      <input
+                        type="text"
+                        placeholder="0:00"
+                        value={tcStartRaw}
+                        onChange={e => { setTcStartRaw(e.target.value); setTcDirty(true) }}
+                        className="w-full mt-0.5 px-2 py-1 text-[12px] font-mono border border-[var(--color-lavender)] rounded-md focus:outline-none focus:border-[var(--color-primary-purple)]"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-[10px] text-[var(--color-purple-gray)] font-semibold">End</label>
+                      <input
+                        type="text"
+                        placeholder="0:05"
+                        value={tcEndRaw}
+                        onChange={e => { setTcEndRaw(e.target.value); setTcDirty(true) }}
+                        className="w-full mt-0.5 px-2 py-1 text-[12px] font-mono border border-[var(--color-lavender)] rounded-md focus:outline-none focus:border-[var(--color-primary-purple)]"
+                      />
+                    </div>
+                  </div>
+                  {tcDirty && (
+                    <button
+                      onClick={saveTitleCard}
+                      disabled={tcSaving || !tcStartRaw || !tcEndRaw}
+                      className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-[var(--color-primary-purple)] text-white text-[12px] font-semibold hover:bg-[var(--color-purple-mid)] disabled:opacity-50 transition-colors"
+                    >
+                      {tcSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                      Save title card
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Transcript column */}
+        {/* ── Right: Transcript ── */}
         <div className="flex-1 p-4 flex flex-col gap-3">
-          <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
-            Transcript
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
+              Transcript
+            </p>
+            {transcriptDirty && (
+              <button
+                onClick={saveTranscript}
+                disabled={savingTranscript}
+                className="flex items-center gap-1 px-3 py-1 rounded-full bg-[var(--color-primary-purple)] text-white text-[11px] font-semibold hover:bg-[var(--color-purple-mid)] disabled:opacity-50 transition-colors"
+              >
+                {savingTranscript ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                Save
+              </button>
+            )}
+          </div>
 
           {segments.length === 0 ? (
             <div className="rounded-lg border-2 border-dashed border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] py-8 text-center">
               <p className="text-[12px] text-[var(--color-purple-gray)]">
-                {transcript !== undefined
-                  ? 'Transcript is processing — check back shortly.'
-                  : 'No transcript available for this clip range.'}
+                No transcript available — add segments manually below.
               </p>
             </div>
           ) : (
-            <ul
-              ref={listRef}
-              className="space-y-1 overflow-y-auto max-h-[400px] pr-1"
-            >
+            <ul ref={listRef} className="space-y-1 overflow-y-auto max-h-[360px] pr-1">
               {segments.map((seg, i) => {
-                const isActive = i === activeIdx
+                const isActive  = i === activeIdx
+                const isEditing = editingIdx === i
                 return (
-                  <li
-                    key={seg.index}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => seekTo(seg.startSec)}
-                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') seekTo(seg.startSec) }}
-                    className={[
-                      'flex items-start gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors text-left',
-                      isActive
-                        ? 'bg-[#6B5CE7] text-white'
-                        : 'bg-[var(--color-lavender-tint)] hover:bg-[var(--color-lavender)] text-[var(--color-deep-plum)]',
-                    ].join(' ')}
-                  >
-                    <span className={[
-                      'text-[10px] font-mono shrink-0 mt-0.5 w-8 text-right',
-                      isActive ? 'text-white/70' : 'text-[var(--color-purple-gray)]',
-                    ].join(' ')}>
+                  <li key={seg.index} className={[
+                    'flex items-start gap-2 px-3 py-2 rounded-lg transition-colors',
+                    isActive && !isEditing
+                      ? 'bg-[#6B5CE7] text-white'
+                      : 'bg-[var(--color-lavender-tint)] text-[var(--color-deep-plum)]',
+                  ].join(' ')}>
+                    {/* Timestamp — click to seek */}
+                    <button
+                      onClick={() => seekTo(seg.startSec)}
+                      className={[
+                        'text-[10px] font-mono shrink-0 mt-0.5 w-8 text-right hover:underline',
+                        isActive && !isEditing ? 'text-white/70' : 'text-[var(--color-purple-gray)]',
+                      ].join(' ')}
+                    >
                       {toMMSS(seg.startSec)}
-                    </span>
-                    <span className="text-[13px] leading-snug">{seg.text}</span>
+                    </button>
+
+                    {/* Text — editable */}
+                    {isEditing ? (
+                      <textarea
+                        autoFocus
+                        value={editText}
+                        onChange={e => setEditText(e.target.value)}
+                        rows={2}
+                        className="flex-1 text-[12px] px-2 py-1 rounded border border-[var(--color-primary-purple)] bg-white text-[var(--color-deep-plum)] resize-none focus:outline-none"
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitEdit() }
+                          if (e.key === 'Escape') setEditingIdx(null)
+                        }}
+                      />
+                    ) : (
+                      <span
+                        className="flex-1 text-[13px] leading-snug cursor-pointer"
+                        onClick={() => seekTo(seg.startSec)}
+                      >
+                        {seg.text}
+                      </span>
+                    )}
+
+                    {/* Actions */}
+                    <div className="flex gap-1 shrink-0 mt-0.5">
+                      {isEditing ? (
+                        <>
+                          <button onClick={commitEdit} className="p-0.5 rounded hover:text-green-600">
+                            <Check size={13} />
+                          </button>
+                          <button onClick={() => setEditingIdx(null)} className="p-0.5 rounded hover:text-red-500">
+                            <X size={13} />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => startEdit(i)}
+                            className={['p-0.5 rounded opacity-50 hover:opacity-100', isActive ? 'text-white' : ''].join(' ')}
+                          >
+                            <Pencil size={12} />
+                          </button>
+                          <button
+                            onClick={() => deleteSegment(i)}
+                            className={['p-0.5 rounded opacity-50 hover:opacity-100 hover:text-red-500', isActive ? 'text-white' : ''].join(' ')}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </li>
                 )
               })}
             </ul>
+          )}
+
+          {/* Add segment */}
+          {showAddSeg ? (
+            <div className="rounded-lg border border-[var(--color-lavender)] p-3 space-y-2 bg-[var(--color-lavender-tint)]">
+              <p className="text-[11px] font-bold text-[var(--color-deep-plum)]">Add segment</p>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-[10px] text-[var(--color-purple-gray)] font-semibold">Start (M:SS)</label>
+                  <input
+                    type="text" placeholder="0:30"
+                    value={newSegStart}
+                    onChange={e => setNewSegStart(e.target.value)}
+                    className="w-full mt-0.5 px-2 py-1 text-[12px] font-mono border border-[var(--color-lavender)] rounded-md focus:outline-none focus:border-[var(--color-primary-purple)] bg-white"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-[10px] text-[var(--color-purple-gray)] font-semibold">End (M:SS)</label>
+                  <input
+                    type="text" placeholder="0:35"
+                    value={newSegEnd}
+                    onChange={e => setNewSegEnd(e.target.value)}
+                    className="w-full mt-0.5 px-2 py-1 text-[12px] font-mono border border-[var(--color-lavender)] rounded-md focus:outline-none focus:border-[var(--color-primary-purple)] bg-white"
+                  />
+                </div>
+              </div>
+              <textarea
+                placeholder="Caption text for this segment…"
+                value={newSegText}
+                onChange={e => setNewSegText(e.target.value)}
+                rows={2}
+                className="w-full px-2 py-1.5 text-[12px] border border-[var(--color-lavender)] rounded-md resize-none focus:outline-none focus:border-[var(--color-primary-purple)] bg-white"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={addManualSegment}
+                  disabled={!newSegStart || !newSegEnd || !newSegText.trim()}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[var(--color-primary-purple)] text-white text-[12px] font-semibold hover:bg-[var(--color-purple-mid)] disabled:opacity-40 transition-colors"
+                >
+                  <Plus size={12} /> Add
+                </button>
+                <button
+                  onClick={() => setShowAddSeg(false)}
+                  className="px-3 py-1.5 rounded-full text-[12px] text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowAddSeg(true)}
+              className="flex items-center gap-1.5 text-[12px] text-[var(--color-primary-purple)] hover:text-[var(--color-deep-plum)] transition-colors self-start"
+            >
+              <Plus size={13} /> Add segment manually
+            </button>
           )}
         </div>
       </div>
@@ -321,15 +661,14 @@ export function PreRenderReviewStep() {
     goToPrevStep,
   } = useSrpWorkflow()
 
-  const { clips: processedClips } = useProcessedClips(sessionId)
+  const { clips: processedClips, upsertClip } = useProcessedClips(sessionId)
 
-  // Normalise transcriptWords to { word, start, end }
   const words: { word: string; start: number; end: number }[] = (() => {
     if (!Array.isArray(transcriptWords)) return []
     return (transcriptWords as unknown[]).map((w: unknown) => {
       const obj = w as Record<string, unknown>
       return {
-        word:  typeof obj.word === 'string' ? obj.word : typeof obj.text === 'string' ? obj.text : String(obj.word ?? obj.text ?? ''),
+        word:  typeof obj.word  === 'string' ? obj.word  : typeof obj.text === 'string' ? obj.text : String(obj.word ?? obj.text ?? ''),
         start: typeof obj.start === 'number' ? obj.start : Number(obj.start ?? 0),
         end:   typeof obj.end   === 'number' ? obj.end   : Number(obj.end   ?? 0),
       }
@@ -338,9 +677,30 @@ export function PreRenderReviewStep() {
 
   const atLeastOneReady = Object.values(processedClips).some(pc => pc.status === 'ready')
 
+  const handleSaveTranscript = useCallback(async (clipId: string, segments: SrtSegment[]) => {
+    await upsertClip(clipId, { transcript: JSON.stringify(segments) })
+  }, [upsertClip])
+
+  const handleSaveTitleCard = useCallback(async (
+    clipId: string, url: string, startMs: number, endMs: number,
+  ) => {
+    await upsertClip(clipId, {
+      title_card_url:      url,
+      title_card_start_ms: startMs,
+      title_card_end_ms:   endMs,
+    })
+  }, [upsertClip])
+
+  const handleRemoveTitleCard = useCallback(async (clipId: string) => {
+    await upsertClip(clipId, {
+      title_card_url:      null,
+      title_card_start_ms: null,
+      title_card_end_ms:   null,
+    })
+  }, [upsertClip])
+
   return (
     <div className="space-y-6 pb-8">
-      {/* Header */}
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-widest text-[var(--color-primary-purple)] flex items-center gap-1.5">
           <Film size={12} /> Transcript review
@@ -349,7 +709,7 @@ export function PreRenderReviewStep() {
           Review your cut clips
         </h2>
         <p className="text-[13px] text-[var(--color-purple-gray)] mt-1">
-          Watch each clip and review the auto-generated transcript. Click any transcript line to jump to that moment in the video.
+          Watch each clip, edit captions, add a title card, and fill in any missing segments.
         </p>
       </div>
 
@@ -361,17 +721,18 @@ export function PreRenderReviewStep() {
         <div className="space-y-5">
           {clipSelections.map((clip, idx) => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const clipId  = (clip as any).clip_id ?? `selection-${idx}`
-            const pc      = processedClips[clipId]
-            const status  = pc?.status === 'ready'       ? 'ready'
-                          : pc?.status === 'processing'  ? 'processing'
-                          : pc?.status === 'error'       ? 'error'
-                          : 'pending'
+            const clipId = (clip as any).clip_id ?? `selection-${idx}`
+            const pc     = processedClips[clipId]
+            const status = pc?.status === 'ready'      ? 'ready'
+                         : pc?.status === 'processing' ? 'processing'
+                         : pc?.status === 'error'      ? 'error'
+                         : 'pending'
             return (
               <ClipCard
                 key={clipId}
                 idx={idx}
                 clipId={clipId}
+                sessionId={sessionId ?? ''}
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 clipTitle={(clip as any).clip_title ?? null}
                 startTime={clip.startTime}
@@ -382,14 +743,19 @@ export function PreRenderReviewStep() {
                 status={status}
                 errorMsg={pc?.error_message}
                 createdAt={pc?.created_at}
+                titleCardUrl={pc?.title_card_url}
+                titleCardStartMs={pc?.title_card_start_ms}
+                titleCardEndMs={pc?.title_card_end_ms}
                 words={words}
+                onSaveTranscript={handleSaveTranscript}
+                onSaveTitleCard={handleSaveTitleCard}
+                onRemoveTitleCard={handleRemoveTitleCard}
               />
             )
           })}
         </div>
       )}
 
-      {/* Navigation */}
       <div className="flex items-center justify-between gap-3 pt-2">
         <SrpButton variant="ghost" onClick={goToPrevStep} leadingIcon={<ArrowLeft size={14} />}>
           Back
