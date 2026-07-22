@@ -41,12 +41,16 @@ LENGTH & FORMAT:
 - Do not use the word "energy."
 - Use emojis only if the voice guide does. If the voice guide is silent on emojis, limit to 1-2 max and only where they add warmth, not decoration.
 
+IF THE COACH GIVES DIRECTION:
+Follow it completely. Do not dilute it with other angles. Do not fall back to generic patterns. The coach's direction is the brief. Write from it.
+
 CONTENT RULES:
-- Lead with the most vivid or emotionally resonant moment from the weekend. Not the most important on paper. The most felt.
+- This is a WEEKEND EXPERIENCE recap, not a sermon recap. The teaching is one small part of a bigger weekend.
+- At most one sentence may touch on the teaching or message — and only if it fits naturally. The rest is about being there: the worship, the lobby moments, the people.
+- Lead with what it felt like to be in the room. Not what was said, but what was experienced.
 - If specific highlights are provided (baptisms, worship moments, child dedications, salvations, special guests, milestones), weave them in naturally. Show what they felt like, not just what they were.
 - If no specific highlights are provided, write about the general feeling of gathering: the atmosphere, the connection, the moments between the big moments.
 - Avoid vague spiritual language that sounds nice but says nothing. "God moved this weekend" is empty. "There wasn't a dry eye during the baptisms" is specific.
-- Don't recap the sermon. This is about the experience, not the content.
 - Paint small, specific pictures. The sound of the room during worship. The look on someone's face during prayer. Details make it real.
 
 WHAT TO CAPTURE:
@@ -179,13 +183,20 @@ export default async function handler(req: any, res: any) {
     ? `\n\nDIRECTION FROM THE COACH — THIS OVERRIDES ALL OTHER DEFAULTS. Lean into exactly what is asked here. Do not soften it, dilute it with other angles, or fall back to generic patterns:\n"${userGuidance}"\n`
     : ''
 
+  // Highlights mode: capture the weekend experience (lobby, worship, community, milestones).
+  // The sermon transcript would pull the AI toward teaching content — don't send it.
+  // Teaching mode: the transcript IS the point, include it.
+  const transcriptSection = promptType === 'teaching' && transcript
+    ? `\n\nSermon transcript:\n${transcript.slice(0, 20000)}`
+    : ''
+
   const userPrompt =
     `Generate 3-5 photo recap caption options for this weekend's service.\n` +
     guidanceBlock +
     (deliverableIntel ? `\nChurch-specific guidance for this deliverable:\n${deliverableIntel}\n` : '') +
     lookingBackSection +
     insightsSection +
-    (transcript ? `\n\nSermon transcript (use for message context where relevant):\n${transcript.slice(0, 20000)}` : '')
+    transcriptSection
 
   try {
     const result = await callGateway<{ captions: any[] }>({
