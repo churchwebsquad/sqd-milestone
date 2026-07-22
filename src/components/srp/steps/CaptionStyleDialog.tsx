@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { X, Check } from 'lucide-react'
 import { SrpButton } from '../_shared/SrpButton'
 import {
@@ -7,7 +7,6 @@ import {
 } from '../../../lib/captionStyles'
 import { ClipLoopPlayer } from '../ClipLoopPlayer'
 import { VimeoClipLoopPlayer } from '../VimeoClipLoopPlayer'
-import { DirectClipLoopPlayer } from '../DirectClipLoopPlayer'
 
 export type { CaptionStyleConfig }
 
@@ -79,33 +78,84 @@ function detectKind(url: string, sourceType?: string | null): VideoKind {
   return null
 }
 
+/* ---------- types ---------- */
+
+interface TranscriptSegment {
+  startSec: number
+  endSec:   number
+  text:     string
+}
+
 /* ---------- caption overlay renderer ---------- */
 
-const SAMPLE_TEXT      = 'faith has made you well'
-const SAMPLE_HIGHLIGHT = 'well'
+const SAMPLE_WORDS = ['faith', 'has', 'made', 'you', 'well']
 
-function CaptionOverlay({ cfg }: { cfg: CaptionStyleConfig }) {
+function renderWords(
+  words: string[],
+  highlightIdx: number | null,
+  meta: ReturnType<typeof styleBySlug>,
+  cfg: CaptionStyleConfig,
+  fontSize: number,
+  textTransform: React.CSSProperties['textTransform'],
+) {
+  if (!meta) return null
+  return words.map((word, i) => {
+    const isHighlight = meta.usesHighlight && (highlightIdx !== null ? i === highlightIdx : i === words.length - 1)
+    const textColor   = isHighlight ? (cfg.highlightColor ?? meta.defaults.highlightColor ?? '#FBA09C') : (cfg.textColor ?? meta.defaults.textColor)
+    const style: React.CSSProperties = {
+      color:        textColor,
+      fontFamily:   cfg.fontFamily || undefined,
+      fontSize:     `${fontSize}px`,
+      fontWeight:   'bold',
+      textTransform,
+      textShadow:   meta.usesBackground ? undefined : '0 1px 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.8)',
+      background:   meta.usesBackground
+        ? (cfg.bgColor ?? meta.defaults.bgColor ?? '#000')
+        : undefined,
+      padding:      meta.usesBackground ? '1px 6px' : undefined,
+      borderRadius: meta.usesBackground ? '3px' : undefined,
+    }
+    if (isHighlight && meta.usesHighlight && !meta.usesBackground) {
+      style.background   = cfg.highlightColor ?? meta.defaults.highlightColor ?? '#FBA09C'
+      style.color        = '#000'
+      style.padding      = '1px 5px'
+      style.borderRadius = '999px'
+    }
+    return <span key={i} style={style}>{word}</span>
+  })
+}
+
+function CaptionOverlay({
+  cfg,
+  segments,
+  currentSec,
+}: {
+  cfg: CaptionStyleConfig
+  segments?: TranscriptSegment[]
+  currentSec?: number
+}) {
   const meta = styleBySlug(cfg.captionSlug ?? '')
   if (!meta) return null
 
-  const words    = SAMPLE_TEXT.split(' ')
-  const scale    = cfg.scale ?? 1.0
-  const fontSize = Math.round(14 * scale)
-  const offset   = cfg.offset ?? 0
+  const scale         = cfg.scale ?? 1.0
+  const fontSize      = Math.round(16 * scale)
+  const offset        = cfg.offset ?? 0
+  const posClass      = cfg.position === 'top' ? 'top-3' : cfg.position === 'center' ? 'top-1/2 -translate-y-1/2' : 'bottom-3'
+  const textTransform = cfg.textCase === 'upper' ? 'uppercase' : cfg.textCase === 'lower' ? 'lowercase' : cfg.textCase === 'title' ? 'capitalize' : undefined
 
-  const posClass = cfg.position === 'top'
-    ? 'top-3'
-    : cfg.position === 'center'
-      ? 'top-1/2 -translate-y-1/2'
-      : 'bottom-3'
+  // Resolve what text to display
+  let displayWords: string[] = SAMPLE_WORDS
+  let highlightIdx: number | null = SAMPLE_WORDS.length - 1
 
-  const textTransform = cfg.textCase === 'upper'
-    ? 'uppercase'
-    : cfg.textCase === 'lower'
-      ? 'lowercase'
-      : cfg.textCase === 'title'
-        ? 'capitalize'
-        : undefined
+  if (segments && currentSec !== undefined) {
+    const active = segments.find(s => currentSec >= s.startSec - 0.1 && currentSec < s.endSec + 0.1)
+    if (active) {
+      displayWords = active.text.split(' ').filter(Boolean)
+      highlightIdx = displayWords.length - 1
+    } else {
+      return null // nothing to show between segments
+    }
+  }
 
   return (
     <div
@@ -113,46 +163,30 @@ function CaptionOverlay({ cfg }: { cfg: CaptionStyleConfig }) {
       style={{ transform: offset ? `translateY(${-offset * 0.12}px)` : undefined }}
     >
       <div className="flex flex-wrap justify-center gap-x-1 gap-y-0.5 max-w-[90%]">
-        {words.map((word, i) => {
-          const isHighlight = meta.usesHighlight && word === SAMPLE_HIGHLIGHT
-          const textColor   = isHighlight ? (cfg.highlightColor ?? meta.defaults.highlightColor ?? '#FBA09C') : (cfg.textColor ?? meta.defaults.textColor)
-          const style: React.CSSProperties = {
-            color:       textColor,
-            fontFamily:  cfg.fontFamily || undefined,
-            fontSize:    `${fontSize}px`,
-            fontWeight:  'bold',
-            textTransform,
-            textShadow:  meta.usesBackground ? undefined : '0 1px 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.8)',
-            background:  meta.usesBackground
-              ? (isHighlight && !meta.usesHighlight ? (cfg.highlightColor ?? meta.defaults.bgColor ?? '#000') : (cfg.bgColor ?? meta.defaults.bgColor ?? '#000'))
-              : undefined,
-            padding:     meta.usesBackground ? '1px 6px' : undefined,
-            borderRadius: meta.usesBackground ? '3px' : undefined,
-          }
-          if (isHighlight && meta.usesHighlight && !meta.usesBackground) {
-            style.background   = cfg.highlightColor ?? meta.defaults.highlightColor ?? '#FBA09C'
-            style.color        = '#000'
-            style.padding      = '1px 5px'
-            style.borderRadius = '999px'
-          }
-          return <span key={i} style={style}>{word}</span>
-        })}
+        {renderWords(displayWords, highlightIdx, meta, cfg, fontSize, textTransform)}
       </div>
     </div>
   )
 }
 
-/* ---------- style tile ---------- */
+/* ---------- animated style tile ---------- */
 
-function StyleTile({ style, selected, onSelect }: { style: typeof CAPTION_STYLES[0]; selected: boolean; onSelect: () => void }) {
-  const words = SAMPLE_TEXT.split(' ')
+function AnimatedStyleTile({ style, selected, onSelect }: { style: typeof CAPTION_STYLES[0]; selected: boolean; onSelect: () => void }) {
+  const [highlightIdx, setHighlightIdx] = useState(0)
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setHighlightIdx(prev => (prev + 1) % SAMPLE_WORDS.length)
+    }, 450)
+    return () => clearInterval(id)
+  }, [])
+
   return (
     <button
       type="button"
       onClick={onSelect}
       className="group flex flex-col items-center gap-1.5 w-full text-left"
     >
-      {/* Card */}
       <div
         className={[
           'relative w-full rounded-xl overflow-hidden transition-all',
@@ -163,11 +197,11 @@ function StyleTile({ style, selected, onSelect }: { style: typeof CAPTION_STYLES
         ].join(' ')}
         style={{ aspectRatio: '9/16' }}
       >
-        {/* Caption preview — centered in the lower third */}
+        {/* Animated caption preview */}
         <div className="absolute inset-x-0 bottom-[28%] flex justify-center px-3">
           <div className="flex flex-wrap justify-center gap-x-1 gap-y-1 max-w-full">
-            {words.map((word, i) => {
-              const isHighlight = style.usesHighlight && word === SAMPLE_HIGHLIGHT
+            {SAMPLE_WORDS.map((word, i) => {
+              const isHighlight = style.usesHighlight && i === highlightIdx
               const textColor   = isHighlight
                 ? (style.defaults.highlightColor ?? '#FBA09C')
                 : (style.defaults.textColor ?? '#ffffff')
@@ -176,11 +210,11 @@ function StyleTile({ style, selected, onSelect }: { style: typeof CAPTION_STYLES
                 fontSize:     '13px',
                 fontWeight:   'bold',
                 lineHeight:   1.4,
-                letterSpacing: '0.01em',
-                textShadow:   style.usesBackground ? undefined : '0 1px 3px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.8)',
+                textShadow:   style.usesBackground ? undefined : '0 1px 3px rgba(0,0,0,0.95)',
                 background:   style.usesBackground ? (style.defaults.bgColor ?? '#000') : undefined,
                 padding:      style.usesBackground ? '2px 7px' : undefined,
                 borderRadius: style.usesBackground ? '4px' : undefined,
+                transition:   'color 0.15s, background 0.15s',
               }
               if (isHighlight && style.usesHighlight && !style.usesBackground) {
                 st.background   = style.defaults.highlightColor ?? '#FBA09C'
@@ -204,7 +238,6 @@ function StyleTile({ style, selected, onSelect }: { style: typeof CAPTION_STYLES
         </div>
       </div>
 
-      {/* Label below card */}
       <span className={[
         'text-[11px] font-semibold text-center leading-tight transition-colors',
         selected ? 'text-[var(--color-primary-purple)]' : 'text-[var(--color-deep-plum)] group-hover:text-[var(--color-primary-purple)]',
@@ -214,6 +247,8 @@ function StyleTile({ style, selected, onSelect }: { style: typeof CAPTION_STYLES
     </button>
   )
 }
+
+/* ---------- style tile ---------- */
 
 /* ---------- color picker ---------- */
 
@@ -254,15 +289,18 @@ interface Props {
   clipStartSec?:    number
   clipEndSec?:      number
   clipText?:        string
+  segments?:        TranscriptSegment[]
 }
 
-export function CaptionStyleDialog({ initial, onApply, onClose, videoUrl, videoSourceType, clipStartSec, clipEndSec }: Props) {
+export function CaptionStyleDialog({ initial, onApply, onClose, videoUrl, videoSourceType, clipStartSec, clipEndSec, segments }: Props) {
   const [cfg, setCfg] = useState<CaptionStyleConfig>(initial)
   const [tab, setTab] = useState<CaptionGroup>(() => {
     if (initial.captionSlug === CUSTOM_SLUG) return 'Custom'
     const meta = styleBySlug(initial.captionSlug ?? '')
     return (meta?.group ?? 'Traditional') as CaptionGroup
   })
+  const [currentSec, setCurrentSec] = useState(0)
+  const videoRef = useRef<HTMLVideoElement>(null)
   const nonce = 0
 
   const patch = <K extends keyof CaptionStyleConfig>(key: K, val: CaptionStyleConfig[K]) =>
@@ -324,13 +362,22 @@ export function CaptionStyleDialog({ initial, onApply, onClose, videoUrl, videoS
             <div className="flex-1 flex flex-col items-center justify-start px-3 pb-3 min-h-0">
               <div className="relative w-full rounded-xl overflow-hidden bg-black shadow-lg" style={{ aspectRatio: '9/16' }}>
                 {kind === 'youtube' && youtubeId && (
-                  <ClipLoopPlayer videoId={youtubeId} startSec={startSec} endSec={endSec} nonce={nonce} />
+                  <ClipLoopPlayer videoId={youtubeId} startSec={startSec} endSec={endSec} nonce={nonce} onTimeUpdate={setCurrentSec} />
                 )}
                 {kind === 'vimeo' && vimeoId && (
                   <VimeoClipLoopPlayer vimeoId={vimeoId} startSec={startSec} endSec={endSec} nonce={nonce} />
                 )}
                 {kind === 'direct' && directSrc && (
-                  <DirectClipLoopPlayer src={directSrc} startSec={startSec} endSec={endSec} nonce={nonce} />
+                  <video
+                    ref={videoRef}
+                    src={directSrc}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="absolute inset-0 w-full h-full object-cover"
+                    onTimeUpdate={e => setCurrentSec(e.currentTarget.currentTime)}
+                  />
                 )}
                 {!kind && (
                   <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-[#2d1b4e] to-[#0d0820]">
@@ -338,10 +385,12 @@ export function CaptionStyleDialog({ initial, onApply, onClose, videoUrl, videoS
                       style={{ background: 'radial-gradient(circle, #7c3aed 0%, transparent 70%)' }} />
                   </div>
                 )}
-                <CaptionOverlay cfg={cfg} />
+                <CaptionOverlay cfg={cfg} segments={segments} currentSec={segments?.length ? currentSec : undefined} />
               </div>
               <p className="text-[9px] text-[var(--color-purple-gray)] text-center mt-1.5 leading-snug">
-                Final captions are synced precisely during rendering.
+                {segments?.length
+                  ? 'Showing your actual transcript — synced to the clip.'
+                  : 'Final captions are synced precisely during rendering.'}
               </p>
             </div>
           </div>
@@ -391,7 +440,7 @@ export function CaptionStyleDialog({ initial, onApply, onClose, videoUrl, videoS
                   <ul className="grid grid-cols-3 gap-3">
                     {tabStyles.map(style => (
                       <li key={style.slug}>
-                        <StyleTile
+                        <AnimatedStyleTile
                           style={style}
                           selected={style.slug === cfg.captionSlug}
                           onSelect={() => handleSelectSlug(style.slug)}

@@ -11,6 +11,17 @@ import { MUSIC_LIBRARY } from '../../../lib/musicLibrary'
 import { styleBySlug } from '../../../lib/captionStyles'
 import { useProcessedClips } from '../../../hooks/useProcessedClips'
 
+function parseSegments(transcript: string | null | undefined) {
+  if (!transcript) return undefined
+  try {
+    const parsed = JSON.parse(transcript)
+    if (Array.isArray(parsed) && parsed.length > 0 && 'startSec' in parsed[0]) {
+      return parsed as { startSec: number; endSec: number; text: string }[]
+    }
+  } catch { /* not JSON segments */ }
+  return undefined
+}
+
 interface PerClipSettings {
   captionCfg:    CaptionStyleConfig
   musicMode:     string
@@ -229,6 +240,7 @@ export function CreativeDirectionStep() {
         const firstClipId = firstClip?.clip_id ?? firstClip?.clip_name ?? ''
         const pc          = processedClips[firstClipId]
         const useRendered = pc?.status === 'ready' && !!pc.video_url
+        const segs = parseSegments(pc?.transcript)
         return (
           <CaptionStyleDialog
             initial={globalCaptionCfg}
@@ -239,6 +251,7 @@ export function CreativeDirectionStep() {
             clipStartSec={useRendered ? 0 : (firstClip ? parseFloat(firstClip.startTime ?? '0') || 0 : undefined)}
             clipEndSec={useRendered ? (pc.duration_ms ? pc.duration_ms / 1000 : undefined) : (firstClip ? parseFloat(firstClip.endTime ?? '0') || undefined : undefined)}
             clipText={firstClip?.caption_text ?? firstClip?.quote}
+            segments={segs}
           />
         )
       })()}
@@ -249,6 +262,7 @@ export function CreativeDirectionStep() {
         const clip = idx >= 0 ? clipSelections[idx] : undefined
         const pc   = processedClips[captionDialogFor]
         const useRendered = pc?.status === 'ready' && !!pc.video_url
+        const segs = parseSegments(pc?.transcript)
         return (
           <CaptionStyleDialog
             initial={perClip[captionDialogFor]?.captionCfg ?? DEFAULT_CAPTION_CFG}
@@ -259,6 +273,7 @@ export function CreativeDirectionStep() {
             clipStartSec={useRendered ? 0 : (clip ? parseFloat(clip.startTime ?? '0') || 0 : undefined)}
             clipEndSec={useRendered ? (pc.duration_ms ? pc.duration_ms / 1000 : undefined) : (clip ? parseFloat(clip.endTime ?? '0') || undefined : undefined)}
             clipText={clip?.caption_text ?? clip?.quote}
+            segments={segs}
           />
         )
       })()}
