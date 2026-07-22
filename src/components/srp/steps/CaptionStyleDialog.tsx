@@ -490,14 +490,6 @@ export function CaptionStyleDialog({ initial, onApply, onClose, videoUrl, videoS
                   <Toggle checked={cfg.reverentCaps ?? false} onChange={v => patch('reverentCaps', v)} />
                 </div>
 
-                {/* 8. Deliver 9:16 */}
-                <div className={rowCls}>
-                  <div>
-                    <p className="text-[12px] font-semibold text-[var(--color-deep-plum)]">Deliver as 9:16 reel</p>
-                    <p className="text-[10px] text-[var(--color-purple-gray)]">Final output cropped to vertical format</p>
-                  </div>
-                  <Toggle checked={cfg.deliver9x16 ?? false} onChange={v => patch('deliver9x16', v)} />
-                </div>
 
               </div>
             </div>
