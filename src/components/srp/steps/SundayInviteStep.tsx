@@ -86,6 +86,14 @@ export function SundayInviteStep() {
   const guidance     = sundayInviteInput?.guidance ?? ''
   const lookingAhead = sundayInviteInput?.lookingAhead ?? ''
 
+  // Pull announcements from the service overview so any special events, upcoming
+  // series, or baptism announcements inform the invite without leaking sermon content.
+  const overviewAnnouncements: string[] = autoDrafts?.overview?.announcements ?? []
+  const announcementsContext = overviewAnnouncements.length
+    ? `Special announcements from this weekend's service:\n${overviewAnnouncements.map((a: string) => `- ${a}`).join('\n')}`
+    : ''
+  const lookingAheadWithAnnouncements = [lookingAhead, announcementsContext].filter(Boolean).join('\n\n')
+
   // Auto-pull "LOOKING AHEAD" from the ClickUp task description on first load
   useEffect(() => {
     if (!clickupTaskId) return
@@ -111,7 +119,7 @@ export function SundayInviteStep() {
         transcript:     transcript || '',
         brandVoice,
         accountContext: buildAccountContext(account, sermonSubmission),
-        lookingAhead:   lookingAhead || undefined,
+        lookingAhead:   lookingAheadWithAnnouncements || undefined,
         userGuidance:   guidance || undefined,
         keyInsights:    keyInsights.length ? keyInsights : undefined,
       })
@@ -124,7 +132,7 @@ export function SundayInviteStep() {
     } finally {
       setGenerating(false)
     }
-  }, [transcript, brandVoice, account, sermonSubmission, lookingAhead, guidance, keyInsights])
+  }, [transcript, brandVoice, account, sermonSubmission, lookingAheadWithAnnouncements, guidance, keyInsights])
 
   const handleRefine = useCallback(async () => {
     if (!sundayInvite) return
@@ -134,7 +142,7 @@ export function SundayInviteStep() {
         transcript:     transcript || '',
         brandVoice,
         accountContext: buildAccountContext(account, sermonSubmission),
-        lookingAhead:   lookingAhead || undefined,
+        lookingAhead:   lookingAheadWithAnnouncements || undefined,
         userGuidance:   `Starting from this draft:\n\n${sundayInvite}\n\nDirection: ${refineGuidance || 'improve it'}`,
         keyInsights:    keyInsights.length ? keyInsights : undefined,
       })
@@ -148,7 +156,7 @@ export function SundayInviteStep() {
     } finally {
       setRefining(false)
     }
-  }, [sundayInvite, transcript, brandVoice, account, sermonSubmission, lookingAhead, refineGuidance, keyInsights, setSundayInvite])
+  }, [sundayInvite, transcript, brandVoice, account, sermonSubmission, lookingAheadWithAnnouncements, refineGuidance, keyInsights, setSundayInvite])
 
   const pickOption = (idx: number) => {
     setSelectedIdx(idx)

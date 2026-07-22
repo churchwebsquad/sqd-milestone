@@ -100,7 +100,6 @@ export default async function handler(req: any, res: any) {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !serviceRoleKey) return res.status(500).json({ error: 'Missing Supabase env vars' })
 
-  const transcript       = typeof req.body?.transcript === 'string' ? req.body.transcript : ''
   const brandVoice       = typeof req.body?.brandVoice === 'string' ? req.body.brandVoice : ''
   const accountContext   = (req.body?.accountContext ?? {}) as Record<string, any>
   const userGuidance     = typeof req.body?.userGuidance === 'string' ? req.body.userGuidance : ''
@@ -137,10 +136,7 @@ export default async function handler(req: any, res: any) {
     guidanceBlock +
     (deliverableIntel ? `\nChurch-specific guidance for this deliverable:\n${deliverableIntel}\n\n` : '') +
     lookingAheadSection +
-    insightsSection +
-    (transcript
-      ? `\n\nChurch context (for voice and tone only — do NOT reference or tease this content, it is from a past service):\n${transcript.slice(0, 6000)}`
-      : '')
+    insightsSection
 
   try {
     const result = await callGateway<{ invites: any[] }>({
