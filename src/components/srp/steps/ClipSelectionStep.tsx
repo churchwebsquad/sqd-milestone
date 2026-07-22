@@ -252,6 +252,7 @@ interface ClipCardProps {
   isPicked:      boolean
   isPinned:      boolean
   isActive:      boolean
+  isLocked:      boolean
   renderStatus:  RenderStatus
   onSelect:      () => void
   onPlay:        () => void
@@ -269,7 +270,7 @@ function isPlaceholderQuote(q: string | undefined): boolean {
 }
 
 function ClipCard({
-  clip, index, isPicked, isPinned, isActive,
+  clip, index, isPicked, isPinned, isActive, isLocked,
   renderStatus, onSelect, onPlay, onPin, onResetRender,
   transcriptWords, onUpdateTimes,
 }: ClipCardProps) {
@@ -307,19 +308,22 @@ function ClipCard({
     ].join(' ')}>
       <div className="flex items-start gap-3 px-4 py-3">
 
-        {/* Select radio */}
+        {/* Select radio — locked once sent to transcript review */}
         <button
           type="button"
-          onClick={() => { onSelect(); onPlay() }}
-          aria-label={isPicked ? 'Deselect clip' : 'Select clip'}
+          onClick={() => { if (!isLocked) { onSelect(); onPlay() } }}
+          aria-label={isLocked ? 'Clip locked — sent to transcript review' : isPicked ? 'Deselect clip' : 'Select clip'}
+          title={isLocked ? 'This clip has been sent to transcript review and cannot be removed' : undefined}
           className={[
             'shrink-0 mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors',
-            isPicked
-              ? 'border-[var(--color-primary-purple)] bg-[var(--color-primary-purple)]'
-              : 'border-[var(--color-lavender)] hover:border-[var(--color-primary-purple)]',
+            isLocked
+              ? 'border-[var(--color-primary-purple)] bg-[var(--color-primary-purple)] cursor-not-allowed opacity-70'
+              : isPicked
+                ? 'border-[var(--color-primary-purple)] bg-[var(--color-primary-purple)]'
+                : 'border-[var(--color-lavender)] hover:border-[var(--color-primary-purple)]',
           ].join(' ')}
         >
-          {isPicked && <Check size={10} strokeWidth={3} className="text-white" />}
+          {(isPicked || isLocked) && <Check size={10} strokeWidth={3} className="text-white" />}
         </button>
 
         {/* Content */}
@@ -638,10 +642,16 @@ export function ClipSelectionStep() {
   const togglePick = useCallback((clip: SrpClipSelection) => {
     const prev = clipSelectionsRef.current
     const idx = prev.findIndex((c: SrpClipSelection) => c.quote === clip.quote)
-    if (idx >= 0) { setClipSelections(prev.filter((_: SrpClipSelection, i: number) => i !== idx)); return }
+    if (idx >= 0) {
+      // Lock clips that have been sent to transcript review — can't deselect
+      const clipId = (prev[idx] as any).clip_id
+      if (clipId && processedClips[clipId]) return
+      setClipSelections(prev.filter((_: SrpClipSelection, i: number) => i !== idx))
+      return
+    }
     if (prev.length >= reelCount) return
     setClipSelections([...prev, assignClipId(clip, prev.length + 1)])
-  }, [reelCount, setClipSelections])
+  }, [reelCount, setClipSelections, processedClips])
 
   const isPicked = useCallback((clip: SrpClipSelection) =>
     clipSelections.some(c => c.quote === clip.quote), [clipSelections])
@@ -869,6 +879,7 @@ export function ClipSelectionStep() {
                   isPicked={isPicked(c)}
                   isPinned={pinnedIds.has(clipId)}
                   isActive={activeClipIndex === i}
+                  isLocked={!!processedClips[clipId]}
                   renderStatus={renderStatus}
                   onSelect={() => togglePick(cWithId)}
                   onPlay={() => {
