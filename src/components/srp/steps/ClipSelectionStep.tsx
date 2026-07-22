@@ -518,7 +518,7 @@ export function ClipSelectionStep() {
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
-  const { clips: processedClips, upsertClip, deleteClip } = useProcessedClips(sessionId)
+  const { clips: processedClips, loaded: processedClipsLoaded, upsertClip, deleteClip } = useProcessedClips(sessionId)
 
   // Seed from autoDrafts on first load if no suggestions yet
   useEffect(() => {
@@ -904,8 +904,8 @@ export function ClipSelectionStep() {
         </div>
       )}
 
-      {/* Render panel — shows once clips are selected */}
-      {clipSelections.length > 0 && (
+      {/* Render panel — shows once clips are selected and processed clips have loaded from DB */}
+      {clipSelections.length > 0 && processedClipsLoaded && (
         <div className="rounded-2xl border border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] p-5 space-y-4">
           <div>
             <p className="text-[10px] uppercase tracking-[0.12em] font-bold text-[var(--color-primary-purple)] mb-1">

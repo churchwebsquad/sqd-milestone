@@ -20,6 +20,7 @@ const srpPipeline = () => (supabase as any).schema('srp_pipeline')
 
 export function useProcessedClips(sessionId: string | null | undefined) {
   const [clips, setClips] = useState<Record<string, ProcessedClip>>({})
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     if (!sessionId) return
@@ -28,8 +29,8 @@ export function useProcessedClips(sessionId: string | null | undefined) {
       .select('*')
       .eq('session_id', sessionId)
       .then(({ data }: { data: ProcessedClip[] | null }) => {
-        if (!data) return
-        setClips(Object.fromEntries(data.map((r: ProcessedClip) => [r.clip_id, r])))
+        if (data) setClips(Object.fromEntries(data.map((r: ProcessedClip) => [r.clip_id, r])))
+        setLoaded(true)
       })
   }, [sessionId])
 
@@ -87,5 +88,5 @@ export function useProcessedClips(sessionId: string | null | undefined) {
     })
   }, [sessionId])
 
-  return { clips, upsertClip, deleteClip }
+  return { clips, loaded, upsertClip, deleteClip }
 }
