@@ -1,5 +1,13 @@
 import { useEffect, useRef } from 'react'
 
+declare global {
+  interface Window {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    YT: any
+    onYouTubeIframeAPIReady: () => void
+  }
+}
+
 interface SkipRange { from: number; to: number }
 
 interface Props {

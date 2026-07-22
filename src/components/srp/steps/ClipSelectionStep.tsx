@@ -483,10 +483,10 @@ function RenderTimer({ startedAt }: { startedAt: string | null | undefined }) {
     return () => clearInterval(id)
   }, [startedAt])
 
-  if (!startedAt) return <span>Rendering…</span>
+  if (!startedAt) return <span>Cutting clip…</span>
   const m = Math.floor(elapsed / 60)
   const s = elapsed % 60
-  return <span>Rendering for {m > 0 ? `${m}m ` : ''}{s}s…</span>
+  return <span>Cutting clip… {m > 0 ? `${m}m ` : ''}{s}s</span>
 }
 
 // ── Generate clips response ───────────────────────────────────────────────────
@@ -898,13 +898,13 @@ export function ClipSelectionStep() {
         <div className="rounded-2xl border border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] p-5 space-y-4">
           <div>
             <p className="text-[10px] uppercase tracking-[0.12em] font-bold text-[var(--color-primary-purple)] mb-1">
-              Ready to render
+              Clips queued for review
             </p>
             <h3 className="text-[16px] font-bold text-[var(--color-deep-plum)]">
-              And now, time to render your clips
+              Send your clips to transcript review
             </h3>
             <p className="text-[12px] text-[var(--color-purple-gray)] mt-0.5">
-              Hit render on each clip below, then continue while they process in the background.
+              Send each clip to be cut and transcribed. Continue working while they process in the background.
             </p>
           </div>
 
@@ -962,7 +962,7 @@ export function ClipSelectionStep() {
                       </div>
                     ) : status === 'ready' ? (
                       <div className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-50 border border-green-200 text-green-700 text-[12px] font-semibold">
-                        <CheckCircle2 size={13} /> Rendered
+                        <CheckCircle2 size={13} /> In Review
                       </div>
                     ) : (
                       <button
@@ -976,7 +976,7 @@ export function ClipSelectionStep() {
                         ].join(' ')}
                       >
                         <Clapperboard size={13} />
-                        {status === 'error' ? 'Retry' : 'Render'}
+                        {status === 'error' ? 'Retry' : 'Send to Review'}
                       </button>
                     )}
                   </div>
