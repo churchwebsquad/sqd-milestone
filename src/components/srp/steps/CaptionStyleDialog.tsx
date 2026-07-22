@@ -150,58 +150,67 @@ function StyleTile({ style, selected, onSelect }: { style: typeof CAPTION_STYLES
     <button
       type="button"
       onClick={onSelect}
-      className={[
-        'relative w-full rounded-xl overflow-hidden transition-all',
-        'bg-gradient-to-b from-[#2d1b4e] via-[#1a0f35] to-[#0d0820]',
-        selected
-          ? 'ring-2 ring-[var(--color-primary-purple)] ring-offset-1'
-          : 'hover:ring-1 hover:ring-[var(--color-primary-purple)]/50',
-      ].join(' ')}
-      style={{ aspectRatio: '9/16' }}
+      className="group flex flex-col items-center gap-1.5 w-full text-left"
     >
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div className="w-1/2 h-1/2 rounded-full opacity-20"
-          style={{ background: 'radial-gradient(circle, #7c3aed 0%, transparent 70%)' }} />
-      </div>
+      {/* Card */}
+      <div
+        className={[
+          'relative w-full rounded-xl overflow-hidden transition-all',
+          'bg-gradient-to-b from-[#1c1030] via-[#150c28] to-[#0d0820]',
+          selected
+            ? 'ring-2 ring-[var(--color-primary-purple)] ring-offset-2'
+            : 'ring-1 ring-white/10 group-hover:ring-[var(--color-primary-purple)]/60',
+        ].join(' ')}
+        style={{ aspectRatio: '9/16' }}
+      >
+        {/* Caption preview — centered in the lower third */}
+        <div className="absolute inset-x-0 bottom-[28%] flex justify-center px-3">
+          <div className="flex flex-wrap justify-center gap-x-1 gap-y-1 max-w-full">
+            {words.map((word, i) => {
+              const isHighlight = style.usesHighlight && word === SAMPLE_HIGHLIGHT
+              const textColor   = isHighlight
+                ? (style.defaults.highlightColor ?? '#FBA09C')
+                : (style.defaults.textColor ?? '#ffffff')
+              const st: React.CSSProperties = {
+                color:        textColor,
+                fontSize:     '13px',
+                fontWeight:   'bold',
+                lineHeight:   1.4,
+                letterSpacing: '0.01em',
+                textShadow:   style.usesBackground ? undefined : '0 1px 3px rgba(0,0,0,0.95), 0 0 8px rgba(0,0,0,0.8)',
+                background:   style.usesBackground ? (style.defaults.bgColor ?? '#000') : undefined,
+                padding:      style.usesBackground ? '2px 7px' : undefined,
+                borderRadius: style.usesBackground ? '4px' : undefined,
+              }
+              if (isHighlight && style.usesHighlight && !style.usesBackground) {
+                st.background   = style.defaults.highlightColor ?? '#FBA09C'
+                st.color        = '#000'
+                st.padding      = '2px 6px'
+                st.borderRadius = '999px'
+              }
+              return <span key={i} style={st}>{word}</span>
+            })}
+          </div>
+        </div>
 
-      <div className="absolute inset-x-0 bottom-3 flex justify-center px-2">
-        <div className="flex flex-wrap justify-center gap-x-0.5 gap-y-0.5 max-w-[95%]">
-          {words.map((word, i) => {
-            const isHighlight = style.usesHighlight && word === SAMPLE_HIGHLIGHT
-            const textColor   = isHighlight
-              ? (style.defaults.highlightColor ?? '#FBA09C')
-              : (style.defaults.textColor ?? '#ffffff')
-            const st: React.CSSProperties = {
-              color:        textColor,
-              fontSize:     '9px',
-              fontWeight:   'bold',
-              lineHeight:   1.3,
-              textShadow:   style.usesBackground ? undefined : '0 1px 2px rgba(0,0,0,0.95)',
-              background:   style.usesBackground ? (style.defaults.bgColor ?? '#000') : undefined,
-              padding:      style.usesBackground ? '0px 4px' : undefined,
-              borderRadius: style.usesBackground ? '2px' : undefined,
-            }
-            if (isHighlight && style.usesHighlight && !style.usesBackground) {
-              st.background   = style.defaults.highlightColor ?? '#FBA09C'
-              st.color        = '#000'
-              st.padding      = '0px 4px'
-              st.borderRadius = '999px'
-            }
-            return <span key={i} style={st}>{word}</span>
-          })}
+        {/* Selection indicator */}
+        <div className={[
+          'absolute top-2 right-2 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all',
+          selected
+            ? 'bg-[var(--color-primary-purple)] border-[var(--color-primary-purple)]'
+            : 'bg-transparent border-white/40 group-hover:border-white/70',
+        ].join(' ')}>
+          {selected && <Check size={10} strokeWidth={3} className="text-white" />}
         </div>
       </div>
 
-      <div className="absolute bottom-0 inset-x-0 h-6 bg-gradient-to-t from-black/70 to-transparent" />
-      <span className="absolute bottom-0.5 inset-x-0 text-center text-[8px] font-semibold text-white/80 px-1 truncate">
+      {/* Label below card */}
+      <span className={[
+        'text-[11px] font-semibold text-center leading-tight transition-colors',
+        selected ? 'text-[var(--color-primary-purple)]' : 'text-[var(--color-deep-plum)] group-hover:text-[var(--color-primary-purple)]',
+      ].join(' ')}>
         {style.label}
       </span>
-
-      {selected && (
-        <span className="absolute top-1.5 right-1.5 inline-flex items-center justify-center w-5 h-5 rounded-full bg-[var(--color-primary-purple)] text-white shadow">
-          <Check size={10} strokeWidth={3} />
-        </span>
-      )}
     </button>
   )
 }
@@ -308,7 +317,7 @@ export function CaptionStyleDialog({ initial, onApply, onClose, videoUrl, videoS
         <div className="flex flex-1 min-h-0 overflow-hidden">
 
           {/* LEFT — video preview */}
-          <div className="w-64 shrink-0 border-r border-[var(--color-lavender)] flex flex-col bg-[var(--color-cream)]">
+          <div className="w-72 shrink-0 border-r border-[var(--color-lavender)] flex flex-col bg-[var(--color-cream)]">
             <div className="px-4 pt-3 pb-1 shrink-0">
               <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">Preview</p>
             </div>
@@ -390,12 +399,6 @@ export function CaptionStyleDialog({ initial, onApply, onClose, videoUrl, videoS
                       </li>
                     ))}
                   </ul>
-                  {selectedMeta && (
-                    <p className="text-[11px] text-[var(--color-purple-gray)] text-center -mt-1">
-                      Selected: <span className="font-semibold text-[var(--color-deep-plum)]">{selectedMeta.label}</span>
-                      <span className="ml-2 text-[var(--color-primary-purple)]">{selectedMeta.group}</span>
-                    </p>
-                  )}
                 </>
               )}
 
