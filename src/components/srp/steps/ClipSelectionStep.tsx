@@ -190,7 +190,7 @@ function StickyVideoPlayer({
   const ytId     = effectiveSourceType === 'youtube' ? extractYouTubeId(videoUrl) : null
   const vimeoId  = effectiveSourceType === 'vimeo'   ? extractVimeoId(videoUrl)   : null
 
-  const wrapCls = 'sticky top-0 z-10 bg-[var(--color-cream)] pt-1 pb-3'
+  const wrapCls = 'bg-[var(--color-cream)] pt-1 pb-3'
   const label   = activeStart !== null
     ? <p className="text-[10px] text-[var(--color-purple-gray)] mt-1 text-center">Playing from {secondsToMmss(activeStart)}</p>
     : null
