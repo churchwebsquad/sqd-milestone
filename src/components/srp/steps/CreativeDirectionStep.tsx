@@ -104,11 +104,24 @@ function toDirectUrl(url: string): string {
   return url
 }
 
+const BROWSER_UNPLAYABLE = ['.mov', '.wmv', '.avi', '.mkv']
+
 function OutroPreview({ url }: { url: string }) {
   const directUrl = toDirectUrl(url)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
   const [error, setError] = useState(false)
   const is916 = dims ? Math.abs(dims.w / dims.h - 9 / 16) < 0.02 : null
+
+  const ext = directUrl.split('?')[0].toLowerCase().match(/\.[^.]+$/)?.[0] ?? ''
+  const browserCantPlay = BROWSER_UNPLAYABLE.includes(ext)
+
+  if (browserCantPlay) {
+    return (
+      <p className="text-[11px] text-[var(--color-purple-gray)]">
+        <strong>.{ext.slice(1).toUpperCase()}</strong> files can't be previewed in the browser, but the renderer handles them fine.
+      </p>
+    )
+  }
 
   return (
     <div className="space-y-1.5">
@@ -128,7 +141,9 @@ function OutroPreview({ url }: { url: string }) {
         />
       </div>
       {error && (
-        <p className="text-[11px] text-wm-danger">Could not load video — check the URL is accessible.</p>
+        <p className="text-[11px] text-[var(--color-purple-gray)]">
+          Could not preview — check the URL is publicly accessible. The renderer will still attempt to download it.
+        </p>
       )}
       {dims && (
         <p className={`text-[11px] ${is916 ? 'text-wm-success' : 'text-amber-600'}`}>
