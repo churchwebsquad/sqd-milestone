@@ -311,7 +311,7 @@ export function SrpWorkflowProvider({ sessionId, children }: SrpWorkflowProvider
       if (selectedDeliverables.includes('facebook'))     steps.push('facebook')
       if (selectedDeliverables.includes('photoRecap'))   steps.push('photoRecap')
       if (selectedDeliverables.includes('sundayInvite')) steps.push('sundayInvite')
-      if (hasReels) steps.push('preRenderReview', 'creativeDirection', 'preRenderEdit', 'clipProcessing')
+      if (hasReels) steps.push('preRenderReview', 'creativeDirection', 'preRenderEdit')
     }
     steps.push('approved')
     return steps

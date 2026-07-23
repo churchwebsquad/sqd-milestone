@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowLeft, ArrowRight, Film, Link, Loader2, Music2, Palette, Save } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Film, Link, Loader2, Music2, Palette, Play, Save, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import { callSrpApi } from '../../../lib/srpApi'
@@ -10,6 +10,8 @@ import { MusicPickerDialog } from './MusicPickerDialog'
 import { MUSIC_LIBRARY } from '../../../lib/musicLibrary'
 import { styleBySlug } from '../../../lib/captionStyles'
 import { useProcessedClips } from '../../../hooks/useProcessedClips'
+import { useClipcutterJob } from '../../../lib/srpRealtime'
+import { supabase } from '../../../lib/supabase'
 
 function parseSegments(transcript: string | null | undefined) {
   if (!transcript) return undefined
@@ -207,6 +209,9 @@ export function CreativeDirectionStep() {
     transcriptWords,
     visibleSteps,
     sessionId,
+    clipcutterJobId, setClipcutterJobId,
+    backgroundMusic,
+    musicByClip,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
@@ -309,6 +314,82 @@ export function CreativeDirectionStep() {
     }
     goToNextStep()
   }, [flushPerClip, saveAsDefault, account?.member, srpTemplate, musicMode, designerNotes, goToNextStep])
+
+  /* ---------- render job ---------- */
+
+  const [renderStarting, setRenderStarting] = useState(false)
+  const [renderStartError, setRenderStartError] = useState<string | null>(null)
+
+  const { job: clipJob, connected: clipJobConnected } = useClipcutterJob(clipcutterJobId)
+
+  function timestampToMs(ts: string | undefined): number {
+    if (!ts) return 0
+    const parts = ts.split(':').map(Number)
+    if (parts.length === 3) return (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000
+    if (parts.length === 2) return (parts[0] * 60 + parts[1]) * 1000
+    return (parts[0] || 0) * 1000
+  }
+
+  const handleStartRender = useCallback(async () => {
+    if (clipSelections.length === 0) { setRenderStartError('No clips picked.'); return }
+    flushPerClip()
+    setRenderStarting(true)
+    setRenderStartError(null)
+    try {
+      const clipsPayload = clipSelections.map((c, i) => {
+        const clipId = c.clip_id ?? `clip_${i + 1}`
+        const pc = processedClips[clipId]
+        return {
+          clip_id:             clipId,
+          clip_name:           c.clip_name ?? c.category ?? `Reel ${i + 1}`,
+          in_point_ms:         timestampToMs(c.startTime),
+          out_point_ms:        timestampToMs(c.endTime),
+          duration_ms:         Math.max(0, timestampToMs(c.endTime) - timestampToMs(c.startTime)),
+          quote:               c.quote ?? null,
+          category:            c.category ?? null,
+          caption_text:        c.social_caption ?? null,
+          title_card_url:      pc?.title_card_url ?? null,
+          title_card_start_ms: pc?.title_card_start_ms ?? null,
+          title_card_end_ms:   pc?.title_card_end_ms ?? null,
+        }
+      })
+      const { data: { session: authSession } } = await supabase.auth.getSession()
+      const enhanceAudioByClip = (captionStyleConfig as Record<string, unknown>).enhance_audio_by_clip as Record<string, boolean> | undefined
+      const r = await callSrpApi<{ job_id: string }>('start-clipcutter', {
+        session_id: sessionId,
+        clips:      clipsPayload,
+        creative_direction: {
+          motion_slug:      srpTemplate || null,
+          background_music: backgroundMusic,
+          designer_notes:   designerNotes || null,
+          caption_style:    Object.keys(captionStyleConfig).length > 0 ? captionStyleConfig : null,
+          deliver_9x16:     deliver9x16,
+          music_mode:       musicMode || null,
+          music_by_clip:    Object.keys(musicByClip).length > 0 ? musicByClip : null,
+          outro_url:        outroUrl || null,
+        },
+        enhance_audio_by_clip: enhanceAudioByClip && Object.keys(enhanceAudioByClip).length > 0
+          ? enhanceAudioByClip
+          : null,
+      }, { authToken: authSession?.access_token })
+      setClipcutterJobId(r.job_id)
+    } catch (e) {
+      setRenderStartError(e instanceof Error ? e.message : 'failed to start render')
+    } finally {
+      setRenderStarting(false)
+    }
+  }, [sessionId, clipSelections, srpTemplate, backgroundMusic, designerNotes,
+      captionStyleConfig, deliver9x16, musicMode, musicByClip, outroUrl,
+      processedClips, flushPerClip, setClipcutterJobId])
+
+  const clipJobResults = useMemo<{ clip_id?: string; video_url?: string | null; status?: string; error_message?: string | null }[]>(
+    () => Array.isArray(clipJob?.clip_results) ? (clipJob.clip_results as never[]) : [],
+    [clipJob?.clip_results],
+  )
+  const renderStatus = (clipJob?.status ?? 'pending') as 'pending' | 'in_progress' | 'completed' | 'failed' | 'partial'
+  const renderRunning = !!clipcutterJobId && (renderStatus === 'pending' || renderStatus === 'in_progress')
+  const renderDone    = renderStatus === 'completed' || (renderStatus === 'partial' && clipJobResults.some(r => r.video_url))
+  const renderFailed  = renderStatus === 'failed'
 
   /* ---------- render ---------- */
   return (
@@ -638,12 +719,126 @@ export function CreativeDirectionStep() {
           <p className="text-[11px] text-green-600">Saved default at {savedAt.toLocaleTimeString()}.</p>
         )}
 
+        {/* Render panel */}
+        <section className="rounded-xl border-2 border-[var(--color-primary-purple)] bg-[var(--color-lavender-tint)]/50 p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <Film size={15} className="text-[var(--color-primary-purple)]" />
+            <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-primary-purple)]">Render Reels</p>
+          </div>
+
+          {/* Not started */}
+          {!clipcutterJobId && (
+            <div className="space-y-3">
+              <p className="text-[12px] text-[var(--color-deep-plum)]">
+                Ready to render <strong>{clipSelections.length}</strong> reel{clipSelections.length === 1 ? '' : 's'}.
+                This runs in the background — you can continue to the next step once it starts.
+              </p>
+              <SrpButton
+                onClick={() => void handleStartRender()}
+                disabled={renderStarting || clipSelections.length === 0}
+                leadingIcon={renderStarting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+              >
+                {renderStarting ? 'Starting…' : 'Render Clips'}
+              </SrpButton>
+              {renderStartError && <p className="text-[12px] text-wm-danger">{renderStartError}</p>}
+            </div>
+          )}
+
+          {/* Job running / done / failed */}
+          {clipcutterJobId && clipJob && (
+            <div className="space-y-3">
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <p className="text-[14px] font-semibold text-[var(--color-deep-plum)] inline-flex items-center gap-2">
+                  {renderRunning && <Loader2 size={14} className="animate-spin text-[var(--color-primary-purple)]" />}
+                  {renderDone   && <CheckCircle2 size={14} className="text-wm-success" />}
+                  {renderFailed && <AlertCircle  size={14} className="text-wm-danger"  />}
+                  {renderStatus.replace(/_/g, ' ')}
+                </p>
+                <span className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] rounded-full border border-[var(--color-lavender)] px-2 py-1">
+                  {clipJobConnected ? 'realtime' : 'polling'}
+                </span>
+              </div>
+
+              {clipJob.status_message && (
+                <p className="text-[12px] text-[var(--color-purple-gray)]">{clipJob.status_message}</p>
+              )}
+
+              {typeof clipJob.progress_percent === 'number' && clipJob.progress_percent > 0 && clipJob.progress_percent < 100 && (
+                <div>
+                  <div className="w-full h-1.5 rounded-full bg-[var(--color-lavender)] overflow-hidden">
+                    <div
+                      className="h-full bg-[var(--color-primary-purple)] transition-all"
+                      style={{ width: `${Math.min(100, Math.max(0, clipJob.progress_percent))}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] font-mono text-[var(--color-purple-gray)] mt-1">{clipJob.progress_percent}%</p>
+                </div>
+              )}
+
+              {clipJob.error_message && (
+                <p className="text-[12px] text-wm-danger bg-wm-danger-bg rounded-lg px-3 py-2">{clipJob.error_message}</p>
+              )}
+
+              {clipJobResults.length > 0 && (
+                <ul className="space-y-2">
+                  {clipJobResults.map((r, i) => {
+                    const ok     = r.status === 'done' || !!r.video_url
+                    const failed = r.status === 'failed' || !!r.error_message
+                    return (
+                      <li key={r.clip_id ?? i} className="rounded-lg border border-[var(--color-lavender)] bg-white p-3 flex items-center gap-3">
+                        <span className={[
+                          'shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full',
+                          ok     ? 'bg-wm-success-bg text-wm-success'
+                          : failed ? 'bg-wm-danger-bg text-wm-danger'
+                                   : 'bg-[var(--color-lavender-tint)] text-[var(--color-primary-purple)]',
+                        ].join(' ')}>
+                          {ok ? <CheckCircle2 size={13} /> : failed ? <AlertCircle size={13} /> : <Loader2 size={13} className="animate-spin" />}
+                        </span>
+                        <p className="text-[12px] font-semibold text-[var(--color-deep-plum)] flex-1 min-w-0 truncate">
+                          Reel {i + 1}
+                          <span className="ml-1.5 text-[10px] font-mono font-normal text-[var(--color-purple-gray)]">{r.clip_id}</span>
+                        </p>
+                        {r.video_url && (
+                          <a href={r.video_url} target="_blank" rel="noreferrer noopener"
+                            className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--color-primary-purple)] hover:text-[var(--color-deep-plum)]">
+                            <Play size={11} /> Watch
+                          </a>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+
+              {renderFailed && (
+                <SrpButton size="sm" variant="secondary"
+                  onClick={() => { setClipcutterJobId(null); setRenderStartError(null) }}>
+                  Retry
+                </SrpButton>
+              )}
+
+              {renderDone && (
+                <p className="text-[12px] text-wm-success font-semibold">
+                  All reels rendered. A ClickUp message has been sent automatically.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Job started but job row not yet loaded */}
+          {clipcutterJobId && !clipJob && (
+            <p className="text-[12px] text-[var(--color-purple-gray)] inline-flex items-center gap-2">
+              <Loader2 size={13} className="animate-spin" /> Connecting…
+            </p>
+          )}
+        </section>
+
         <div className="flex items-center justify-between gap-3 pt-2">
           <SrpButton variant="ghost" onClick={goToPrevStep} leadingIcon={<ArrowLeft size={14} />}>Back</SrpButton>
           <SrpButton
             onClick={() => void handleContinue()}
             trailingIcon={savingDefault ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
-            disabled={savingDefault}
+            disabled={savingDefault || (!clipcutterJobId && clipSelections.length > 0)}
             leadingIcon={saveAsDefault ? <Save size={14} /> : undefined}
           >
             {savingDefault ? 'Saving…' : (saveAsDefault ? 'Save & continue' : 'Continue')}

@@ -195,7 +195,7 @@ export const SRP_ALL_STEPS: SrpWorkflowStep[] = [
   'account', 'deliverables', 'sermon',
   'overview', 'clips', 'reelCaptions',
   'carousel', 'facebook', 'sundayInvite', 'photoRecap',
-  'preRenderReview', 'creativeDirection', 'preRenderEdit', 'clipProcessing',
+  'preRenderReview', 'creativeDirection', 'preRenderEdit',
   'approved',
 ]
 
