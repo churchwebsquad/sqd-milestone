@@ -186,6 +186,17 @@ function ClipCard({
   const [tcUrl, setTcUrl]               = useState(titleCardUrl ?? '')
   const [tcStartRaw, setTcStartRaw]     = useState(titleCardStartMs != null ? toMMSS(msToSeconds(titleCardStartMs)) : '')
   const [tcEndRaw, setTcEndRaw]         = useState(titleCardEndMs   != null ? toMMSS(msToSeconds(titleCardEndMs))   : '')
+
+  // Sync title card state from Supabase after remount (same fix as approved)
+  useEffect(() => {
+    setTcUrl(titleCardUrl ?? '')
+  }, [titleCardUrl])
+  useEffect(() => {
+    setTcStartRaw(titleCardStartMs != null ? toMMSS(msToSeconds(titleCardStartMs)) : '')
+  }, [titleCardStartMs])
+  useEffect(() => {
+    setTcEndRaw(titleCardEndMs != null ? toMMSS(msToSeconds(titleCardEndMs)) : '')
+  }, [titleCardEndMs])
   const [tcUploading, setTcUploading]   = useState(false)
   const [tcSaving, setTcSaving]         = useState(false)
   const [tcDirty, setTcDirty]           = useState(false)
