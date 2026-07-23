@@ -9,6 +9,7 @@ export interface ProcessedClip {
   status:               'processing' | 'ready' | 'error'
   video_url?:           string | null
   transcript?:          string | null
+  transcript_approved?: boolean | null
   duration_ms?:         number | null
   error_message?:       string | null
   title_card_url?:      string | null

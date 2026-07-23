@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Loader2, CheckCircle2, AlertCircle, Film,
+  Loader2, CheckCircle2, AlertCircle, Film, ShieldCheck,
   ArrowLeft, ArrowRight, Pencil, Check, X, Plus, Image, Trash2,
 } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
@@ -110,6 +110,7 @@ interface ClipCardProps {
   quote?:      string | null
   videoUrl:    string | null | undefined
   transcript:  string | null | undefined
+  transcriptApproved?: boolean | null
   status:      'processing' | 'ready' | 'error' | 'pending'
   errorMsg?:   string | null
   createdAt?:  string | null
@@ -117,16 +118,19 @@ interface ClipCardProps {
   titleCardStartMs?: number | null
   titleCardEndMs?:   number | null
   words:       { word: string; start: number; end: number }[]
-  onSaveTranscript: (clipId: string, segments: SrtSegment[]) => Promise<void>
-  onSaveTitleCard:  (clipId: string, url: string, startMs: number, endMs: number) => Promise<void>
-  onRemoveTitleCard:(clipId: string) => Promise<void>
+  onSaveTranscript:    (clipId: string, segments: SrtSegment[]) => Promise<void>
+  onApproveTranscript: (clipId: string, segments: SrtSegment[]) => Promise<void>
+  onUnapproveTranscript:(clipId: string) => Promise<void>
+  onSaveTitleCard:     (clipId: string, url: string, startMs: number, endMs: number) => Promise<void>
+  onRemoveTitleCard:   (clipId: string) => Promise<void>
 }
 
 function ClipCard({
   idx, clipId, sessionId, clipTitle, startTime, endTime, quote,
-  videoUrl, transcript, status, errorMsg, createdAt, words,
+  videoUrl, transcript, transcriptApproved, status, errorMsg, createdAt, words,
   titleCardUrl, titleCardStartMs, titleCardEndMs,
-  onSaveTranscript, onSaveTitleCard, onRemoveTitleCard,
+  onSaveTranscript, onApproveTranscript, onUnapproveTranscript,
+  onSaveTitleCard, onRemoveTitleCard,
 }: ClipCardProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const listRef  = useRef<HTMLUListElement>(null)
@@ -161,8 +165,10 @@ function ClipCard({
   const [segments, setSegments]         = useState<SrtSegment[]>(initialSegments)
   const [editingIdx, setEditingIdx]     = useState<number | null>(null)
   const [editText, setEditText]         = useState('')
-  const [savingTranscript, setSavingTranscript] = useState(false)
-  const [transcriptDirty, setTranscriptDirty]   = useState(false)
+  const [savingTranscript, setSavingTranscript]   = useState(false)
+  const [transcriptDirty, setTranscriptDirty]     = useState(false)
+  const [approved, setApproved]                   = useState(!!transcriptApproved)
+  const [approvingSaving, setApprovingSaving]     = useState(false)
 
   // Manual segment add
   const [showAddSeg, setShowAddSeg]   = useState(false)
@@ -247,6 +253,21 @@ function ClipCard({
     await onSaveTranscript(clipId, segments)
     setSavingTranscript(false)
     setTranscriptDirty(false)
+  }
+
+  const approveTranscript = async () => {
+    setApprovingSaving(true)
+    await onApproveTranscript(clipId, segments)
+    setApproved(true)
+    setTranscriptDirty(false)
+    setApprovingSaving(false)
+  }
+
+  const unapproveTranscript = async () => {
+    setApprovingSaving(true)
+    await onUnapproveTranscript(clipId)
+    setApproved(false)
+    setApprovingSaving(false)
   }
 
   // ── Title card helpers ────────────────────────────────────────────────────
@@ -488,21 +509,58 @@ function ClipCard({
 
         {/* ── Right: Transcript ── */}
         <div className="flex-1 p-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
-              Transcript
-            </p>
-            {transcriptDirty && (
-              <button
-                onClick={saveTranscript}
-                disabled={savingTranscript}
-                className="flex items-center gap-1 px-3 py-1 rounded-full bg-[var(--color-primary-purple)] text-white text-[11px] font-semibold hover:bg-[var(--color-purple-mid)] disabled:opacity-50 transition-colors"
-              >
-                {savingTranscript ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
-                Save
-              </button>
-            )}
+
+          {/* Header row */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
+                Transcript
+              </p>
+              {approved && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[10px] font-bold uppercase tracking-wider">
+                  <ShieldCheck size={10} /> Source of truth
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {!approved && transcriptDirty && (
+                <button
+                  onClick={saveTranscript}
+                  disabled={savingTranscript}
+                  className="flex items-center gap-1 px-3 py-1 rounded-full bg-[var(--color-lavender-tint)] text-[var(--color-deep-plum)] border border-[var(--color-lavender)] text-[11px] font-semibold hover:border-[var(--color-primary-purple)] disabled:opacity-50 transition-colors"
+                >
+                  {savingTranscript ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                  Save draft
+                </button>
+              )}
+              {approved ? (
+                <button
+                  onClick={unapproveTranscript}
+                  disabled={approvingSaving}
+                  className="flex items-center gap-1 px-3 py-1 rounded-full border border-[var(--color-lavender)] text-[var(--color-purple-gray)] text-[11px] font-semibold hover:text-[var(--color-deep-plum)] hover:border-[var(--color-deep-plum)] disabled:opacity-50 transition-colors"
+                >
+                  {approvingSaving ? <Loader2 size={11} className="animate-spin" /> : <Pencil size={11} />}
+                  Edit
+                </button>
+              ) : (
+                <button
+                  onClick={approveTranscript}
+                  disabled={approvingSaving || segments.length === 0}
+                  className="flex items-center gap-1 px-3 py-1 rounded-full bg-green-600 text-white text-[11px] font-semibold hover:bg-green-700 disabled:opacity-50 transition-colors"
+                >
+                  {approvingSaving ? <Loader2 size={11} className="animate-spin" /> : <ShieldCheck size={11} />}
+                  Approve captions
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* Approved banner */}
+          {approved && (
+            <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-[11px] text-green-700">
+              These captions are locked as the source of truth. They will be used for all downstream steps. Click <strong>Edit</strong> to make changes, then re-approve.
+            </div>
+          )}
 
           {segments.length === 0 ? (
             <div className="rounded-lg border-2 border-dashed border-[var(--color-lavender)] bg-[var(--color-lavender-tint)] py-8 text-center">
@@ -514,7 +572,7 @@ function ClipCard({
             <ul ref={listRef} className="space-y-1 overflow-y-auto max-h-[360px] pr-1">
               {segments.map((seg, i) => {
                 const isActive  = i === activeIdx
-                const isEditing = editingIdx === i
+                const isEditing = !approved && editingIdx === i
                 return (
                   <li key={seg.index} className={[
                     'flex items-start gap-2 px-3 py-2 rounded-lg transition-colors',
@@ -522,7 +580,6 @@ function ClipCard({
                       ? 'bg-[#6B5CE7] text-white'
                       : 'bg-[var(--color-lavender-tint)] text-[var(--color-deep-plum)]',
                   ].join(' ')}>
-                    {/* Timestamp — click to seek */}
                     <button
                       onClick={() => seekTo(seg.startSec)}
                       className={[
@@ -533,7 +590,6 @@ function ClipCard({
                       {toMMSS(seg.startSec)}
                     </button>
 
-                    {/* Text — editable */}
                     {isEditing ? (
                       <textarea
                         autoFocus
@@ -555,94 +611,98 @@ function ClipCard({
                       </span>
                     )}
 
-                    {/* Actions */}
-                    <div className="flex gap-1 shrink-0 mt-0.5">
-                      {isEditing ? (
-                        <>
-                          <button onClick={commitEdit} className="p-0.5 rounded hover:text-green-600">
-                            <Check size={13} />
-                          </button>
-                          <button onClick={() => setEditingIdx(null)} className="p-0.5 rounded hover:text-red-500">
-                            <X size={13} />
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => startEdit(i)}
-                            className={['p-0.5 rounded opacity-50 hover:opacity-100', isActive ? 'text-white' : ''].join(' ')}
-                          >
-                            <Pencil size={12} />
-                          </button>
-                          <button
-                            onClick={() => deleteSegment(i)}
-                            className={['p-0.5 rounded opacity-50 hover:opacity-100 hover:text-red-500', isActive ? 'text-white' : ''].join(' ')}
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </>
-                      )}
-                    </div>
+                    {/* Actions — hidden when approved */}
+                    {!approved && (
+                      <div className="flex gap-1 shrink-0 mt-0.5">
+                        {isEditing ? (
+                          <>
+                            <button onClick={commitEdit} className="p-0.5 rounded hover:text-green-600">
+                              <Check size={13} />
+                            </button>
+                            <button onClick={() => setEditingIdx(null)} className="p-0.5 rounded hover:text-red-500">
+                              <X size={13} />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => startEdit(i)}
+                              className={['p-0.5 rounded opacity-50 hover:opacity-100', isActive ? 'text-white' : ''].join(' ')}
+                            >
+                              <Pencil size={12} />
+                            </button>
+                            <button
+                              onClick={() => deleteSegment(i)}
+                              className={['p-0.5 rounded opacity-50 hover:opacity-100 hover:text-red-500', isActive ? 'text-white' : ''].join(' ')}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </li>
                 )
               })}
             </ul>
           )}
 
-          {/* Add segment */}
-          {showAddSeg ? (
-            <div className="rounded-lg border border-[var(--color-lavender)] p-3 space-y-2 bg-[var(--color-lavender-tint)]">
-              <p className="text-[11px] font-bold text-[var(--color-deep-plum)]">Add segment</p>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label className="text-[10px] text-[var(--color-purple-gray)] font-semibold">Start (M:SS)</label>
-                  <input
-                    type="text" placeholder="0:30"
-                    value={newSegStart}
-                    onChange={e => setNewSegStart(e.target.value)}
-                    className="w-full mt-0.5 px-2 py-1 text-[12px] font-mono border border-[var(--color-lavender)] rounded-md focus:outline-none focus:border-[var(--color-primary-purple)] bg-white"
-                  />
+          {/* Add segment — hidden when approved */}
+          {!approved && (
+            showAddSeg ? (
+              <div className="rounded-lg border border-[var(--color-lavender)] p-3 space-y-2 bg-[var(--color-lavender-tint)]">
+                <p className="text-[11px] font-bold text-[var(--color-deep-plum)]">Add segment</p>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className="text-[10px] text-[var(--color-purple-gray)] font-semibold">Start (M:SS)</label>
+                    <input
+                      type="text" placeholder="0:30"
+                      value={newSegStart}
+                      onChange={e => setNewSegStart(e.target.value)}
+                      className="w-full mt-0.5 px-2 py-1 text-[12px] font-mono border border-[var(--color-lavender)] rounded-md focus:outline-none focus:border-[var(--color-primary-purple)] bg-white"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[10px] text-[var(--color-purple-gray)] font-semibold">End (M:SS)</label>
+                    <input
+                      type="text" placeholder="0:35"
+                      value={newSegEnd}
+                      onChange={e => setNewSegEnd(e.target.value)}
+                      className="w-full mt-0.5 px-2 py-1 text-[12px] font-mono border border-[var(--color-lavender)] rounded-md focus:outline-none focus:border-[var(--color-primary-purple)] bg-white"
+                    />
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <label className="text-[10px] text-[var(--color-purple-gray)] font-semibold">End (M:SS)</label>
-                  <input
-                    type="text" placeholder="0:35"
-                    value={newSegEnd}
-                    onChange={e => setNewSegEnd(e.target.value)}
-                    className="w-full mt-0.5 px-2 py-1 text-[12px] font-mono border border-[var(--color-lavender)] rounded-md focus:outline-none focus:border-[var(--color-primary-purple)] bg-white"
-                  />
+                <textarea
+                  placeholder="Caption text for this segment…"
+                  value={newSegText}
+                  onChange={e => setNewSegText(e.target.value)}
+                  rows={2}
+                  className="w-full px-2 py-1.5 text-[12px] border border-[var(--color-lavender)] rounded-md resize-none focus:outline-none focus:border-[var(--color-primary-purple)] bg-white"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={addManualSegment}
+                    disabled={!newSegStart || !newSegEnd || !newSegText.trim()}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[var(--color-primary-purple)] text-white text-[12px] font-semibold hover:bg-[var(--color-purple-mid)] disabled:opacity-40 transition-colors"
+                  >
+                    <Plus size={12} /> Add
+                  </button>
+                  <button
+                    onClick={() => setShowAddSeg(false)}
+                    className="px-3 py-1.5 rounded-full text-[12px] text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] transition-colors"
+                  >
+                    Cancel
+                  </button>
                 </div>
               </div>
-              <textarea
-                placeholder="Caption text for this segment…"
-                value={newSegText}
-                onChange={e => setNewSegText(e.target.value)}
-                rows={2}
-                className="w-full px-2 py-1.5 text-[12px] border border-[var(--color-lavender)] rounded-md resize-none focus:outline-none focus:border-[var(--color-primary-purple)] bg-white"
-              />
-              <div className="flex gap-2">
-                <button
-                  onClick={addManualSegment}
-                  disabled={!newSegStart || !newSegEnd || !newSegText.trim()}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-full bg-[var(--color-primary-purple)] text-white text-[12px] font-semibold hover:bg-[var(--color-purple-mid)] disabled:opacity-40 transition-colors"
-                >
-                  <Plus size={12} /> Add
-                </button>
-                <button
-                  onClick={() => setShowAddSeg(false)}
-                  className="px-3 py-1.5 rounded-full text-[12px] text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => setShowAddSeg(true)}
-              className="flex items-center gap-1.5 text-[12px] text-[var(--color-primary-purple)] hover:text-[var(--color-deep-plum)] transition-colors self-start"
-            >
-              <Plus size={13} /> Add segment manually
-            </button>
+            ) : (
+              <button
+                onClick={() => setShowAddSeg(true)}
+                className="flex items-center gap-1.5 text-[12px] text-[var(--color-primary-purple)] hover:text-[var(--color-deep-plum)] transition-colors self-start"
+              >
+                <Plus size={13} /> Add segment manually
+              </button>
+            )
           )}
         </div>
       </div>
@@ -679,6 +739,14 @@ export function PreRenderReviewStep() {
 
   const handleSaveTranscript = useCallback(async (clipId: string, segments: SrtSegment[]) => {
     await upsertClip(clipId, { transcript: JSON.stringify(segments) })
+  }, [upsertClip])
+
+  const handleApproveTranscript = useCallback(async (clipId: string, segments: SrtSegment[]) => {
+    await upsertClip(clipId, { transcript: JSON.stringify(segments), transcript_approved: true })
+  }, [upsertClip])
+
+  const handleUnapproveTranscript = useCallback(async (clipId: string) => {
+    await upsertClip(clipId, { transcript_approved: false })
   }, [upsertClip])
 
   const handleSaveTitleCard = useCallback(async (
@@ -740,6 +808,7 @@ export function PreRenderReviewStep() {
                 quote={clip.quote}
                 videoUrl={pc?.video_url}
                 transcript={pc?.transcript}
+                transcriptApproved={pc?.transcript_approved}
                 status={status}
                 errorMsg={pc?.error_message}
                 createdAt={pc?.created_at}
@@ -748,6 +817,8 @@ export function PreRenderReviewStep() {
                 titleCardEndMs={pc?.title_card_end_ms}
                 words={words}
                 onSaveTranscript={handleSaveTranscript}
+                onApproveTranscript={handleApproveTranscript}
+                onUnapproveTranscript={handleUnapproveTranscript}
                 onSaveTitleCard={handleSaveTitleCard}
                 onRemoveTitleCard={handleRemoveTitleCard}
               />
