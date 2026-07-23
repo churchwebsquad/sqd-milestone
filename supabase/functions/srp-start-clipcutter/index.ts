@@ -91,6 +91,7 @@ serve(async (req) => {
       member,
       clips,
       creative_direction,
+      enhance_audio_by_clip,
     } = await req.json();
 
     // Create Supabase client early so we can do session lookup
@@ -248,6 +249,7 @@ serve(async (req) => {
       skip_transcription: true,
       clips: n8nClips,
       creative_direction: creative_direction || null,
+      enhance_audio_by_clip: enhance_audio_by_clip || null,
       callback_url: callbackUrl,
       callback_secret: callbackSecret,
       supabase_url: supabaseUrl,

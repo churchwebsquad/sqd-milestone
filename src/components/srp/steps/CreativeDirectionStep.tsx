@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { ArrowLeft, ArrowRight, Film, Link, Loader2, Music2, Palette, Save } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Film, Link, Loader2, Music2, Palette, Save } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import { callSrpApi } from '../../../lib/srpApi'
@@ -58,6 +58,7 @@ interface PerClipSettings {
   musicTrackId:  string
   isWorship:     boolean
   deliver9x16:   boolean
+  enhanceAudio:  boolean
 }
 
 const DEFAULT_PER_CLIP: PerClipSettings = {
@@ -66,6 +67,7 @@ const DEFAULT_PER_CLIP: PerClipSettings = {
   musicTrackId: '',
   isWorship:    false,
   deliver9x16:  false,
+  enhanceAudio: true,
 }
 
 const MUSIC_OPTIONS = [
@@ -221,16 +223,16 @@ export function CreativeDirectionStep() {
   /* flush per-clip settings into context before navigating */
   const flushPerClip = useCallback(() => {
     const byClip: Record<string, unknown> = {}
+    const enhanceAudioByClip: Record<string, boolean> = {}
     for (const [id, s] of Object.entries(perClip)) {
       byClip[id] = s
+      enhanceAudioByClip[id] = s.enhanceAudio ?? true
     }
-    setCaptionStyleConfig({ ...globalCaptionCfg, byClip } as unknown as Record<string, unknown>)
-    const musicMap: Record<string, string> = {}
-    for (const [id, s] of Object.entries(perClip)) {
-      if (s.musicTrackId) musicMap[id] = s.musicTrackId
-    }
-    // setMusicByClip is not exposed directly; we encode via captionStyleConfig.byClip above
-    void musicMap
+    setCaptionStyleConfig({
+      ...globalCaptionCfg,
+      byClip,
+      enhance_audio_by_clip: enhanceAudioByClip,
+    } as unknown as Record<string, unknown>)
   }, [perClip, globalCaptionCfg, setCaptionStyleConfig])
 
   const handleContinue = useCallback(async () => {
@@ -364,6 +366,19 @@ export function CreativeDirectionStep() {
             <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">
               Per-clip settings
             </p>
+
+            {/* Warn when a specific music track is selected AND any clip has enhance audio off */}
+            {musicMode === 'select' && Object.values(perClip).some(s => !s.enhanceAudio) && (
+              <div className="flex gap-3 rounded-xl border border-amber-400 bg-amber-50 px-4 py-3">
+                <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[13px] font-semibold text-amber-800">Two audio tracks will play at once</p>
+                  <p className="text-[11px] text-amber-700 mt-0.5">
+                    You've turned Enhance Audio OFF on a clip (preserving its live mix) and selected a background track. Both will play on top of each other. Turn Enhance Audio back on if the clip is speech-only, or set Background Music to None for this job.
+                  </p>
+                </div>
+              </div>
+            )}
             {clipSelections.map((clip, idx) => {
               const id       = clipKey(idx)
               const settings = perClip[id] ?? DEFAULT_PER_CLIP
@@ -431,6 +446,36 @@ export function CreativeDirectionStep() {
                         ].join(' ')} />
                       </button>
                     </div>
+                  </div>
+
+                  {/* Enhance audio toggle */}
+                  <div className={[
+                    'flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 transition-colors',
+                    !settings.enhanceAudio
+                      ? 'border-amber-400 bg-amber-50'
+                      : 'border-[var(--color-lavender)]',
+                  ].join(' ')}>
+                    <div>
+                      <p className="text-[12px] font-semibold text-[var(--color-deep-plum)]">Enhance audio</p>
+                      <p className="text-[10px] text-[var(--color-purple-gray)]">
+                        {settings.enhanceAudio ? 'ON — audio will be cleaned and leveled' : 'OFF — preserves the clip\'s own live mix'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={settings.enhanceAudio}
+                      onClick={() => updatePerClip(id, { enhanceAudio: !settings.enhanceAudio })}
+                      className={[
+                        'relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0',
+                        settings.enhanceAudio ? 'bg-[var(--color-primary-purple)]' : 'bg-amber-400',
+                      ].join(' ')}
+                    >
+                      <span className={[
+                        'inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform',
+                        settings.enhanceAudio ? 'translate-x-5' : 'translate-x-0.5',
+                      ].join(' ')} />
+                    </button>
                   </div>
 
                   {/* Worship caption style picker */}

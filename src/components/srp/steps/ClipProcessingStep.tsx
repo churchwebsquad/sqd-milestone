@@ -79,6 +79,7 @@ export function ClipProcessingStep() {
         caption_text:  c.social_caption ?? null,
       }))
       const { data: { session: authSession } } = await supabase.auth.getSession()
+      const enhanceAudioByClip = (captionStyleConfig as Record<string, unknown>).enhance_audio_by_clip as Record<string, boolean> | undefined
       const r = await callSrpApi<StartClipcutterResponse>('start-clipcutter', {
         session_id: sessionId,
         clips:      clipsPayload,
@@ -95,6 +96,9 @@ export function ClipProcessingStep() {
           music_mode:       musicMode || null,
           music_by_clip:    Object.keys(musicByClip).length > 0 ? musicByClip : null,
         },
+        enhance_audio_by_clip: enhanceAudioByClip && Object.keys(enhanceAudioByClip).length > 0
+          ? enhanceAudioByClip
+          : null,
       }, { authToken: authSession?.access_token })
       setClipcutterJobId(r.job_id)
     } catch (e) {
