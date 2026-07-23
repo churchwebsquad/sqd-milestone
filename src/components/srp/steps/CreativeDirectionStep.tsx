@@ -153,7 +153,6 @@ export function CreativeDirectionStep() {
     srpTemplate, setSrpTemplate,
     designerNotes, setDesignerNotes,
     musicMode, setMusicMode,
-    selectedMusicTrackId, setSelectedMusicTrackId,
     captionStyleConfig, setCaptionStyleConfig,
     deliver9x16, setDeliver9x16,
     outroUrl, setOutroUrl,
@@ -204,10 +203,6 @@ export function CreativeDirectionStep() {
   const updatePerClip = (id: string, patch: Partial<PerClipSettings>) =>
     setPerClip(prev => ({ ...prev, [id]: { ...(prev[id] ?? DEFAULT_PER_CLIP), ...patch } }))
 
-  const selectedGlobalTrack = selectedMusicTrackId
-    ? MUSIC_LIBRARY.find(t => t.id === selectedMusicTrackId)
-    : null
-
   /* live-update global caption (called on every change in dialog — must NOT close) */
   const handleApplyGlobalCaption = useCallback((cfg: CaptionStyleConfig) => {
     if (cfg.captionSlug) setSrpTemplate(cfg.captionSlug)
@@ -224,16 +219,23 @@ export function CreativeDirectionStep() {
   const flushPerClip = useCallback(() => {
     const byClip: Record<string, unknown> = {}
     const enhanceAudioByClip: Record<string, boolean> = {}
+    const musicByClipMap: Record<string, string> = {}
     for (const [id, s] of Object.entries(perClip)) {
       byClip[id] = s
       enhanceAudioByClip[id] = s.enhanceAudio ?? true
+      if (s.musicMode === 'select' && s.musicTrackId) musicByClipMap[id] = s.musicTrackId
     }
+    // Derive a representative musicMode for the global field (used by legacy paths)
+    const anySelect = Object.values(perClip).some(s => s.musicMode === 'select')
+    const allNone   = Object.values(perClip).every(s => s.musicMode === 'none')
+    setMusicMode(anySelect ? 'select' : allNone ? 'none' : 'editor_choice')
     setCaptionStyleConfig({
       ...globalCaptionCfg,
       byClip,
       enhance_audio_by_clip: enhanceAudioByClip,
+      music_by_clip:         Object.keys(musicByClipMap).length > 0 ? musicByClipMap : null,
     } as unknown as Record<string, unknown>)
-  }, [perClip, globalCaptionCfg, setCaptionStyleConfig])
+  }, [perClip, globalCaptionCfg, setCaptionStyleConfig, setMusicMode])
 
   const handleContinue = useCallback(async () => {
     flushPerClip()
@@ -311,15 +313,6 @@ export function CreativeDirectionStep() {
         )
       })()}
 
-      {/* Global music dialog */}
-      {musicDialogFor === 'global' && (
-        <MusicPickerDialog
-          selectedTrackId={selectedMusicTrackId}
-          onSelect={id => setSelectedMusicTrackId(id)}
-          onClose={() => setMusicDialogFor(null)}
-        />
-      )}
-
       {/* Per-clip music dialog */}
       {musicDialogFor !== null && musicDialogFor !== 'global' && (
         <MusicPickerDialog
@@ -367,8 +360,8 @@ export function CreativeDirectionStep() {
               Per-clip settings
             </p>
 
-            {/* Warn when a specific music track is selected AND any clip has enhance audio off */}
-            {musicMode === 'select' && Object.values(perClip).some(s => !s.enhanceAudio) && (
+            {/* Warn when any clip has a track selected AND enhance audio off */}
+            {Object.values(perClip).some(s => s.musicMode === 'select' && s.musicTrackId && !s.enhanceAudio) && (
               <div className="flex gap-3 rounded-xl border border-amber-400 bg-amber-50 px-4 py-3">
                 <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
                 <div>
@@ -478,6 +471,38 @@ export function CreativeDirectionStep() {
                     </button>
                   </div>
 
+                  {/* Background music per clip */}
+                  <div className="pt-1 border-t border-[var(--color-lavender)] space-y-2">
+                    <div className="flex items-center gap-2 pt-2">
+                      <Music2 size={13} className="text-[var(--color-primary-purple)]" />
+                      <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">Background Music</p>
+                    </div>
+                    <MusicRadio
+                      value={settings.musicMode}
+                      onChange={v => updatePerClip(id, { musicMode: v, musicTrackId: v !== 'select' ? '' : settings.musicTrackId })}
+                    />
+                    {settings.musicMode === 'select' && (
+                      <div className="flex items-center gap-3 pt-1">
+                        <SrpButton
+                          variant="secondary"
+                          leadingIcon={<Music2 size={14} />}
+                          onClick={() => setMusicDialogFor(id)}
+                        >
+                          Choose Track
+                        </SrpButton>
+                        {settings.musicTrackId && (() => {
+                          const track = MUSIC_LIBRARY.find(t => t.id === settings.musicTrackId)
+                          return track ? (
+                            <span className="text-[12px] text-[var(--color-deep-plum)]">
+                              <span className="font-semibold">{track.name}</span>
+                              <span className="text-[var(--color-purple-gray)] ml-1">({track.genre})</span>
+                            </span>
+                          ) : null
+                        })()}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Worship caption style picker */}
                   {settings.isWorship && (
                     <div className="space-y-2 pt-1 border-t border-[var(--color-lavender)]">
@@ -497,32 +522,6 @@ export function CreativeDirectionStep() {
             })}
           </div>
         )}
-
-        {/* Background music — global */}
-        <section className="rounded-xl border border-[var(--color-lavender)] bg-white p-5 space-y-3">
-          <div className="flex items-center gap-2">
-            <Music2 size={15} className="text-[var(--color-primary-purple)]" />
-            <p className="text-[11px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">Background Music</p>
-          </div>
-          <MusicRadio value={musicMode} onChange={setMusicMode} />
-          {musicMode === 'select' && (
-            <div className="flex items-center gap-3 pt-1">
-              <SrpButton
-                variant="secondary"
-                leadingIcon={<Music2 size={14} />}
-                onClick={() => setMusicDialogFor('global')}
-              >
-                Choose Track
-              </SrpButton>
-              {selectedGlobalTrack && (
-                <span className="text-[12px] text-[var(--color-deep-plum)]">
-                  <span className="font-semibold">{selectedGlobalTrack.name}</span>
-                  <span className="text-[var(--color-purple-gray)] ml-1">({selectedGlobalTrack.genre})</span>
-                </span>
-              )}
-            </div>
-          )}
-        </section>
 
         {/* Outro video (always shown) */}
         <section className="rounded-xl border border-[var(--color-lavender)] bg-white p-5 space-y-2">
