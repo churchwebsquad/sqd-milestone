@@ -260,7 +260,7 @@ serve(async (req) => {
               body: JSON.stringify({
                 job_id: crypto.randomUUID(),
                 clickup_id: sess.clickup_task_id,
-                action: "render_complete",
+                action: "update_transcripts",
                 clips: notifyClips,
                 session_id: job.session_id,
                 member: sess.member ?? null,
