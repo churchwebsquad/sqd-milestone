@@ -272,8 +272,9 @@ export function CreativeDirectionStep() {
         const firstClipId = firstClip?.clip_id ?? firstClip?.clip_name ?? ''
         const pc          = processedClips[firstClipId]
         const useRendered = pc?.status === 'ready' && !!pc.video_url
+        const approved    = !!pc?.transcript_approved
         const segs        = parseSegments(pc?.transcript)
-        const clipWords   = sliceClipWords(transcriptWords, firstClip?.startTime, firstClip?.endTime)
+        const clipWords   = approved ? undefined : sliceClipWords(transcriptWords, firstClip?.startTime, firstClip?.endTime)
         const previewText = firstClip?.caption_text ?? firstClip?.quote ?? undefined
         return (
           <CaptionStyleDialog
@@ -295,9 +296,10 @@ export function CreativeDirectionStep() {
         void _idx
         const pc          = processedClips[captionDialogFor]
         const useRendered = pc?.status === 'ready' && !!pc.video_url
+        const approved    = !!pc?.transcript_approved
         const segs        = parseSegments(pc?.transcript)
         const clipSel     = clipSelections.find((c, i) => (c.clip_id ?? c.clip_name ?? String(i)) === captionDialogFor)
-        const clipWords   = sliceClipWords(transcriptWords, clipSel?.startTime, clipSel?.endTime)
+        const clipWords   = approved ? undefined : sliceClipWords(transcriptWords, clipSel?.startTime, clipSel?.endTime)
         const previewText = clipSel?.caption_text ?? clipSel?.quote ?? undefined
         return (
           <CaptionStyleDialog
