@@ -1,28 +1,31 @@
-import { useState, useEffect, useRef } from 'react'
-import { X, Check } from 'lucide-react'
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { X } from 'lucide-react'
 import { SrpButton } from '../_shared/SrpButton'
 import {
-  CAPTION_STYLES, CAPTION_GROUPS, styleBySlug, CUSTOM_SLUG,
+  CAPTION_STYLES, styleBySlug,
   type CaptionGroup, type CaptionStyleConfig,
 } from '../../../lib/captionStyles'
-import { ClipLoopPlayer } from '../ClipLoopPlayer'
-import { VimeoClipLoopPlayer } from '../VimeoClipLoopPlayer'
+import {
+  loadCaptionEngine, getCaptionComponent,
+  chunkWords, chunkAt, captionHiddenAt,
+  applyTextCase, applySacredCaps, synthesizePreviewWords,
+  type CaptionWord, type CaptionChunk,
+} from '../../../lib/captionEngine'
+import { CaptionTile } from '../CaptionTile'
 
 export type { CaptionStyleConfig }
 
 /* ---------- constants ---------- */
 
 const FONTS = [
-  { value: '',                  label: "Default (style's font)" },
-  { value: 'Inter',             label: 'Inter' },
-  { value: 'Georgia',           label: 'Georgia' },
-  { value: 'Oswald',            label: 'Oswald' },
-  { value: 'Montserrat',        label: 'Montserrat' },
-  { value: 'Playfair Display',  label: 'Playfair Display' },
-  { value: 'Bebas Neue',        label: 'Bebas Neue' },
+  { value: '',                 label: "Default (style's font)" },
+  { value: 'Inter',            label: 'Inter' },
+  { value: 'Georgia',          label: 'Georgia' },
+  { value: 'Oswald',           label: 'Oswald' },
+  { value: 'Montserrat',       label: 'Montserrat' },
+  { value: 'Playfair Display', label: 'Playfair Display' },
+  { value: 'Bebas Neue',       label: 'Bebas Neue' },
 ]
-
-// values match Duane's engine.ts
 const POSITIONS  = [
   { value: 'top',    label: 'Top' },
   { value: 'center', label: 'Center' },
@@ -35,521 +38,376 @@ const TEXT_CASES = [
   { value: 'title',    label: 'Title' },
 ]
 
-/* ---------- URL helpers ---------- */
+const GROUPS: CaptionGroup[] = ['Traditional', 'Elevated', 'Reference', 'Basic']
 
-function extractYouTubeId(url: string): string | null {
-  try {
-    const u = new URL(url)
-    if (u.hostname.includes('youtu.be')) return u.pathname.slice(1).split('?')[0]
-    if (u.hostname.includes('youtube.com'))
-      return u.searchParams.get('v') ?? u.pathname.split('/').pop() ?? null
-  } catch { /* ignore */ }
-  return null
-}
+// Full 1080×1920 render reference — same as VidDrop
+const REF_W = 1080
+const REF_H = 1920
 
-function extractVimeoId(url: string): string | null {
-  try {
-    const u = new URL(url)
-    if (u.hostname.includes('vimeo.com')) {
-      const parts = u.pathname.split('/').filter(Boolean)
-      const id = parts[parts.length - 1]
-      return /^\d+$/.test(id) ? id : null
-    }
-  } catch { /* ignore */ }
-  return null
-}
+/* ---------- TranscriptSegment type ---------- */
+interface TranscriptSegment { startSec: number; endSec: number; text: string }
 
-function toDirectSrc(url: string): string {
-  if (url.includes('dropbox.com')) {
-    return url
-      .replace('www.dropbox.com', 'dl.dropboxusercontent.com')
-      .replace('?dl=0', '')
-      .replace('?dl=1', '')
-  }
-  return url
-}
-
-type VideoKind = 'youtube' | 'vimeo' | 'direct' | null
-
-function detectKind(url: string, sourceType?: string | null): VideoKind {
-  if (sourceType === 'youtube' || url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube'
-  if (sourceType === 'vimeo'   || url.includes('vimeo.com'))                               return 'vimeo'
-  if (url.includes('dropbox.com') || url.match(/\.(mp4|mov|webm)(\?|$)/i))                return 'direct'
-  return null
-}
-
-/* ---------- types ---------- */
-
-interface TranscriptSegment {
-  startSec: number
-  endSec:   number
-  text:     string
-}
-
-/* ---------- caption overlay renderer ---------- */
-
-const SAMPLE_WORDS = ['faith', 'has', 'made', 'you', 'well']
-
-function renderWords(
-  words: string[],
-  highlightIdx: number | null,
-  meta: ReturnType<typeof styleBySlug>,
-  cfg: CaptionStyleConfig,
-  fontSize: number,
-  textTransform: React.CSSProperties['textTransform'],
-) {
-  if (!meta) return null
-  return words.map((word, i) => {
-    const isHighlight = meta.usesHighlight && (highlightIdx !== null ? i === highlightIdx : i === words.length - 1)
-    const textColor   = isHighlight ? (cfg.highlightColor ?? meta.defaults.highlightColor ?? '#FBA09C') : (cfg.textColor ?? meta.defaults.textColor)
-    const style: React.CSSProperties = {
-      color:        textColor,
-      fontFamily:   cfg.fontFamily || undefined,
-      fontSize:     `${fontSize}px`,
-      fontWeight:   'bold',
-      textTransform,
-      textShadow:   meta.usesBackground ? undefined : '0 1px 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.8)',
-      background:   meta.usesBackground
-        ? (cfg.bgColor ?? meta.defaults.bgColor ?? '#000')
-        : undefined,
-      padding:      meta.usesBackground ? '1px 6px' : undefined,
-      borderRadius: meta.usesBackground ? '3px' : undefined,
-    }
-    if (isHighlight && meta.usesHighlight && !meta.usesBackground) {
-      style.background   = cfg.highlightColor ?? meta.defaults.highlightColor ?? '#FBA09C'
-      style.color        = '#000'
-      style.padding      = '1px 5px'
-      style.borderRadius = '999px'
-    }
-    return <span key={i} style={style}>{word}</span>
-  })
-}
-
-function CaptionOverlay({
-  cfg,
-  segments,
-  currentSec,
-}: {
-  cfg: CaptionStyleConfig
-  segments?: TranscriptSegment[]
-  currentSec?: number
-}) {
-  const meta = styleBySlug(cfg.captionSlug ?? '')
-  if (!meta) return null
-
-  const scale         = cfg.scale ?? 1.0
-  const fontSize      = Math.round(16 * scale)
-  const offset        = cfg.offset ?? 0
-  const posClass      = cfg.position === 'top' ? 'top-3' : cfg.position === 'center' ? 'top-1/2 -translate-y-1/2' : 'bottom-3'
-  const textTransform = cfg.textCase === 'upper' ? 'uppercase' : cfg.textCase === 'lower' ? 'lowercase' : cfg.textCase === 'title' ? 'capitalize' : undefined
-
-  // Resolve what text to display
-  let displayWords: string[] = SAMPLE_WORDS
-  let highlightIdx: number | null = SAMPLE_WORDS.length - 1
-
-  if (segments && currentSec !== undefined) {
-    const active = segments.find(s => currentSec >= s.startSec - 0.1 && currentSec < s.endSec + 0.1)
-    if (active) {
-      displayWords = active.text.split(' ').filter(Boolean)
-      highlightIdx = displayWords.length - 1
-    } else {
-      return null // nothing to show between segments
-    }
-  }
-
-  return (
-    <div
-      className={`pointer-events-none absolute inset-x-0 ${posClass} flex justify-center px-3`}
-      style={{ transform: offset ? `translateY(${-offset * 0.12}px)` : undefined }}
-    >
-      <div className="flex flex-wrap justify-center gap-x-1 gap-y-0.5 max-w-[90%]">
-        {renderWords(displayWords, highlightIdx, meta, cfg, fontSize, textTransform)}
-      </div>
-    </div>
-  )
-}
-
-/* ---------- animated style tile ---------- */
-
-function AnimatedStyleTile({ style, selected, onSelect }: { style: typeof CAPTION_STYLES[0]; selected: boolean; onSelect: () => void }) {
-  const [highlightIdx, setHighlightIdx] = useState(0)
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setHighlightIdx(prev => (prev + 1) % SAMPLE_WORDS.length)
-    }, 450)
-    return () => clearInterval(id)
-  }, [])
-
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className="group flex flex-col items-center gap-1.5 w-full text-left"
-    >
-      <div
-        className={[
-          'relative w-full rounded-xl overflow-hidden transition-all',
-          'bg-gradient-to-b from-[#1c1030] via-[#150c28] to-[#0d0820]',
-          selected
-            ? 'ring-2 ring-[var(--color-primary-purple)] ring-offset-2'
-            : 'ring-1 ring-white/10 group-hover:ring-[var(--color-primary-purple)]/60',
-        ].join(' ')}
-        style={{ aspectRatio: '9/16' }}
-      >
-        {/* Animated caption preview */}
-        <div className="absolute inset-x-0 bottom-[28%] flex justify-center px-3">
-          <div className="flex flex-wrap justify-center gap-x-1 gap-y-1 max-w-full">
-            {SAMPLE_WORDS.map((word, i) => {
-              const isHighlight = style.usesHighlight && i === highlightIdx
-              const textColor   = isHighlight
-                ? (style.defaults.highlightColor ?? '#FBA09C')
-                : (style.defaults.textColor ?? '#ffffff')
-              const st: React.CSSProperties = {
-                color:        textColor,
-                fontSize:     '13px',
-                fontWeight:   'bold',
-                lineHeight:   1.4,
-                textShadow:   style.usesBackground ? undefined : '0 1px 3px rgba(0,0,0,0.95)',
-                background:   style.usesBackground ? (style.defaults.bgColor ?? '#000') : undefined,
-                padding:      style.usesBackground ? '2px 7px' : undefined,
-                borderRadius: style.usesBackground ? '4px' : undefined,
-                transition:   'color 0.15s, background 0.15s',
-              }
-              if (isHighlight && style.usesHighlight && !style.usesBackground) {
-                st.background   = style.defaults.highlightColor ?? '#FBA09C'
-                st.color        = '#000'
-                st.padding      = '2px 6px'
-                st.borderRadius = '999px'
-              }
-              return <span key={i} style={st}>{word}</span>
-            })}
-          </div>
-        </div>
-
-        {/* Selection indicator */}
-        <div className={[
-          'absolute top-2 right-2 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all',
-          selected
-            ? 'bg-[var(--color-primary-purple)] border-[var(--color-primary-purple)]'
-            : 'bg-transparent border-white/40 group-hover:border-white/70',
-        ].join(' ')}>
-          {selected && <Check size={10} strokeWidth={3} className="text-white" />}
-        </div>
-      </div>
-
-      <span className={[
-        'text-[11px] font-semibold text-center leading-tight transition-colors',
-        selected ? 'text-[var(--color-primary-purple)]' : 'text-[var(--color-deep-plum)] group-hover:text-[var(--color-primary-purple)]',
-      ].join(' ')}>
-        {style.label}
-      </span>
-    </button>
-  )
-}
-
-/* ---------- style tile ---------- */
-
-/* ---------- color picker ---------- */
-
-function ColorDial({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <div>
-      <label className="block text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] mb-1">{label}</label>
-      <div className="flex items-center gap-2">
-        <input type="color" value={value} onChange={e => onChange(e.target.value)}
-          className="h-8 w-10 rounded cursor-pointer border border-[var(--color-lavender)]" />
-        <span className="text-[11px] text-[var(--color-purple-gray)] font-mono">{value}</span>
-      </div>
-    </div>
-  )
-}
-
-/* ---------- toggle switch ---------- */
-
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)}
-      className={['relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0',
-        checked ? 'bg-[var(--color-primary-purple)]' : 'bg-[var(--color-lavender)]'].join(' ')}>
-      <span className={['inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform',
-        checked ? 'translate-x-5' : 'translate-x-0.5'].join(' ')} />
-    </button>
-  )
-}
-
-/* ---------- main dialog ---------- */
-
+/* ---------- props ---------- */
 interface Props {
-  initial:          CaptionStyleConfig
-  onApply:          (cfg: CaptionStyleConfig) => void
-  onClose:          () => void
-  videoUrl?:        string
-  videoSourceType?: string | null
-  clipStartSec?:    number
-  clipEndSec?:      number
-  clipText?:        string
-  segments?:        TranscriptSegment[]
+  open:      boolean
+  onClose:   () => void
+  value:     CaptionStyleConfig
+  onChange:  (cfg: CaptionStyleConfig) => void
+  /** Optional: MP4/video url for the direct clip preview */
+  videoUrl?: string
+  /** Optional: parsed transcript segments to drive live captions in preview */
+  segments?: TranscriptSegment[]
 }
 
-export function CaptionStyleDialog({ initial, onApply, onClose, videoUrl, videoSourceType, clipStartSec, clipEndSec, segments }: Props) {
-  const [cfg, setCfg] = useState<CaptionStyleConfig>(initial)
-  const [tab, setTab] = useState<CaptionGroup>(() => {
-    if (initial.captionSlug === CUSTOM_SLUG) return 'Custom'
-    const meta = styleBySlug(initial.captionSlug ?? '')
-    return (meta?.group ?? 'Traditional') as CaptionGroup
-  })
-  const [currentSec, setCurrentSec] = useState(0)
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const nonce = 0
+/* ---------- dialog ---------- */
+export function CaptionStyleDialog({ open, onClose, value, onChange, videoUrl, segments }: Props) {
+  const [activeGroup, setActiveGroup] = useState<CaptionGroup>('Traditional')
+  const [engineReady, setEngineReady] = useState(false)
+  const [t, setT]                     = useState(0)
+  const videoRef                      = useRef<HTMLVideoElement>(null)
+  const stageRef                      = useRef<HTMLDivElement>(null)
+  const [stageW, setStageW]           = useState(0)
 
-  const patch = <K extends keyof CaptionStyleConfig>(key: K, val: CaptionStyleConfig[K]) =>
-    setCfg(prev => ({ ...prev, [key]: val }))
+  const motionSlug     = value.captionSlug ?? 'cap01-hormozi-pill'
+  const wordsPerSeg    = value.wordsPerSegment ?? 0
+  const meta           = styleBySlug(motionSlug)
+  const effectiveStyle = useMemo(() => ({ ...(meta?.defaults ?? {}), ...value }), [meta, value])
 
-  function handleSelectSlug(slug: string) {
-    const meta = styleBySlug(slug)
-    if (!meta) return
-    setCfg(prev => ({
-      ...prev,
-      captionSlug:    slug,
-      textColor:      meta.defaults.textColor,
-      highlightColor: meta.defaults.highlightColor ?? prev.highlightColor ?? '#FBA09C',
-      bgColor:        meta.defaults.bgColor ?? prev.bgColor ?? '#000000',
-    }))
-  }
+  // Load caption engine
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    let tries = 0
+    const attempt = () => {
+      loadCaptionEngine()
+        .then(() => { if (alive) setEngineReady(true) })
+        .catch((e) => {
+          console.error('caption engine load failed', e)
+          if (alive && tries++ < 4) setTimeout(attempt, 400)
+        })
+    }
+    attempt()
+    return () => { alive = false }
+  }, [open])
 
-  const selectedMeta = styleBySlug(cfg.captionSlug ?? '')
-  const tabStyles    = CAPTION_STYLES.filter(s => s.group === tab)
+  // Measure stage width
+  useLayoutEffect(() => {
+    const el = stageRef.current
+    if (!el) return
+    const update = () => setStageW(el.clientWidth)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [open])
 
-  const kind      = videoUrl ? detectKind(videoUrl, videoSourceType) : null
-  const youtubeId = kind === 'youtube' ? extractYouTubeId(videoUrl!) : null
-  const vimeoId   = kind === 'vimeo'   ? extractVimeoId(videoUrl!)   : null
-  const directSrc = kind === 'direct'  ? toDirectSrc(videoUrl!)      : null
+  // Drive caption time from video via rAF (same as VidDrop)
+  useEffect(() => {
+    if (!open) return
+    let raf = 0
+    const tick = () => {
+      const v = videoRef.current
+      if (v) setT(v.currentTime || 0)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [open])
 
-  const startSec = clipStartSec ?? null
-  const endSec   = clipEndSec   ?? null
+  // Build timed words from transcript segments or synthesize from text
+  const casedWords: CaptionWord[] = useMemo(() => {
+    if (!engineReady) return []
+    let words: CaptionWord[] = []
+    if (segments && segments.length > 0) {
+      // Use real transcript: each segment becomes evenly-spaced word timings
+      segments.forEach(seg => {
+        const tokens = seg.text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+        if (tokens.length === 0) return
+        const dur = seg.endSec - seg.startSec
+        const per = dur / tokens.length
+        tokens.forEach((word, i) => {
+          words.push({
+            word,
+            start: +(seg.startSec + i * per).toFixed(3),
+            end:   +(seg.startSec + (i + 1) * per).toFixed(3),
+          })
+        })
+      })
+    } else {
+      const dur = videoRef.current?.duration || 30
+      words = synthesizePreviewWords('Your faith has made you well', dur)
+    }
+    words = applyTextCase(words, effectiveStyle.textCase)
+    words = applySacredCaps(words, effectiveStyle.reverentCaps)
+    return words
+  }, [engineReady, segments, effectiveStyle.textCase, effectiveStyle.reverentCaps])
 
-  const scaleDisplay = Math.round((cfg.scale ?? 1.0) * 100)
+  const chunks: CaptionChunk[] | null = useMemo(() => {
+    if (!engineReady || casedWords.length === 0) return null
+    try { return chunkWords(casedWords, wordsPerSeg ? { wordsPerSegment: wordsPerSeg } : undefined) }
+    catch { return null }
+  }, [engineReady, casedWords, wordsPerSeg])
 
-  const labelCls  = 'block text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] mb-1'
-  const selectCls = 'w-full rounded-lg border border-[var(--color-lavender)] bg-white px-2.5 py-1.5 text-[11px] text-[var(--color-deep-plum)] focus:outline-none focus:border-[var(--color-primary-purple)]'
-  const rowCls    = 'flex items-center justify-between rounded-xl border border-[var(--color-lavender)] bg-[var(--color-cream)] px-4 py-3'
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const Comp        = engineReady ? getCaptionComponent((meta as any)?.component ?? motionSlug) : null
+  const scale       = (stageW > 0 ? stageW : 270) / REF_W
+  const activeChunk = chunks ? chunkAt(chunks, t) : null
+  const activeWords = activeChunk?.words ?? casedWords
+  const hidden      = casedWords.length > 0 ? captionHiddenAt(casedWords, t, 2) : false
+
+  const patch = (p: Partial<CaptionStyleConfig>) => onChange({ ...value, ...p })
+
+
+  if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-[var(--color-deep-plum)]/60 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl border border-[var(--color-lavender)] shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
 
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-lavender)] shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-lavender)]">
           <div>
-            <h3 className="text-[16px] font-semibold text-[var(--color-deep-plum)]">Caption Studio</h3>
-            <p className="text-[11px] text-[var(--color-purple-gray)] mt-0.5">Pick a style and fine-tune the look. The preview plays the clip with live captions.</p>
+            <h2 className="text-lg font-bold text-[var(--color-deep-plum)]">Caption Studio</h2>
+            <p className="text-xs text-[var(--color-purple-gray)] mt-0.5">
+              Pick a style and fine-tune the look. The preview plays the clip with live captions.
+            </p>
           </div>
-          <button type="button" onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-[var(--color-lavender-tint)] text-[var(--color-purple-gray)] transition-colors">
-            <X size={16} />
+          <button onClick={onClose} className="text-[var(--color-purple-gray)] hover:text-[var(--color-deep-plum)] transition-colors">
+            <X size={20} />
           </button>
         </div>
 
         {/* Body */}
-        <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="flex-1 overflow-hidden grid md:grid-cols-[270px_1fr]">
 
-          {/* LEFT — video preview */}
-          <div className="w-72 shrink-0 border-r border-[var(--color-lavender)] flex flex-col bg-[var(--color-cream)]">
-            <div className="px-4 pt-3 pb-1 shrink-0">
-              <p className="text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)]">Preview</p>
-            </div>
-            <div className="flex-1 flex flex-col items-center justify-start px-3 pb-3 min-h-0">
-              <div className="relative w-full rounded-xl overflow-hidden bg-black shadow-lg" style={{ aspectRatio: '9/16' }}>
-                {kind === 'youtube' && youtubeId && (
-                  <ClipLoopPlayer videoId={youtubeId} startSec={startSec} endSec={endSec} nonce={nonce} onTimeUpdate={setCurrentSec} />
-                )}
-                {kind === 'vimeo' && vimeoId && (
-                  <VimeoClipLoopPlayer vimeoId={vimeoId} startSec={startSec} endSec={endSec} nonce={nonce} />
-                )}
-                {kind === 'direct' && directSrc && (
-                  <video
-                    ref={videoRef}
-                    src={directSrc}
-                    autoPlay
-                    loop
-                    muted
-                    playsInline
-                    className="absolute inset-0 w-full h-full object-cover"
-                    onTimeUpdate={e => setCurrentSec(e.currentTarget.currentTime)}
+          {/* Left: live preview stage */}
+          <div className="p-4 border-r border-[var(--color-lavender)] flex flex-col gap-3">
+            <div
+              ref={stageRef}
+              className="relative w-full overflow-hidden rounded-xl bg-black"
+              style={{ aspectRatio: '9 / 16' }}
+            >
+              {/* Video layer — direct MP4 only; captions overlay it */}
+              {videoUrl && (
+                <video
+                  ref={videoRef}
+                  src={videoUrl}
+                  className="absolute inset-0 h-full w-full object-cover"
+                  muted loop autoPlay playsInline preload="auto"
+                />
+              )}
+
+              {/* Caption overlay: 1080×1920 space scaled down */}
+              {Comp && activeWords.length > 0 && (
+                <div
+                  className="absolute left-0 top-0 origin-top-left pointer-events-none"
+                  style={{
+                    width:     REF_W,
+                    height:    REF_H,
+                    transform: `scale(${scale})`,
+                    opacity:   hidden ? 0 : 1,
+                  }}
+                >
+                  <Comp
+                    t={t}
+                    words={activeWords}
+                    style={effectiveStyle}
+                    mode="render"
+                    showFrom={activeChunk?.showFrom ?? 0}
+                    showUntil={activeChunk?.showUntil ?? Infinity}
                   />
-                )}
-                {!kind && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-[#2d1b4e] to-[#0d0820]">
-                    <div className="w-1/2 h-1/2 rounded-full opacity-20"
-                      style={{ background: 'radial-gradient(circle, #7c3aed 0%, transparent 70%)' }} />
-                  </div>
-                )}
-                <CaptionOverlay cfg={cfg} segments={segments} currentSec={segments?.length ? currentSec : undefined} />
-              </div>
-              <p className="text-[9px] text-[var(--color-purple-gray)] text-center mt-1.5 leading-snug">
-                {segments?.length
-                  ? 'Showing your actual transcript — synced to the clip.'
-                  : 'Final captions are synced precisely during rendering.'}
-              </p>
+                </div>
+              )}
+
+              {open && !engineReady && (
+                <div className="absolute bottom-2 left-2 right-2 text-center text-[10px] text-white/60 pointer-events-none">
+                  Loading caption styles…
+                </div>
+              )}
             </div>
+            <p className="text-[11px] text-[var(--color-purple-gray)] text-center">
+              {segments?.length ? 'Showing your actual transcript — synced to the clip.' : 'Preview timing is approximate — final captions are synced precisely during rendering.'}
+            </p>
           </div>
 
-          {/* RIGHT — style picker + controls */}
-          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+          {/* Right: controls */}
+          <div className="flex-1 overflow-y-auto p-5 space-y-5">
 
-            {/* Category tabs */}
-            <div className="px-5 pt-4 pb-2 border-b border-[var(--color-lavender)] shrink-0">
-              <p className={labelCls + ' mb-2'}>Style category</p>
-              <div className="flex gap-1.5 flex-wrap">
-                {CAPTION_GROUPS.map(g => (
-                  <button key={g} type="button" onClick={() => setTab(g)}
-                    className={['px-3 py-1.5 rounded-full text-[12px] font-semibold transition-colors',
-                      tab === g
-                        ? 'bg-[var(--color-primary-purple)] text-white'
+            {/* Style category tabs */}
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-[var(--color-purple-gray)] mb-2">Style category</p>
+              <div className="flex gap-1 flex-wrap mb-3">
+                {GROUPS.map(g => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setActiveGroup(g)}
+                    className={[
+                      'px-3 py-1.5 rounded-full text-xs font-semibold transition-all',
+                      activeGroup === g
+                        ? 'bg-[var(--color-deep-plum)] text-white'
                         : 'bg-[var(--color-lavender-tint)] text-[var(--color-deep-plum)] hover:bg-[var(--color-lavender)]',
-                    ].join(' ')}>
+                    ].join(' ')}
+                  >
                     {g}
                   </button>
                 ))}
               </div>
+
+              {/* Tile grid */}
+              {GROUPS.map(g => activeGroup === g && (
+                <div key={g} className="grid grid-cols-3 gap-2">
+                  {CAPTION_STYLES.filter(s => s.group === g).map(s => (
+                    <CaptionTile
+                      key={s.slug}
+                      meta={s}
+                      selected={motionSlug === s.slug}
+                      onSelect={() => patch({ captionSlug: s.slug })}
+                    />
+                  ))}
+                </div>
+              ))}
             </div>
 
-            <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4 space-y-5">
-
-              {/* Style tiles or custom tab */}
-              {tab === 'Custom' ? (
-                <div className="rounded-xl border-2 border-dashed border-[var(--color-primary-purple)]/40 bg-[var(--color-lavender-tint)] p-5 text-center space-y-3">
-                  <div className="text-[32px]">✏️</div>
-                  <p className="text-[13px] font-semibold text-[var(--color-deep-plum)]">Build your own style</p>
-                  <p className="text-[11px] text-[var(--color-purple-gray)] leading-relaxed">
-                    Set every caption property below — color, font, position, size, and more.
-                  </p>
-                  {cfg.captionSlug !== CUSTOM_SLUG ? (
-                    <SrpButton variant="secondary" onClick={() => patch('captionSlug', CUSTOM_SLUG)}>
-                      Use custom settings
-                    </SrpButton>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--color-primary-purple)] text-white text-[11px] font-semibold">
-                      <Check size={11} strokeWidth={3} /> Custom style active
-                    </span>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <ul className="grid grid-cols-3 gap-3">
-                    {tabStyles.map(style => (
-                      <li key={style.slug}>
-                        <AnimatedStyleTile
-                          style={style}
-                          selected={style.slug === cfg.captionSlug}
-                          onSelect={() => handleSelectSlug(style.slug)}
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                </>
+            {/* Color pickers */}
+            <div className="grid grid-cols-2 gap-4">
+              <ColorDial label="Text color"  value={effectiveStyle.textColor  ?? '#ffffff'} onChange={c => patch({ textColor: c })} />
+              {meta?.usesHighlight && (
+                <ColorDial label="Highlight" value={effectiveStyle.highlightColor ?? '#FBA09C'} onChange={c => patch({ highlightColor: c })} />
               )}
+              {meta?.usesBackground && (
+                <ColorDial label="Background" value={effectiveStyle.bgColor ?? '#000000'} onChange={c => patch({ bgColor: c })} />
+              )}
+            </div>
 
-              {/* Controls — exact Duane order */}
-              <div className="border-t border-[var(--color-lavender)] pt-4 space-y-4">
+            {/* Font */}
+            <div>
+              <label className="block text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] mb-1">Font</label>
+              <select
+                value={value.fontFamily ?? ''}
+                onChange={e => patch({ fontFamily: e.target.value || undefined })}
+                className="w-full rounded-lg border border-[var(--color-lavender)] px-3 py-2 text-sm text-[var(--color-deep-plum)] bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-purple)]"
+              >
+                {FONTS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+              </select>
+            </div>
 
-                {/* 1. Color dials: text + highlight (if style uses it) + bg (if style uses it) */}
-                <div className="grid grid-cols-2 gap-4">
-                  <ColorDial
-                    label="Text color"
-                    value={cfg.textColor ?? selectedMeta?.defaults.textColor ?? '#ffffff'}
-                    onChange={v => patch('textColor', v)}
-                  />
-                  {selectedMeta?.usesHighlight && (
-                    <ColorDial
-                      label="Highlight"
-                      value={cfg.highlightColor ?? selectedMeta.defaults.highlightColor ?? '#FBA09C'}
-                      onChange={v => patch('highlightColor', v)}
-                    />
-                  )}
-                  {selectedMeta?.usesBackground && (
-                    <ColorDial
-                      label="Background"
-                      value={cfg.bgColor ?? selectedMeta.defaults.bgColor ?? '#000000'}
-                      onChange={v => patch('bgColor', v)}
-                    />
-                  )}
-                </div>
-
-                {/* 2. Font — full width */}
-                <div>
-                  <label className={labelCls}>Font</label>
-                  <select value={cfg.fontFamily ?? ''} onChange={e => patch('fontFamily', e.target.value || undefined)} className={selectCls}>
-                    {FONTS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
-                  </select>
-                </div>
-
-                {/* 3. Position + Text case */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelCls}>Position</label>
-                    <select value={cfg.position ?? 'bottom'} onChange={e => patch('position', e.target.value as CaptionStyleConfig['position'])} className={selectCls}>
-                      {POSITIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className={labelCls}>Text case</label>
-                    <select value={cfg.textCase ?? 'as_typed'} onChange={e => patch('textCase', e.target.value as CaptionStyleConfig['textCase'])} className={selectCls}>
-                      {TEXT_CASES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-                    </select>
-                  </div>
-                </div>
-
-                {/* 4. Size slider — 70–140 step 5, value = scale*100 */}
-                <div>
-                  <label className={labelCls}>Size ({scaleDisplay}%)</label>
-                  <input type="range" min={70} max={140} step={5} value={scaleDisplay}
-                    onChange={e => patch('scale', Number(e.target.value) / 100)}
-                    className="w-full accent-[var(--color-primary-purple)]" />
-                </div>
-
-                {/* 5. Vertical offset slider — -120 to 120 step 4 */}
-                <div>
-                  <label className={labelCls}>Vertical offset ({cfg.offset ?? 0}px)</label>
-                  <input type="range" min={-120} max={120} step={4} value={cfg.offset ?? 0}
-                    onChange={e => patch('offset', Number(e.target.value))}
-                    className="w-full accent-[var(--color-primary-purple)]" />
-                </div>
-
-                {/* 6. Words per segment */}
-                <div>
-                  <label className={labelCls}>Words per segment</label>
-                  <select
-                    value={cfg.wordsPerSegment ?? 0}
-                    onChange={e => patch('wordsPerSegment', Number(e.target.value))}
-                    className={selectCls}
-                  >
-                    <option value={0}>Auto</option>
-                    {[1,2,3,4,5,6,7,8].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </div>
-
-                {/* 7. Reverent caps */}
-                <div className={rowCls}>
-                  <div>
-                    <p className="text-[12px] font-semibold text-[var(--color-deep-plum)]">Reverent capitalization</p>
-                    <p className="text-[10px] text-[var(--color-purple-gray)]">Capitalize God, Lord, Jesus, He / Him / His</p>
-                  </div>
-                  <Toggle checked={cfg.reverentCaps ?? false} onChange={v => patch('reverentCaps', v)} />
-                </div>
-
-
+            {/* Position + Text case */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] mb-1">Position</label>
+                <select
+                  value={effectiveStyle.position ?? 'center'}
+                  onChange={e => patch({ position: e.target.value as CaptionStyleConfig['position'] })}
+                  className="w-full rounded-lg border border-[var(--color-lavender)] px-3 py-2 text-sm text-[var(--color-deep-plum)] bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-purple)]"
+                >
+                  {POSITIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] mb-1">Text case</label>
+                <select
+                  value={effectiveStyle.textCase ?? 'as_typed'}
+                  onChange={e => patch({ textCase: e.target.value as CaptionStyleConfig['textCase'] })}
+                  className="w-full rounded-lg border border-[var(--color-lavender)] px-3 py-2 text-sm text-[var(--color-deep-plum)] bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-purple)]"
+                >
+                  {TEXT_CASES.map(tc => <option key={tc.value} value={tc.value}>{tc.label}</option>)}
+                </select>
               </div>
             </div>
+
+            {/* Size slider */}
+            <div>
+              <label className="block text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] mb-1">
+                Size ({Math.round((effectiveStyle.scale ?? 1) * 100)}%)
+              </label>
+              <input
+                type="range" min={70} max={140} step={5}
+                value={Math.round((effectiveStyle.scale ?? 1) * 100)}
+                onChange={e => patch({ scale: Number(e.target.value) / 100 })}
+                className="w-full accent-[var(--color-primary-purple)]"
+              />
+            </div>
+
+            {/* Vertical offset */}
+            <div>
+              <label className="block text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] mb-1">
+                Vertical offset ({effectiveStyle.offset ?? 0}px)
+              </label>
+              <input
+                type="range" min={-120} max={120} step={4}
+                value={effectiveStyle.offset ?? 0}
+                onChange={e => patch({ offset: Number(e.target.value) })}
+                className="w-full accent-[var(--color-primary-purple)]"
+              />
+            </div>
+
+            {/* Words per segment */}
+            <div>
+              <label className="block text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] mb-1">Words per segment</label>
+              <select
+                value={String(wordsPerSeg)}
+                onChange={e => patch({ wordsPerSegment: Number(e.target.value) })}
+                className="w-full rounded-lg border border-[var(--color-lavender)] px-3 py-2 text-sm text-[var(--color-deep-plum)] bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-primary-purple)]"
+              >
+                <option value="0">Auto</option>
+                {[1,2,3,4,5,6,7,8].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+
+            {/* Reverent caps toggle */}
+            <label className="flex items-center justify-between rounded-xl border border-[var(--color-lavender)] p-3 cursor-pointer">
+              <div>
+                <span className="block text-sm font-semibold text-[var(--color-deep-plum)]">Reverent capitalization</span>
+                <span className="block text-[11px] text-[var(--color-purple-gray)] mt-0.5">Capitalize God, Lord, Jesus, He/Him/His.</span>
+              </div>
+              <div
+                role="checkbox"
+                aria-checked={!!effectiveStyle.reverentCaps}
+                onClick={() => patch({ reverentCaps: !effectiveStyle.reverentCaps })}
+                className={[
+                  'relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer flex-shrink-0 ml-3',
+                  effectiveStyle.reverentCaps ? 'bg-[var(--color-primary-purple)]' : 'bg-gray-200',
+                ].join(' ')}
+              >
+                <span className={[
+                  'inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform',
+                  effectiveStyle.reverentCaps ? 'translate-x-6' : 'translate-x-1',
+                ].join(' ')} />
+              </div>
+            </label>
+
           </div>
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-[var(--color-lavender)] flex justify-end gap-3 shrink-0">
-          <SrpButton variant="ghost" onClick={onClose}>Cancel</SrpButton>
-          <SrpButton onClick={() => onApply(cfg)}>Apply</SrpButton>
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-[var(--color-lavender)]">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 rounded-full text-sm font-semibold border border-[var(--color-lavender)] text-[var(--color-deep-plum)] hover:bg-[var(--color-lavender-tint)] transition-colors"
+          >
+            Cancel
+          </button>
+          <SrpButton onClick={onClose}>Apply →</SrpButton>
         </div>
+
+      </div>
+    </div>
+  )
+}
+
+/* ---------- color picker ---------- */
+function ColorDial({ label, value, onChange }: { label: string; value: string; onChange: (c: string) => void }) {
+  return (
+    <div>
+      <label className="block text-[10px] uppercase tracking-widest font-bold text-[var(--color-purple-gray)] mb-1">{label}</label>
+      <div className="flex items-center gap-2">
+        <input
+          type="color" value={value}
+          onChange={e => onChange(e.target.value)}
+          className="h-8 w-10 cursor-pointer rounded border border-[var(--color-lavender)] bg-transparent"
+        />
+        <span className="text-xs text-[var(--color-purple-gray)] font-mono">{value}</span>
       </div>
     </div>
   )

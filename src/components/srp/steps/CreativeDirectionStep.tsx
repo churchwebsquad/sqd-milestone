@@ -126,7 +126,6 @@ export function CreativeDirectionStep() {
     deliver9x16, setDeliver9x16,
     outroUrl, setOutroUrl,
     clipSelections,
-    videoUrl, videoSourceType,
     visibleSteps,
     sessionId,
     goToNextStep, goToPrevStep,
@@ -243,14 +242,11 @@ export function CreativeDirectionStep() {
         const segs = parseSegments(pc?.transcript)
         return (
           <CaptionStyleDialog
-            initial={globalCaptionCfg}
-            onApply={handleApplyGlobalCaption}
+            open
+            value={globalCaptionCfg}
+            onChange={handleApplyGlobalCaption}
             onClose={() => setCaptionDialogFor(null)}
-            videoUrl={useRendered ? pc.video_url! : videoUrl}
-            videoSourceType={useRendered ? 'direct' : videoSourceType}
-            clipStartSec={useRendered ? 0 : (firstClip ? parseFloat(firstClip.startTime ?? '0') || 0 : undefined)}
-            clipEndSec={useRendered ? (pc.duration_ms ? pc.duration_ms / 1000 : undefined) : (firstClip ? parseFloat(firstClip.endTime ?? '0') || undefined : undefined)}
-            clipText={firstClip?.caption_text ?? firstClip?.quote}
+            videoUrl={useRendered ? pc.video_url! : undefined}
             segments={segs}
           />
         )
@@ -258,21 +254,18 @@ export function CreativeDirectionStep() {
 
       {/* Per-clip caption dialogs */}
       {captionDialogFor !== null && captionDialogFor !== 'global' && (() => {
-        const idx = clipSelections.findIndex((c, i) => (c.clip_id ?? c.clip_name ?? String(i)) === captionDialogFor)
-        const clip = idx >= 0 ? clipSelections[idx] : undefined
+        const _idx = clipSelections.findIndex((c, i) => (c.clip_id ?? c.clip_name ?? String(i)) === captionDialogFor)
+        void _idx
         const pc   = processedClips[captionDialogFor]
         const useRendered = pc?.status === 'ready' && !!pc.video_url
         const segs = parseSegments(pc?.transcript)
         return (
           <CaptionStyleDialog
-            initial={perClip[captionDialogFor]?.captionCfg ?? DEFAULT_CAPTION_CFG}
-            onApply={cfg => handleApplyClipCaption(captionDialogFor, cfg)}
+            open
+            value={perClip[captionDialogFor]?.captionCfg ?? DEFAULT_CAPTION_CFG}
+            onChange={(cfg: CaptionStyleConfig) => handleApplyClipCaption(captionDialogFor, cfg)}
             onClose={() => setCaptionDialogFor(null)}
-            videoUrl={useRendered ? pc.video_url! : videoUrl}
-            videoSourceType={useRendered ? 'direct' : videoSourceType}
-            clipStartSec={useRendered ? 0 : (clip ? parseFloat(clip.startTime ?? '0') || 0 : undefined)}
-            clipEndSec={useRendered ? (pc.duration_ms ? pc.duration_ms / 1000 : undefined) : (clip ? parseFloat(clip.endTime ?? '0') || undefined : undefined)}
-            clipText={clip?.caption_text ?? clip?.quote}
+            videoUrl={useRendered ? pc.video_url! : undefined}
             segments={segs}
           />
         )
