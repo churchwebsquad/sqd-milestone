@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:captions": "node scripts/build-captions-bundle.mjs",
     "typecheck": "tsc -b",
     "typecheck:ratchet": "node scripts/typecheck-ratchet.mjs",
     "typecheck:ratchet:update": "node scripts/typecheck-ratchet.mjs --update",

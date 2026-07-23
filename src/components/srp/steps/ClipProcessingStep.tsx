@@ -52,6 +52,8 @@ export function ClipProcessingStep() {
     clipSelections,
     clipcutterJobId, setClipcutterJobId,
     srpTemplate, backgroundMusic, designerNotes,
+    captionStyleConfig, deliver9x16,
+    musicMode, musicByClip,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
@@ -81,9 +83,17 @@ export function ClipProcessingStep() {
         session_id: sessionId,
         clips:      clipsPayload,
         creative_direction: {
-          srp_template:     srpTemplate,
+          // motion_slug is the field name the renderer expects
+          motion_slug:      srpTemplate || null,
           background_music: backgroundMusic,
           designer_notes:   designerNotes || null,
+          // Full caption style config — passed straight to render.js as `style` + `chunking`
+          caption_style:    Object.keys(captionStyleConfig).length > 0 ? captionStyleConfig : null,
+          // deliver_9x16: true = 9:16 mp4 w/ reframe+burn; false = 16:9 ZIP + alpha .mov
+          deliver_9x16:     deliver9x16,
+          // Music
+          music_mode:       musicMode || null,
+          music_by_clip:    Object.keys(musicByClip).length > 0 ? musicByClip : null,
         },
       }, { authToken: authSession?.access_token })
       setClipcutterJobId(r.job_id)
@@ -92,7 +102,8 @@ export function ClipProcessingStep() {
     } finally {
       setStarting(false)
     }
-  }, [sessionId, clipSelections, srpTemplate, backgroundMusic, designerNotes, setClipcutterJobId])
+  }, [sessionId, clipSelections, srpTemplate, backgroundMusic, designerNotes,
+      captionStyleConfig, deliver9x16, musicMode, musicByClip, setClipcutterJobId])
 
   const clipResults = useMemo<ClipResult[]>(
     () => Array.isArray(job?.clip_results) ? (job.clip_results as ClipResult[]) : [],
