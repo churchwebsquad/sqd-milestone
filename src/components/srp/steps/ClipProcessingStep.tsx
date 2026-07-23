@@ -53,7 +53,7 @@ export function ClipProcessingStep() {
     clipcutterJobId, setClipcutterJobId,
     srpTemplate, backgroundMusic, designerNotes,
     captionStyleConfig, deliver9x16,
-    musicMode, musicByClip,
+    musicMode, musicByClip, outroUrl,
     visibleSteps,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
@@ -95,6 +95,7 @@ export function ClipProcessingStep() {
           // Music
           music_mode:       musicMode || null,
           music_by_clip:    Object.keys(musicByClip).length > 0 ? musicByClip : null,
+          outro_url:        outroUrl || null,
         },
         enhance_audio_by_clip: enhanceAudioByClip && Object.keys(enhanceAudioByClip).length > 0
           ? enhanceAudioByClip
@@ -107,7 +108,7 @@ export function ClipProcessingStep() {
       setStarting(false)
     }
   }, [sessionId, clipSelections, srpTemplate, backgroundMusic, designerNotes,
-      captionStyleConfig, deliver9x16, musicMode, musicByClip, setClipcutterJobId])
+      captionStyleConfig, deliver9x16, musicMode, musicByClip, outroUrl, setClipcutterJobId])
 
   const clipResults = useMemo<ClipResult[]>(
     () => Array.isArray(job?.clip_results) ? (job.clip_results as ClipResult[]) : [],
