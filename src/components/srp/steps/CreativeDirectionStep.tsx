@@ -90,7 +90,20 @@ const MUSIC_OPTIONS = [
 
 /* ---------- helpers ---------- */
 
+function toDirectUrl(url: string): string {
+  if (!url) return url
+  // Dropbox: swap dl=0 → dl=1, or add dl=1 if absent, and strip www for direct streaming
+  if (url.includes('dropbox.com')) {
+    return url
+      .replace('www.dropbox.com', 'dl.dropboxusercontent.com')
+      .replace(/([?&])dl=0/, '$1dl=1')
+      .replace(/([?&])dl=(\d)/, '$1dl=1')
+  }
+  return url
+}
+
 function OutroPreview({ url }: { url: string }) {
+  const directUrl = toDirectUrl(url)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
   const [error, setError] = useState(false)
   const is916 = dims ? Math.abs(dims.w / dims.h - 9 / 16) < 0.02 : null
@@ -99,7 +112,7 @@ function OutroPreview({ url }: { url: string }) {
     <div className="space-y-1.5">
       <div className="relative w-full overflow-hidden rounded-lg bg-black" style={{ aspectRatio: '9 / 16', maxHeight: 220 }}>
         <video
-          src={url}
+          src={directUrl}
           className="absolute inset-0 h-full w-full object-contain"
           muted
           playsInline
@@ -113,7 +126,7 @@ function OutroPreview({ url }: { url: string }) {
         />
       </div>
       {error && (
-        <p className="text-[11px] text-wm-danger">Could not load video — check the URL is a direct playable link.</p>
+        <p className="text-[11px] text-wm-danger">Could not load video — check the URL is accessible.</p>
       )}
       {dims && (
         <p className={`text-[11px] ${is916 ? 'text-wm-success' : 'text-amber-600'}`}>
@@ -577,7 +590,7 @@ export function CreativeDirectionStep() {
             id="outro-url"
             type="url"
             value={outroUrl}
-            onChange={e => setOutroUrl(e.target.value)}
+            onChange={e => setOutroUrl(toDirectUrl(e.target.value))}
             placeholder="https://www.dropbox.com/..."
             className="w-full rounded-lg border border-[var(--color-lavender)] bg-white px-3 py-2 text-[12px] text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] focus:ring-2 focus:ring-[var(--color-lavender)]"
           />
