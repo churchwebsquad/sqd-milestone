@@ -22,6 +22,36 @@ function parseSegments(transcript: string | null | undefined) {
   return undefined
 }
 
+function mmssToSec(ts: string | null | undefined): number {
+  if (!ts) return 0
+  const parts = String(ts).split(':').map(Number)
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  return Number(ts) || 0
+}
+
+function sliceClipWords(
+  transcriptWords: unknown[] | null,
+  startTs: string | undefined,
+  endTs:   string | undefined,
+): { word: string; start: number; end: number }[] | undefined {
+  if (!Array.isArray(transcriptWords) || !transcriptWords.length) return undefined
+  if (!startTs || !endTs) return undefined
+  const clipStart = mmssToSec(startTs)
+  const clipEnd   = mmssToSec(endTs)
+  const slice = (transcriptWords as Record<string, unknown>[])
+    .filter(w => {
+      const t = typeof w.start === 'number' ? w.start : mmssToSec(w.start as string)
+      return t >= clipStart && t <= clipEnd
+    })
+    .map(w => ({
+      word:  typeof w.word === 'string' ? w.word : typeof w.text === 'string' ? w.text : '',
+      start: +(((typeof w.start === 'number' ? w.start : mmssToSec(w.start as string)) - clipStart).toFixed(3)),
+      end:   +(((typeof w.end   === 'number' ? w.end   : mmssToSec(w.end   as string)) - clipStart).toFixed(3)),
+    }))
+  return slice.length > 0 ? slice : undefined
+}
+
 interface PerClipSettings {
   captionCfg:    CaptionStyleConfig
   musicMode:     string
@@ -126,6 +156,7 @@ export function CreativeDirectionStep() {
     deliver9x16, setDeliver9x16,
     outroUrl, setOutroUrl,
     clipSelections,
+    transcriptWords,
     visibleSteps,
     sessionId,
     goToNextStep, goToPrevStep,
@@ -237,7 +268,9 @@ export function CreativeDirectionStep() {
         const firstClipId = firstClip?.clip_id ?? firstClip?.clip_name ?? ''
         const pc          = processedClips[firstClipId]
         const useRendered = pc?.status === 'ready' && !!pc.video_url
-        const segs = parseSegments(pc?.transcript)
+        const segs        = parseSegments(pc?.transcript)
+        const clipWords   = sliceClipWords(transcriptWords, firstClip?.startTime, firstClip?.endTime)
+        const previewText = firstClip?.caption_text ?? firstClip?.quote ?? undefined
         return (
           <CaptionStyleDialog
             open
@@ -246,6 +279,8 @@ export function CreativeDirectionStep() {
             onClose={() => setCaptionDialogFor(null)}
             videoUrl={useRendered ? pc.video_url! : undefined}
             segments={segs}
+            words={clipWords}
+            previewText={previewText}
           />
         )
       })()}
@@ -254,9 +289,12 @@ export function CreativeDirectionStep() {
       {captionDialogFor !== null && captionDialogFor !== 'global' && (() => {
         const _idx = clipSelections.findIndex((c, i) => (c.clip_id ?? c.clip_name ?? String(i)) === captionDialogFor)
         void _idx
-        const pc   = processedClips[captionDialogFor]
+        const pc          = processedClips[captionDialogFor]
         const useRendered = pc?.status === 'ready' && !!pc.video_url
-        const segs = parseSegments(pc?.transcript)
+        const segs        = parseSegments(pc?.transcript)
+        const clipSel     = clipSelections.find((c, i) => (c.clip_id ?? c.clip_name ?? String(i)) === captionDialogFor)
+        const clipWords   = sliceClipWords(transcriptWords, clipSel?.startTime, clipSel?.endTime)
+        const previewText = clipSel?.caption_text ?? clipSel?.quote ?? undefined
         return (
           <CaptionStyleDialog
             open
@@ -265,6 +303,8 @@ export function CreativeDirectionStep() {
             onClose={() => setCaptionDialogFor(null)}
             videoUrl={useRendered ? pc.video_url! : undefined}
             segments={segs}
+            words={clipWords}
+            previewText={previewText}
           />
         )
       })()}

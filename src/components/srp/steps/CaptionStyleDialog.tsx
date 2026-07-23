@@ -49,18 +49,22 @@ interface TranscriptSegment { startSec: number; endSec: number; text: string }
 
 /* ---------- props ---------- */
 interface Props {
-  open:      boolean
-  onClose:   () => void
-  value:     CaptionStyleConfig
-  onChange:  (cfg: CaptionStyleConfig) => void
+  open:         boolean
+  onClose:      () => void
+  value:        CaptionStyleConfig
+  onChange:     (cfg: CaptionStyleConfig) => void
   /** Optional: MP4/video url for the direct clip preview */
-  videoUrl?: string
+  videoUrl?:    string
   /** Optional: parsed transcript segments to drive live captions in preview */
-  segments?: TranscriptSegment[]
+  segments?:    TranscriptSegment[]
+  /** Pre-built word timings (rebased to t=0) — takes priority over segments/previewText */
+  words?:       CaptionWord[]
+  /** Fallback text to synthesize word timings from when no segments/words are available */
+  previewText?: string
 }
 
 /* ---------- dialog ---------- */
-export function CaptionStyleDialog({ open, onClose, value, onChange, videoUrl, segments }: Props) {
+export function CaptionStyleDialog({ open, onClose, value, onChange, videoUrl, segments, words: wordsProp, previewText }: Props) {
   const [activeGroup, setActiveGroup] = useState<CaptionGroup>('Traditional')
   const [engineReady, setEngineReady] = useState(false)
   const [t, setT]                     = useState(0)
@@ -114,12 +118,13 @@ export function CaptionStyleDialog({ open, onClose, value, onChange, videoUrl, s
     return () => cancelAnimationFrame(raf)
   }, [open])
 
-  // Build timed words from transcript segments or synthesize from text
+  // Build timed words — priority: wordsProp > segments > synthesize from previewText
   const casedWords: CaptionWord[] = useMemo(() => {
     if (!engineReady) return []
     let words: CaptionWord[] = []
-    if (segments && segments.length > 0) {
-      // Use real transcript: each segment becomes evenly-spaced word timings
+    if (wordsProp && wordsProp.length > 0) {
+      words = wordsProp
+    } else if (segments && segments.length > 0) {
       segments.forEach(seg => {
         const tokens = seg.text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
         if (tokens.length === 0) return
@@ -134,13 +139,14 @@ export function CaptionStyleDialog({ open, onClose, value, onChange, videoUrl, s
         })
       })
     } else {
-      const dur = videoRef.current?.duration || 30
-      words = synthesizePreviewWords('Your faith has made you well', dur)
+      const dur  = videoRef.current?.duration || 30
+      const text = previewText?.trim() || 'Your faith has made you well'
+      words = synthesizePreviewWords(text, dur)
     }
     words = applyTextCase(words, effectiveStyle.textCase)
     words = applySacredCaps(words, effectiveStyle.reverentCaps)
     return words
-  }, [engineReady, segments, effectiveStyle.textCase, effectiveStyle.reverentCaps])
+  }, [engineReady, wordsProp, segments, previewText, effectiveStyle.textCase, effectiveStyle.reverentCaps])
 
   const chunks: CaptionChunk[] | null = useMemo(() => {
     if (!engineReady || casedWords.length === 0) return null
