@@ -49,7 +49,7 @@ declare global {
   }
 }
 
-const CAPTION_ASSETS_V = '9'
+const CAPTION_ASSETS_V = '10'
 
 let loadPromise: Promise<void> | null = null
 
