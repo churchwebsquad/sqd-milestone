@@ -286,6 +286,7 @@ export function CreativeDirectionStep() {
             segments={segs}
             words={clipWords}
             previewText={previewText}
+            titleCardUrl={pc?.title_card_url ?? undefined}
           />
         )
       })()}
@@ -311,6 +312,7 @@ export function CreativeDirectionStep() {
             segments={segs}
             words={clipWords}
             previewText={previewText}
+            titleCardUrl={pc?.title_card_url ?? undefined}
           />
         )
       })()}

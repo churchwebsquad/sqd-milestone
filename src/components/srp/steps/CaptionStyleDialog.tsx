@@ -61,10 +61,12 @@ interface Props {
   words?:       CaptionWord[]
   /** Fallback text to synthesize word timings from when no segments/words are available */
   previewText?: string
+  /** Optional: title card image URL (1080×1920) to overlay on the preview */
+  titleCardUrl?: string
 }
 
 /* ---------- dialog ---------- */
-export function CaptionStyleDialog({ open, onClose, value, onChange, videoUrl, segments, words: wordsProp, previewText }: Props) {
+export function CaptionStyleDialog({ open, onClose, value, onChange, videoUrl, segments, words: wordsProp, previewText, titleCardUrl }: Props) {
   const [activeGroup, setActiveGroup] = useState<CaptionGroup>('Traditional')
   const [engineReady, setEngineReady] = useState(false)
   const [t, setT]                     = useState(0)
@@ -200,6 +202,15 @@ export function CaptionStyleDialog({ open, onClose, value, onChange, videoUrl, s
                   src={videoUrl}
                   className="absolute inset-0 h-full w-full object-cover"
                   muted loop autoPlay playsInline preload="auto"
+                />
+              )}
+
+              {/* Title card overlay — 1080×1920 fits the stage exactly */}
+              {titleCardUrl && (
+                <img
+                  src={titleCardUrl}
+                  alt="Title card"
+                  className="absolute inset-0 h-full w-full object-cover pointer-events-none"
                 />
               )}
 
