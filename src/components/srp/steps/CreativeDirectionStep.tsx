@@ -90,6 +90,40 @@ const MUSIC_OPTIONS = [
 
 /* ---------- helpers ---------- */
 
+function OutroPreview({ url }: { url: string }) {
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
+  const [error, setError] = useState(false)
+  const is916 = dims ? Math.abs(dims.w / dims.h - 9 / 16) < 0.02 : null
+
+  return (
+    <div className="space-y-1.5">
+      <div className="relative w-full overflow-hidden rounded-lg bg-black" style={{ aspectRatio: '9 / 16', maxHeight: 220 }}>
+        <video
+          src={url}
+          className="absolute inset-0 h-full w-full object-contain"
+          muted
+          playsInline
+          preload="metadata"
+          onLoadedMetadata={e => {
+            const v = e.currentTarget
+            setDims({ w: v.videoWidth, h: v.videoHeight })
+            setError(false)
+          }}
+          onError={() => setError(true)}
+        />
+      </div>
+      {error && (
+        <p className="text-[11px] text-wm-danger">Could not load video — check the URL is a direct playable link.</p>
+      )}
+      {dims && (
+        <p className={`text-[11px] ${is916 ? 'text-wm-success' : 'text-amber-600'}`}>
+          {dims.w}×{dims.h}{is916 ? ' — looks good (9:16)' : ' — not 9:16, will be letterboxed/pillarboxed by the renderer'}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function CaptionChip({ cfg }: { cfg: CaptionStyleConfig }) {
   const meta = styleBySlug(cfg.captionSlug ?? '')
   return (
@@ -548,8 +582,12 @@ export function CreativeDirectionStep() {
             className="w-full rounded-lg border border-[var(--color-lavender)] bg-white px-3 py-2 text-[12px] text-[var(--color-deep-plum)] placeholder:text-[var(--color-purple-gray)] focus:outline-none focus:border-[var(--color-primary-purple)] focus:ring-2 focus:ring-[var(--color-lavender)]"
           />
           <p className="text-[11px] text-[var(--color-purple-gray)]">
-            This video is appended to the end of each clip after captions are baked in.
+            This video is appended to the end of each clip. Should be <strong>1080×1920 (9:16)</strong> — non-9:16 videos will be pillarboxed/letterboxed by the renderer.
           </p>
+          {/* Inline preview so the user can eyeball the aspect ratio */}
+          {outroUrl && (
+            <OutroPreview url={outroUrl} />
+          )}
         </section>
 
         {/* Designer notes */}
