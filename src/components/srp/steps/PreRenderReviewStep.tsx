@@ -167,8 +167,14 @@ function ClipCard({
   const [editText, setEditText]         = useState('')
   const [savingTranscript, setSavingTranscript]   = useState(false)
   const [transcriptDirty, setTranscriptDirty]     = useState(false)
-  const [approved, setApproved]                   = useState(!!transcriptApproved)
-  const [approvingSaving, setApprovingSaving]     = useState(false)
+  const [approved, setApproved]               = useState(!!transcriptApproved)
+  const [approvingSaving, setApprovingSaving] = useState(false)
+
+  // Sync with Supabase data — prop arrives async after mount so useState
+  // initial value is always false on remount; this corrects it once data loads.
+  useEffect(() => {
+    setApproved(!!transcriptApproved)
+  }, [transcriptApproved])
 
   // Manual segment add
   const [showAddSeg, setShowAddSeg]   = useState(false)
