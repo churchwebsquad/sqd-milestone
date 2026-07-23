@@ -176,6 +176,19 @@ function ClipCard({
     setApproved(!!transcriptApproved)
   }, [transcriptApproved])
 
+  // Sync saved transcript from Supabase when the prop loads after remount.
+  // Skip if the user is actively editing to avoid stomping in-progress changes.
+  useEffect(() => {
+    if (transcriptDirty || editingIdx !== null) return
+    if (!transcript) return
+    try {
+      const parsed = JSON.parse(transcript)
+      if (Array.isArray(parsed) && parsed.length > 0 && 'startSec' in parsed[0]) {
+        setSegments(parsed as SrtSegment[])
+      }
+    } catch { /* not parseable segments, keep existing state */ }
+  }, [transcript]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Manual segment add
   const [showAddSeg, setShowAddSeg]   = useState(false)
   const [newSegStart, setNewSegStart] = useState('')
