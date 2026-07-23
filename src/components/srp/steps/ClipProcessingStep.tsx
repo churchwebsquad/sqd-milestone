@@ -17,6 +17,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { ArrowLeft, ArrowRight, Loader2, Film, Play, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { useClipcutterJob } from '../../../lib/srpRealtime'
+import { useProcessedClips } from '../../../hooks/useProcessedClips'
 import { SrpButton } from '../_shared/SrpButton'
 import { callSrpApi } from '../../../lib/srpApi'
 import { STEP_LABELS, STEP_DESCRIPTIONS } from '../../../lib/srpSessions'
@@ -61,6 +62,7 @@ export function ClipProcessingStep() {
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
 
+  const { clips: processedClips } = useProcessedClips(sessionId)
   const { job, connected } = useClipcutterJob(clipcutterJobId)
   const stepNum = visibleSteps.indexOf('clipProcessing') + 1
 
@@ -68,16 +70,23 @@ export function ClipProcessingStep() {
     if (clipSelections.length === 0) { setStartError('No clips picked.'); return }
     setStarting(true); setStartError(null)
     try {
-      const clipsPayload = clipSelections.map((c, i) => ({
-        clip_id:       c.clip_id ?? `clip_${i + 1}`,
-        clip_name:     c.clip_name ?? c.category ?? `Reel ${i + 1}`,
-        in_point_ms:   timestampToMs(c.startTime),
-        out_point_ms:  timestampToMs(c.endTime),
-        duration_ms:   Math.max(0, timestampToMs(c.endTime) - timestampToMs(c.startTime)),
-        quote:         c.quote ?? null,
-        category:      c.category ?? null,
-        caption_text:  c.social_caption ?? null,
-      }))
+      const clipsPayload = clipSelections.map((c, i) => {
+        const clipId = c.clip_id ?? `clip_${i + 1}`
+        const pc = processedClips[clipId]
+        return {
+          clip_id:             clipId,
+          clip_name:           c.clip_name ?? c.category ?? `Reel ${i + 1}`,
+          in_point_ms:         timestampToMs(c.startTime),
+          out_point_ms:        timestampToMs(c.endTime),
+          duration_ms:         Math.max(0, timestampToMs(c.endTime) - timestampToMs(c.startTime)),
+          quote:               c.quote ?? null,
+          category:            c.category ?? null,
+          caption_text:        c.social_caption ?? null,
+          title_card_url:      pc?.title_card_url ?? null,
+          title_card_start_ms: pc?.title_card_start_ms ?? null,
+          title_card_end_ms:   pc?.title_card_end_ms ?? null,
+        }
+      })
       const { data: { session: authSession } } = await supabase.auth.getSession()
       const enhanceAudioByClip = (captionStyleConfig as Record<string, unknown>).enhance_audio_by_clip as Record<string, boolean> | undefined
       const r = await callSrpApi<StartClipcutterResponse>('start-clipcutter', {
