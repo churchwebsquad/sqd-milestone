@@ -175,19 +175,17 @@ export function CreativeDirectionStep() {
     ? MUSIC_LIBRARY.find(t => t.id === selectedMusicTrackId)
     : null
 
-  /* apply global caption */
+  /* live-update global caption (called on every change in dialog — must NOT close) */
   const handleApplyGlobalCaption = useCallback((cfg: CaptionStyleConfig) => {
     if (cfg.captionSlug) setSrpTemplate(cfg.captionSlug)
     setDeliver9x16(cfg.deliver9x16 ?? false)
     setCaptionStyleConfig({ ...cfg } as unknown as Record<string, unknown>)
-    setCaptionDialogFor(null)
   }, [setSrpTemplate, setDeliver9x16, setCaptionStyleConfig])
 
-  /* apply per-clip caption */
+  /* live-update per-clip caption (called on every change in dialog — must NOT close) */
   const handleApplyClipCaption = useCallback((id: string, cfg: CaptionStyleConfig) => {
     updatePerClip(id, { captionCfg: cfg })
-    setCaptionDialogFor(null)
-  }, [])
+  }, [updatePerClip])
 
   /* flush per-clip settings into context before navigating */
   const flushPerClip = useCallback(() => {
