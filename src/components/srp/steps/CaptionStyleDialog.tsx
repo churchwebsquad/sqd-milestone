@@ -63,10 +63,13 @@ interface Props {
   previewText?: string
   /** Optional: title card image URL (1080×1920) to overlay on the preview */
   titleCardUrl?: string
+  /** Title card visibility window in milliseconds (from processed_clips) */
+  titleCardStartMs?: number | null
+  titleCardEndMs?: number | null
 }
 
 /* ---------- dialog ---------- */
-export function CaptionStyleDialog({ open, onClose, value, onChange, videoUrl, segments, words: wordsProp, previewText, titleCardUrl }: Props) {
+export function CaptionStyleDialog({ open, onClose, value, onChange, videoUrl, segments, words: wordsProp, previewText, titleCardUrl, titleCardStartMs, titleCardEndMs }: Props) {
   const [activeGroup, setActiveGroup] = useState<CaptionGroup>('Traditional')
   const [engineReady, setEngineReady] = useState(false)
   const [t, setT]                     = useState(0)
@@ -205,14 +208,18 @@ export function CaptionStyleDialog({ open, onClose, value, onChange, videoUrl, s
                 />
               )}
 
-              {/* Title card overlay — 1080×1920 fits the stage exactly */}
-              {titleCardUrl && (
-                <img
-                  src={titleCardUrl}
-                  alt="Title card"
-                  className="absolute inset-0 h-full w-full object-cover pointer-events-none"
-                />
-              )}
+              {/* Title card overlay — visible only within its timestamp window */}
+              {titleCardUrl && (() => {
+                const startS = titleCardStartMs != null ? titleCardStartMs / 1000 : 0
+                const endS   = titleCardEndMs   != null ? titleCardEndMs   / 1000 : Infinity
+                return t >= startS && t <= endS ? (
+                  <img
+                    src={titleCardUrl}
+                    alt="Title card"
+                    className="absolute inset-0 h-full w-full object-cover pointer-events-none"
+                  />
+                ) : null
+              })()}
 
               {/* Caption overlay: 1080×1920 space scaled down */}
               {Comp && activeWords.length > 0 && (
