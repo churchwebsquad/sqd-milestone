@@ -378,22 +378,30 @@ export function CreativeDirectionStep() {
         const captionCfg = settings.isWorship ? settings.captionCfg : globalCaptionCfg
         const { captionSlug, wordsPerSegment, deliver9x16: clipD9, ...styleFields } = captionCfg
 
-        // Use approved/saved transcript segments if available (coach edits from Pre-render review).
-        // Each SrtSegment { startSec, endSec, text } is already zero-offset to clip start.
-        // Convert to renderer's { word, start, end } format by treating each segment as one "word".
-        // Fall back to slicing the original Whisper word array when no edits exist.
+        // Use saved transcript segments from Pre-render review as the authoritative source.
+        // Each SrtSegment { startSec, endSec, text } is zero-offset to clip start.
+        // Convert to renderer's { word, start, end } format (each segment = one caption block).
+        // Fall back to slicing the original Whisper word array only when no saved transcript exists
+        // or when parsing fails, or when the saved transcript parses to an empty array.
         let words: { word: string; start: number; end: number }[]
         const savedTranscript = pc?.transcript
+        let usedSavedTranscript = false
         if (savedTranscript) {
           try {
             const segs = JSON.parse(savedTranscript) as { startSec: number; endSec: number; text: string }[]
-            words = segs.map(s => ({ word: s.text, start: s.startSec, end: s.endSec }))
+            if (segs.length > 0) {
+              words = segs.map(s => ({ word: s.text, start: s.startSec, end: s.endSec }))
+              usedSavedTranscript = true
+            } else {
+              words = sliceClipWords(transcriptWords, c.startTime, c.endTime) ?? []
+            }
           } catch {
             words = sliceClipWords(transcriptWords, c.startTime, c.endTime) ?? []
           }
         } else {
           words = sliceClipWords(transcriptWords, c.startTime, c.endTime) ?? []
         }
+        console.log(`[render] clip ${clipId}: words source = ${usedSavedTranscript ? 'saved transcript' : 'whisper slice'} (${words.length} segments)`)
 
         return {
           clip_id:             clipId,
