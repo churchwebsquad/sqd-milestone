@@ -155,7 +155,8 @@ serve(async (req) => {
         const pcUpdate = {
           status: "ready",
           video_url: result.video_url,
-          transcript: null, // clipcutter does not transcribe
+          // Do NOT touch transcript/transcript_approved — the coach may have
+          // approved captions in Pre-render review and those must survive renders.
           duration_ms: result.duration_ms ?? null,
           error_message: null,
           updated_at: new Date().toISOString(),
