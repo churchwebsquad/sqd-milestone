@@ -25,6 +25,7 @@ serve(async (req) => {
       background_music: bgm_in,
       approved_content,
       srp_task_id_override,
+      clipcutter_job_id: clipcutter_job_id_in,
     } = body;
 
     // ── Supabase client (service role) ────────────────────────────────
@@ -53,12 +54,13 @@ serve(async (req) => {
       if (sess?.member && !member) member = sess.member;
       if (sess?.church_name && !church_name) church_name = sess.church_name;
 
-      if (sess?.clipcutter_job_id) {
+      const resolved_job_id = clipcutter_job_id_in || sess?.clipcutter_job_id;
+      if (resolved_job_id) {
         const { data: job } = await supabase
           .schema("srp_pipeline")
           .from("clipcutter_jobs")
           .select("creative_direction, clips")
-          .eq("id", sess.clipcutter_job_id)
+          .eq("id", resolved_job_id)
           .maybeSingle();
         const cd = (job?.creative_direction || {}) as Record<string, unknown>;
         if (!creative_direction) creative_direction = cd.srp_template || null;
@@ -77,7 +79,7 @@ serve(async (req) => {
             .schema("srp_pipeline")
             .from("clipcutter_jobs")
             .select("clip_results")
-            .eq("id", sess.clipcutter_job_id)
+            .eq("id", resolved_job_id)
             .maybeSingle();
 
           const clipResults: Array<{ clip_id?: string; clip_name?: string; video_url?: string; duration_ms?: number }> =

@@ -407,8 +407,9 @@ export function CreativeDirectionStep() {
     setSubmitting(true); setSubmitError(null); setSubmitOk(false)
     try {
       await callSrpApi('submit-to-clickup', {
-        session_id: sessionId,
-        srp_task_id_override: srpTaskIdOverride || null,
+        session_id:            sessionId,
+        clipcutter_job_id:     clipcutterJobId || null,
+        srp_task_id_override:  srpTaskIdOverride || null,
       })
       setSubmitOk(true)
     } catch (e) {
