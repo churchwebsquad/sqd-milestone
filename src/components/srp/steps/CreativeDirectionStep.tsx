@@ -226,8 +226,6 @@ export function CreativeDirectionStep() {
     visibleSteps,
     sessionId,
     clipcutterJobId, setClipcutterJobId,
-    backgroundMusic,
-    musicByClip,
     srpTaskIdOverride,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
@@ -352,13 +350,37 @@ export function CreativeDirectionStep() {
 
   const handleStartRender = useCallback(async () => {
     if (clipSelections.length === 0) { setRenderStartError('No clips picked.'); return }
+
+    // Compute per-clip render settings directly from local perClip state — do NOT
+    // read from captionStyleConfig context because flushPerClip() is async and the
+    // context value would be stale by the time we read it here.
+    const enhanceAudioByClip: Record<string, boolean> = {}
+    const musicByClipMap: Record<string, string> = {}
+    for (const [id, s] of Object.entries(perClip)) {
+      enhanceAudioByClip[id] = s.enhanceAudio ?? true
+      if (s.musicMode === 'select' && s.musicTrackId) musicByClipMap[id] = s.musicTrackId
+    }
+    const anySelect = Object.values(perClip).some(s => s.musicMode === 'select')
+    const allNone   = Object.values(perClip).every(s => s.musicMode === 'none')
+    const resolvedMusicMode = anySelect ? 'select' : allNone ? 'none' : 'editor_choice'
+
+    // Flush to context for navigation continuity (fire-and-forget; we use local values above)
     flushPerClip()
+
     setRenderStarting(true)
     setRenderStartError(null)
     try {
       const clipsPayload = clipSelections.map((c, i) => {
-        const clipId = c.clip_id ?? `clip_${i + 1}`
-        const pc = processedClips[clipId]
+        const clipId   = c.clip_id ?? `clip_${i + 1}`
+        const pc       = processedClips[clipId]
+        const settings = perClip[clipId] ?? DEFAULT_PER_CLIP
+        // Pick caption slug: worship clips use their own style, others use global
+        const captionCfg = settings.isWorship ? settings.captionCfg : globalCaptionCfg
+        const { captionSlug, wordsPerSegment, deliver9x16: clipD9, ...styleFields } = captionCfg
+
+        // Slice the full-sermon word array to this clip's in/out range for the renderer
+        const words = sliceClipWords(transcriptWords, c.startTime, c.endTime) ?? []
+
         return {
           clip_id:             clipId,
           clip_name:           c.clip_name ?? c.category ?? `Reel ${i + 1}`,
@@ -371,27 +393,33 @@ export function CreativeDirectionStep() {
           title_card_url:      pc?.title_card_url ?? null,
           title_card_start_ms: pc?.title_card_start_ms ?? null,
           title_card_end_ms:   pc?.title_card_end_ms ?? null,
+          // Renderer fields — passed per-clip so n8n can forward them to Modal renderer
+          words,
+          motion_slug:         captionSlug || srpTemplate || null,
+          style:               styleFields,
+          chunking:            { wordsPerSegment: wordsPerSegment ?? 0 },
+          enhance_audio:       settings.enhanceAudio ?? true,
+          deliver_9x16:        settings.deliver9x16 ?? clipD9 ?? false,
+          music_mode:          settings.musicMode || 'editor_choice',
+          music_track_id:      settings.musicTrackId || null,
         }
       })
       const { data: { session: authSession } } = await supabase.auth.getSession()
-      const enhanceAudioByClip = (captionStyleConfig as Record<string, unknown>).enhance_audio_by_clip as Record<string, boolean> | undefined
       const r = await callSrpApi<{ job_id: string }>('start-clipcutter', {
         session_id: sessionId,
         source_url: videoUrl || null,
         clips:      clipsPayload,
         creative_direction: {
           motion_slug:      srpTemplate || null,
-          background_music: backgroundMusic,
+          background_music: resolvedMusicMode !== 'none',
           designer_notes:   designerNotes || null,
-          caption_style:    Object.keys(captionStyleConfig).length > 0 ? captionStyleConfig : null,
+          caption_style:    globalCaptionCfg,
           deliver_9x16:     deliver9x16,
-          music_mode:       musicMode || null,
-          music_by_clip:    Object.keys(musicByClip).length > 0 ? musicByClip : null,
+          music_mode:       resolvedMusicMode,
+          music_by_clip:    Object.keys(musicByClipMap).length > 0 ? musicByClipMap : null,
           outro_url:        outroUrl || null,
         },
-        enhance_audio_by_clip: enhanceAudioByClip && Object.keys(enhanceAudioByClip).length > 0
-          ? enhanceAudioByClip
-          : null,
+        enhance_audio_by_clip: Object.keys(enhanceAudioByClip).length > 0 ? enhanceAudioByClip : null,
       }, { authToken: authSession?.access_token })
       setClipcutterJobId(r.job_id)
     } catch (e) {
@@ -399,9 +427,9 @@ export function CreativeDirectionStep() {
     } finally {
       setRenderStarting(false)
     }
-  }, [sessionId, clipSelections, srpTemplate, backgroundMusic, designerNotes,
-      captionStyleConfig, deliver9x16, musicMode, musicByClip, outroUrl,
-      processedClips, flushPerClip, setClipcutterJobId])
+  }, [sessionId, clipSelections, srpTemplate, designerNotes, deliver9x16,
+      outroUrl, processedClips, perClip, globalCaptionCfg,
+      transcriptWords, videoUrl, flushPerClip, setClipcutterJobId])
 
   const handleSendToClickUp = useCallback(async () => {
     setSubmitting(true); setSubmitError(null); setSubmitOk(false)
