@@ -378,8 +378,22 @@ export function CreativeDirectionStep() {
         const captionCfg = settings.isWorship ? settings.captionCfg : globalCaptionCfg
         const { captionSlug, wordsPerSegment, deliver9x16: clipD9, ...styleFields } = captionCfg
 
-        // Slice the full-sermon word array to this clip's in/out range for the renderer
-        const words = sliceClipWords(transcriptWords, c.startTime, c.endTime) ?? []
+        // Use approved/saved transcript segments if available (coach edits from Pre-render review).
+        // Each SrtSegment { startSec, endSec, text } is already zero-offset to clip start.
+        // Convert to renderer's { word, start, end } format by treating each segment as one "word".
+        // Fall back to slicing the original Whisper word array when no edits exist.
+        let words: { word: string; start: number; end: number }[]
+        const savedTranscript = pc?.transcript
+        if (savedTranscript) {
+          try {
+            const segs = JSON.parse(savedTranscript) as { startSec: number; endSec: number; text: string }[]
+            words = segs.map(s => ({ word: s.text, start: s.startSec, end: s.endSec }))
+          } catch {
+            words = sliceClipWords(transcriptWords, c.startTime, c.endTime) ?? []
+          }
+        } else {
+          words = sliceClipWords(transcriptWords, c.startTime, c.endTime) ?? []
+        }
 
         return {
           clip_id:             clipId,
