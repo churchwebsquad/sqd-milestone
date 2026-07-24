@@ -245,8 +245,9 @@ export function CreativeDirectionStep() {
   const [perClip, setPerClip] = useState<Record<string, PerClipSettings>>(() => {
     const byClip = (captionStyleConfig as { byClip?: Record<string, unknown> }).byClip ?? {}
     const init: Record<string, PerClipSettings> = {}
-    for (const clip of clipSelections) {
-      const id = clip.clip_id ?? clip.clip_name ?? String(clipSelections.indexOf(clip))
+    for (let i = 0; i < clipSelections.length; i++) {
+      const clip = clipSelections[i]
+      const id = clip.clip_id ?? `selection-${i}`
       const stored = byClip[id] as Partial<PerClipSettings> | undefined
       init[id] = { ...DEFAULT_PER_CLIP, ...stored }
     }
@@ -265,7 +266,7 @@ export function CreativeDirectionStep() {
 
   /* helpers */
   const clipKey = (idx: number) =>
-    clipSelections[idx]?.clip_id ?? clipSelections[idx]?.clip_name ?? String(idx)
+    clipSelections[idx]?.clip_id ?? `selection-${idx}`
 
   const updatePerClip = (id: string, patch: Partial<PerClipSettings>) =>
     setPerClip(prev => ({ ...prev, [id]: { ...(prev[id] ?? DEFAULT_PER_CLIP), ...patch } }))
@@ -371,7 +372,7 @@ export function CreativeDirectionStep() {
     setRenderStartError(null)
     try {
       const clipsPayload = clipSelections.map((c, i) => {
-        const clipId   = c.clip_id ?? `clip_${i + 1}`
+        const clipId   = c.clip_id ?? `selection-${i}`
         const pc       = processedClips[clipId]
         const settings = perClip[clipId] ?? DEFAULT_PER_CLIP
         // Pick caption slug: worship clips use their own style, others use global
