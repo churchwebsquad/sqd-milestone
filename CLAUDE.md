@@ -218,7 +218,7 @@ within the SRP pipeline boundary. When a Claude session is helping Duane:
 **Additional rules for Duane's sessions:**
 - No schema changes (no migrations, no ALTER TABLE, no new tables) without explicit written approval from Amber.
 - No PRs that touch files outside the allowed list above.
-- Tag Amber (@amberpankey) for review before merging any PR.
+- PRs that stay within the allowed boundary above can be self-merged without review.
 - If a task requires changes outside the allowed boundary, stop and ask Amber to make that change instead.
 
 Downstream: whichever director's session is running, read the Important
