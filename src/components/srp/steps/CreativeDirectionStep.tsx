@@ -222,6 +222,7 @@ export function CreativeDirectionStep() {
     outroUrl, setOutroUrl,
     clipSelections,
     transcriptWords,
+    videoUrl,
     visibleSteps,
     sessionId,
     clipcutterJobId, setClipcutterJobId,
@@ -372,6 +373,7 @@ export function CreativeDirectionStep() {
       const enhanceAudioByClip = (captionStyleConfig as Record<string, unknown>).enhance_audio_by_clip as Record<string, boolean> | undefined
       const r = await callSrpApi<{ job_id: string }>('start-clipcutter', {
         session_id: sessionId,
+        source_url: videoUrl || null,
         clips:      clipsPayload,
         creative_direction: {
           motion_slug:      srpTemplate || null,
