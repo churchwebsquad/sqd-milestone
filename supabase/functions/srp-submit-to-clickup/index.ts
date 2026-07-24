@@ -66,29 +66,50 @@ serve(async (req) => {
         if (designer_notes === undefined) designer_notes = cd.designer_notes ?? "";
         if (background_music === undefined) background_music = cd.background_music ?? false;
 
-        // Auto-build clips from processed_clips rows that have a rendered video_url.
-        // Only rendered clips (status = ready, video_url non-null) are included.
-        if (!clips?.length && sess.clipcutter_job_id) {
+        // Auto-build clips from the clipcutter job's clip_results (rendered video URLs).
+        // Fall back to processed_clips for transcript data where available.
+        if (!clips?.length) {
           const storedClips: Array<{ clip_id?: string; clip_name?: string }> =
             Array.isArray(job?.clips) ? job.clips : [];
 
-          const { data: pcRows } = await supabase
+          // Fetch the full job row to get clip_results
+          const { data: fullJob } = await supabase
             .schema("srp_pipeline")
-            .from("processed_clips")
-            .select("clip_id, video_url, transcript, srt_transcript, duration_ms")
-            .eq("session_id", session_id)
-            .eq("status", "ready")
-            .not("video_url", "is", null);
+            .from("clipcutter_jobs")
+            .select("clip_results")
+            .eq("id", sess.clipcutter_job_id)
+            .maybeSingle();
 
-          if (pcRows?.length) {
-            clips = pcRows.map((pc, i) => {
-              const stored = storedClips.find((sc) => sc.clip_id === pc.clip_id) ?? storedClips[i];
+          const clipResults: Array<{ clip_id?: string; clip_name?: string; video_url?: string; duration_ms?: number }> =
+            Array.isArray(fullJob?.clip_results) ? fullJob.clip_results : [];
+
+          const rendered = clipResults.filter((r) => r?.video_url);
+
+          if (rendered.length) {
+            // Pull transcripts from processed_clips in one query
+            const clipIds = storedClips.map((sc) => sc.clip_id).filter(Boolean) as string[];
+            const { data: pcRows } = clipIds.length
+              ? await supabase
+                  .schema("srp_pipeline")
+                  .from("processed_clips")
+                  .select("clip_id, transcript, srt_transcript")
+                  .eq("session_id", session_id)
+                  .in("clip_id", clipIds)
+              : { data: [] };
+
+            const pcByClipId = Object.fromEntries((pcRows ?? []).map((r) => [r.clip_id, r]));
+
+            clips = rendered.map((r, i) => {
+              const stored = r.clip_name
+                ? storedClips.find((sc) => sc.clip_name === r.clip_name)
+                : storedClips[i];
+              const pc = stored?.clip_id ? pcByClipId[stored.clip_id] : null;
               return {
-                clip_name: stored?.clip_name ?? `Reel ${i + 1}`,
-                video_url: pc.video_url,
-                transcript: pc.transcript || "",
-                srt_transcript: pc.srt_transcript || null,
-                duration_seconds: pc.duration_ms ? Math.round(pc.duration_ms / 1000) : null,
+                clip_name: stored?.clip_name ?? r.clip_name ?? `Reel ${i + 1}`,
+                video_url: r.video_url,
+                transcript: pc?.transcript || "",
+                srt_transcript: pc?.srt_transcript || null,
+                duration_seconds: r.duration_ms ? Math.round(r.duration_ms / 1000) : null,
               };
             });
           }
