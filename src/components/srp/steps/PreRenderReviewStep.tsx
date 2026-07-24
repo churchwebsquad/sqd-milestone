@@ -80,23 +80,50 @@ function reindexSegments(segs: SrtSegment[]): SrtSegment[] {
     .map((s, i) => ({ ...s, index: i + 1 }))
 }
 
-// ── Elapsed timer ─────────────────────────────────────────────────────────────
+// ── Cutting progress bar ──────────────────────────────────────────────────────
 
-function ElapsedTimer({ startedAt }: { startedAt: string | null | undefined }) {
+// Clip cutting typically finishes in 60-120s. We animate progress to ~85%
+// over 90s so the bar fills steadily and never falsely hits 100% while waiting.
+const CUT_ESTIMATE_SEC = 90
+
+function CuttingProgress({ startedAt }: { startedAt: string | null | undefined }) {
   const [elapsed, setElapsed] = useState(0)
   useEffect(() => {
-    if (!startedAt) return
-    const start = new Date(startedAt).getTime()
+    const start = startedAt ? new Date(startedAt).getTime() : Date.now()
     const tick = () => setElapsed(Math.floor((Date.now() - start) / 1000))
     tick()
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
   }, [startedAt])
-  if (!startedAt) return <span>Cutting clip…</span>
+
   const m = Math.floor(elapsed / 60)
   const s = elapsed % 60
-  return <span>Cutting clip… {m > 0 ? `${m}m ` : ''}{s}s</span>
+  const elapsedLabel = m > 0 ? `${m}m ${s}s` : `${s}s`
+  // Ease toward 85% over CUT_ESTIMATE_SEC, then creep slowly after
+  const pct = elapsed <= CUT_ESTIMATE_SEC
+    ? Math.round((elapsed / CUT_ESTIMATE_SEC) * 85)
+    : Math.min(98, 85 + Math.round(((elapsed - CUT_ESTIMATE_SEC) / 120) * 13))
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-[11px] text-[var(--color-purple-gray)]">
+        <span className="flex items-center gap-1.5">
+          <Loader2 size={11} className="animate-spin text-[var(--color-primary-purple)]" />
+          Cutting clip…
+        </span>
+        <span className="font-mono">{elapsedLabel}</span>
+      </div>
+      <div className="h-1.5 rounded-full bg-[var(--color-lavender)] overflow-hidden">
+        <div
+          className="h-full rounded-full bg-[var(--color-primary-purple)] transition-all duration-1000"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  )
 }
+
+
 
 // ── Per-clip card ─────────────────────────────────────────────────────────────
 
@@ -364,9 +391,8 @@ function ClipCard({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-[var(--color-lavender-tint)] text-[12px] text-[var(--color-purple-gray)]">
-          <Loader2 size={14} className="animate-spin text-[var(--color-primary-purple)] shrink-0" />
-          <ElapsedTimer startedAt={createdAt} />
+        <div className="px-4 py-3 rounded-lg bg-[var(--color-lavender-tint)]">
+          <CuttingProgress startedAt={createdAt} />
         </div>
       </div>
     )
