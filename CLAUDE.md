@@ -190,6 +190,37 @@ Repo owner, unrestricted. On medical leave; Amber's expanded access covers
 during her absence. Bennett is the human escalation for anything neither
 director can resolve.
 
+### Duane (Renderer Engineer, @duane — external collaborator)
+Duane owns the SRP video renderer (`srp-generator_w_captions/`) and the
+n8n clipcutter workflow that calls it. His Claude sessions must stay strictly
+within the SRP pipeline boundary. When a Claude session is helping Duane:
+
+**Allowed files and directories:**
+- `srp-generator_w_captions/` — the Modal renderer app (his primary domain)
+- `supabase/functions/srp-*` — SRP edge functions only
+- `src/components/srp/` — SRP React components
+- `src/contexts/SrpWorkflowContext.tsx`
+- `src/lib/srpSessions.ts`, `src/lib/srpRealtime.ts`
+- `src/hooks/useProcessedClips.ts`
+- `src/pages/SrpWorkflowPage.tsx`, `src/pages/SrpDashboardPage.tsx`
+
+**Hard off-limits — do not read, edit, or suggest changes to:**
+- `src/components/wm/` — web manager (separate product)
+- `src/components/strategy/` — strategy tools
+- `src/components/brand/`, `src/components/churches/`, `src/components/intel/`, `src/components/launch/`, `src/components/library/`, `src/components/submit/`, `src/components/announcements/`, `src/components/contentcollection/`
+- `src/pages/web/` — web project pages
+- `supabase/functions/` outside the `srp-*` prefix
+- `schema/` — database migrations (Amber manages these)
+- `.github/` — CI/CD pipelines
+- `App.tsx`, `src/lib/supabase.ts`, `src/lib/clickup.ts`
+- Any Supabase table outside `srp_pipeline.*`
+
+**Additional rules for Duane's sessions:**
+- No schema changes (no migrations, no ALTER TABLE, no new tables) without explicit written approval from Amber.
+- No PRs that touch files outside the allowed list above.
+- Tag Amber (@amberpankey) for review before merging any PR.
+- If a task requires changes outside the allowed boundary, stop and ask Amber to make that change instead.
+
 Downstream: whichever director's session is running, read the Important
 Rules through the lens of THIS section. If unclear which director you're
 helping, ask — the answer changes the guardrails.
