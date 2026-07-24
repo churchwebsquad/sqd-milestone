@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowLeft, ArrowRight, Film, Link, Loader2, Music2, Palette, Play, Save, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Film, Link, Loader2, Music2, Palette, Play, Save, AlertCircle, CheckCircle2, Send } from 'lucide-react'
 import { useSrpWorkflow } from '../../../contexts/SrpWorkflowContext'
 import { SrpButton } from '../_shared/SrpButton'
 import { callSrpApi } from '../../../lib/srpApi'
@@ -228,6 +228,7 @@ export function CreativeDirectionStep() {
     clipcutterJobId, setClipcutterJobId,
     backgroundMusic,
     musicByClip,
+    srpTaskIdOverride,
     goToNextStep, goToPrevStep,
   } = useSrpWorkflow()
 
@@ -335,6 +336,9 @@ export function CreativeDirectionStep() {
 
   const [renderStarting, setRenderStarting] = useState(false)
   const [renderStartError, setRenderStartError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitOk, setSubmitOk] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   const { job: clipJob, connected: clipJobConnected } = useClipcutterJob(clipcutterJobId)
 
@@ -398,6 +402,21 @@ export function CreativeDirectionStep() {
   }, [sessionId, clipSelections, srpTemplate, backgroundMusic, designerNotes,
       captionStyleConfig, deliver9x16, musicMode, musicByClip, outroUrl,
       processedClips, flushPerClip, setClipcutterJobId])
+
+  const handleSendToClickUp = useCallback(async () => {
+    setSubmitting(true); setSubmitError(null); setSubmitOk(false)
+    try {
+      await callSrpApi('submit-to-clickup', {
+        session_id: sessionId,
+        srp_task_id_override: srpTaskIdOverride || null,
+      })
+      setSubmitOk(true)
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : 'failed to send to ClickUp')
+    } finally {
+      setSubmitting(false)
+    }
+  }, [sessionId, srpTaskIdOverride])
 
   const clipJobResults = useMemo<{ clip_id?: string; video_url?: string | null; status?: string; error_message?: string | null }[]>(
     () => Array.isArray(clipJob?.clip_results) ? (clipJob.clip_results as never[]) : [],
@@ -827,17 +846,42 @@ export function CreativeDirectionStep() {
                 </ul>
               )}
 
-              {renderFailed && (
-                <SrpButton size="sm" variant="secondary"
-                  onClick={() => { setClipcutterJobId(null); setRenderStartError(null) }}>
-                  Retry
-                </SrpButton>
+              {(renderFailed || renderDone) && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <SrpButton
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setClipcutterJobId(null)
+                      setRenderStartError(null)
+                      setSubmitOk(false)
+                      setSubmitError(null)
+                    }}
+                  >
+                    {renderDone ? 'Re-render' : 'Retry'}
+                  </SrpButton>
+
+                  {renderDone && !submitOk && (
+                    <SrpButton
+                      size="sm"
+                      onClick={() => void handleSendToClickUp()}
+                      disabled={submitting}
+                      leadingIcon={submitting ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                    >
+                      {submitting ? 'Sending…' : 'Send to ClickUp'}
+                    </SrpButton>
+                  )}
+
+                  {submitOk && (
+                    <span className="inline-flex items-center gap-1.5 text-[12px] text-wm-success font-semibold">
+                      <CheckCircle2 size={13} /> Sent to ClickUp
+                    </span>
+                  )}
+                </div>
               )}
 
-              {renderDone && (
-                <p className="text-[12px] text-wm-success font-semibold">
-                  All reels rendered. A ClickUp message has been sent automatically.
-                </p>
+              {submitError && (
+                <p className="text-[12px] text-wm-danger mt-1">{submitError}</p>
               )}
             </div>
           )}

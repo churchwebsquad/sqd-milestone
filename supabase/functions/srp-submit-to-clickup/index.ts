@@ -16,8 +16,8 @@ serve(async (req) => {
     const body = await req.json();
     const {
       session_id,
-      member,
-      church_name,
+      member: member_in,
+      church_name: church_name_in,
       clickup_id: clickup_id_in,
       creative_direction: cd_in,
       creative_direction_name: cdn_in,
@@ -26,36 +26,38 @@ serve(async (req) => {
       approved_content,
       srp_task_id_override,
     } = body;
-    // Accept either `clips` (legacy) or `edited_clips` (new Step 7 editor)
-    const clips = body.edited_clips || body.clips;
 
     // ── Supabase client (service role) ────────────────────────────────
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // ── Backfill fields from clipcutter_jobs if the caller didn't supply them
-    // (Step 7 editor only sends clip/session info; creative_direction,
-    // designer_notes, background_music, and clickup_id live on the job row.)
+    // ── Backfill fields from session + clipcutter_jobs if caller didn't supply them ──
     let clickup_id = clickup_id_in;
     let creative_direction = cd_in;
     let creative_direction_name = cdn_in;
     let designer_notes = dn_in;
     let background_music = bgm_in;
-    if (session_id && (!clickup_id || !creative_direction)) {
+    let clips = body.edited_clips || body.clips;
+    let member = member_in;
+    let church_name = church_name_in;
+
+    if (session_id && (!clickup_id || !creative_direction || !clips?.length)) {
       const { data: sess } = await supabase
         .schema("srp_pipeline")
         .from("sessions")
-        .select("clickup_task_id, clipcutter_job_id")
+        .select("clickup_task_id, clipcutter_job_id, member, church_name")
         .eq("session_id", session_id)
         .maybeSingle();
       if (sess?.clickup_task_id && !clickup_id) clickup_id = sess.clickup_task_id;
+      if (sess?.member && !member) member = sess.member;
+      if (sess?.church_name && !church_name) church_name = sess.church_name;
 
       if (sess?.clipcutter_job_id) {
         const { data: job } = await supabase
           .schema("srp_pipeline")
           .from("clipcutter_jobs")
-          .select("creative_direction")
+          .select("creative_direction, clips")
           .eq("id", sess.clipcutter_job_id)
           .maybeSingle();
         const cd = (job?.creative_direction || {}) as Record<string, unknown>;
@@ -63,6 +65,34 @@ serve(async (req) => {
         if (!creative_direction_name) creative_direction_name = cd.srp_template || null;
         if (designer_notes === undefined) designer_notes = cd.designer_notes ?? "";
         if (background_music === undefined) background_music = cd.background_music ?? false;
+
+        // Auto-build clips from processed_clips rows that have a rendered video_url.
+        // Only rendered clips (status = ready, video_url non-null) are included.
+        if (!clips?.length && sess.clipcutter_job_id) {
+          const storedClips: Array<{ clip_id?: string; clip_name?: string }> =
+            Array.isArray(job?.clips) ? job.clips : [];
+
+          const { data: pcRows } = await supabase
+            .schema("srp_pipeline")
+            .from("processed_clips")
+            .select("clip_id, video_url, transcript, srt_transcript, duration_ms")
+            .eq("session_id", session_id)
+            .eq("status", "ready")
+            .not("video_url", "is", null);
+
+          if (pcRows?.length) {
+            clips = pcRows.map((pc, i) => {
+              const stored = storedClips.find((sc) => sc.clip_id === pc.clip_id) ?? storedClips[i];
+              return {
+                clip_name: stored?.clip_name ?? `Reel ${i + 1}`,
+                video_url: pc.video_url,
+                transcript: pc.transcript || "",
+                srt_transcript: pc.srt_transcript || null,
+                duration_seconds: pc.duration_ms ? Math.round(pc.duration_ms / 1000) : null,
+              };
+            });
+          }
+        }
       }
     }
 
