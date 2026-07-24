@@ -167,16 +167,44 @@ serve(async (req) => {
       out_point_ms?: number;
       quote?: string;
       kept_segments?: unknown[];
+      // Per-clip renderer fields forwarded to Modal renderer via n8n
+      words?: unknown[];
+      motion_slug?: string | null;
+      style?: Record<string, unknown> | null;
+      chunking?: { wordsPerSegment?: number } | null;
+      enhance_audio?: boolean;
+      deliver_9x16?: boolean;
+      music_mode?: string | null;
+      music_track_id?: string | null;
+      title_card_url?: string | null;
+      title_card_start_ms?: number | null;
+      title_card_end_ms?: number | null;
+      caption_text?: string | null;
+      category?: string | null;
     }>).map((clip, i) => {
       const inMs  = clip.in_point_ms  ?? mmssToMs(clip.startTime);
       const outMs = clip.out_point_ms ?? mmssToMs(clip.endTime);
       const clipName = clip.clip_name ?? `${namePrefix}_Clip_${String(i + 1).padStart(2, "0")}-01`;
       return {
-        clip_name:     clipName,
-        in_point_ms:   inMs,
-        out_point_ms:  outMs,
-        quote:         clip.quote ?? "",
-        kept_segments: clip.kept_segments ?? [{ in_point_ms: inMs, out_point_ms: outMs }],
+        clip_name:           clipName,
+        in_point_ms:         inMs,
+        out_point_ms:        outMs,
+        quote:               clip.quote ?? "",
+        kept_segments:       clip.kept_segments ?? [{ in_point_ms: inMs, out_point_ms: outMs }],
+        // Pass renderer fields through so n8n can forward them to the Modal renderer
+        words:               clip.words ?? [],
+        motion_slug:         clip.motion_slug ?? null,
+        style:               clip.style ?? null,
+        chunking:            clip.chunking ?? null,
+        enhance_audio:       clip.enhance_audio ?? true,
+        deliver_9x16:        clip.deliver_9x16 ?? false,
+        music_mode:          clip.music_mode ?? null,
+        music_track_id:      clip.music_track_id ?? null,
+        title_card_url:      clip.title_card_url ?? null,
+        title_card_start_ms: clip.title_card_start_ms ?? null,
+        title_card_end_ms:   clip.title_card_end_ms ?? null,
+        caption_text:        clip.caption_text ?? null,
+        category:            clip.category ?? null,
       };
     });
 
