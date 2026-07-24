@@ -216,69 +216,6 @@ serve(async (req) => {
       }
     }
 
-    // When render completes, fire the n8n ClickUp webhook so the SRP Video task
-    // gets a "reels are ready" message automatically (mirrors VidDrop's caption-render-callback).
-    if (status === "completed" && job.session_id && resolvedClips?.length > 0) {
-      try {
-        // Fetch session for clickup_task_id, member, church_name, srp_task_id_override
-        const { data: sess } = await supabase
-          .schema("srp_pipeline")
-          .from("sessions")
-          .select("clickup_task_id, member, church_name, srp_task_id_override")
-          .eq("session_id", job.session_id)
-          .maybeSingle();
-
-        if (sess?.clickup_task_id) {
-          const storedClipsForNotify: Array<{ clip_id?: string; clip_name?: string }> =
-            Array.isArray(job?.clips) ? job.clips : [];
-
-          // Build clip list for n8n — match clip_name from stored job clips
-          const notifyClips = resolvedClips
-            .filter((r: { video_url?: string }) => r?.video_url)
-            .map((r: { clip_id?: string; clip_name?: string; video_url?: string; duration_ms?: number }, i: number) => {
-              const matchedStored = r.clip_name
-                ? storedClipsForNotify.find((sc) => sc.clip_name === r.clip_name)
-                : storedClipsForNotify[i];
-              return {
-                clip_name: matchedStored?.clip_name ?? r.clip_name ?? `Reel ${i + 1}`,
-                video_url: r.video_url!,
-                transcript: "",
-                srt_transcript: null,
-                duration_seconds: r.duration_ms ? Math.round(r.duration_ms / 1000) : null,
-              };
-            });
-
-          if (notifyClips.length > 0) {
-            const n8nWebhookUrl =
-              "https://vid2.thesqd.com/webhook/38a7fb68-d23f-4711-b903-ede558e45332/clip_to_clickup";
-            const callbackSecret = Deno.env.get("SRP_TOOL_N8N_CALLBACK_SECRET") || "";
-            const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-
-            await fetch(n8nWebhookUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                job_id: crypto.randomUUID(),
-                clickup_id: sess.clickup_task_id,
-                action: "update_transcripts",
-                clips: notifyClips,
-                session_id: job.session_id,
-                member: sess.member ?? null,
-                church_name: sess.church_name ?? null,
-                srp_task_id_override: sess.srp_task_id_override ?? null,
-                callback_url: `${supabaseUrl}/functions/v1/srp-clickup-callback`,
-                callback_secret: callbackSecret,
-              }),
-            });
-            console.log(`Fired n8n ClickUp webhook for session ${job.session_id} with ${notifyClips.length} clips`);
-          }
-        }
-      } catch (notifyErr) {
-        // Non-fatal — render is already complete; ClickUp message is best-effort
-        console.error("Failed to fire ClickUp render-complete webhook:", notifyErr);
-      }
-    }
-
     return new Response(
       JSON.stringify({ success: true, job_id, status }),
       {
